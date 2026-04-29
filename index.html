@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>บันทึกรายงานสาขาประจำวัน</title>
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f7fa; color: #333; padding: 15px; margin: 0; }
+        .container { max-width: 100%; background: #ffffff; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        h2 { text-align: center; color: #00c300; margin-bottom: 20px; }
+        label { display: block; margin-top: 15px; font-weight: 600; font-size: 14px; }
+        select, textarea, input { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #dcdcdc; border-radius: 6px; box-sizing: border-box; font-size: 14px; font-family: inherit; }
+        textarea { height: 80px; resize: vertical; }
+        button { width: 100%; padding: 14px; background-color: #00c300; color: white; border: none; border-radius: 6px; margin-top: 25px; font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.3s; }
+        button:disabled { background-color: #a5a5a5; cursor: not-allowed; }
+        .note { font-size: 12px; color: #888; margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>📝 รายงานยอดขายประจำวัน</h2>
+    <form id="reportForm">
+        
+        <label>รหัสและชื่อสาขา</label>
+        <select id="branchName" required>
+            <option value="" disabled selected>-- เลือกสาขา --</option>
+            <option value="001 บ้านส้อง">001 บ้านส้อง</option>
+            <option value="002 พระแสง">002 พระแสง</option>
+            <option value="006 ชัยบุรี">006 ชัยบุรี</option>
+            <option value="009 เกาะลันตา">009 เกาะลันตา</option>
+            <option value="013 คลองท่อม">013 คลองท่อม</option>
+            <option value="014 เคียนซา">014 เคียนซา</option>
+            <option value="016 โคกกลอย">016 โคกกลอย</option>
+            <option value="017 เขาปีบ">017 เขาปีบ</option>
+            <option value="020 หนองนิล">020 หนองนิล</option>
+            <option value="021 พิปูน">021 พิปูน</option>
+            <option value="022 บางสวรรค์">022 บางสวรรค์</option>
+            <option value="023 พังงา">023 พังงา</option>
+            <option value="025 วค.สุราษฏร์">025 วค.สุราษฏร์</option>
+            <option value="026 เขาพนม">026 เขาพนม</option>
+            <option value="027 ทับใหม่">027 ทับใหม่</option>
+            <option value="028 คีรีรัฐนิคม">028 คีรีรัฐนิคม</option>
+            <option value="029 ควนสามัคคี">029 ควนสามัคคี</option>
+            <option value="030 ทุ่งใหญ่">030 ทุ่งใหญ่</option>
+            <option value="031 บ้านนาเดิม">031 บ้านนาเดิม</option>
+            <option value="032 คลองพน">032 คลองพน</option>
+            <option value="033 เสวียด">033 เสวียด</option>
+            <option value="034 สิเกา">034 สิเกา</option>
+            <option value="036 ชะอวด">036 ชะอวด</option>
+            <option value="037 ขนอม">037 ขนอม</option>
+            <option value="038 ควนขนุน">038 ควนขนุน</option>
+            <option value="039 สิชล">039 สิชล</option>
+            <option value="040 ทำเนียบ">040 ทำเนียบ</option>
+            <option value="041 การุณราษฏร์">041 การุณราษฏร์</option>
+            <option value="042 โคกบก">042 โคกบก</option>
+            <option value="043 ป่าพะยอม">043 ป่าพะยอม</option>
+            <option value="045 อำเภอเมืองกระบี่">045 อำเภอเมืองกระบี่</option>
+            <option value="046 ทุ่งเตา">046 ทุ่งเตา</option>
+            <option value="047 พรุดินนา">047 พรุดินนา</option>
+            <option value="048 ฉวาง">048 ฉวาง</option>
+            <option value="049 ลำทับใหม่">049 ลำทับใหม่</option>
+            <option value="050 ทุ่งยาว">050 ทุ่งยาว</option>
+            <option value="051 คลองยาง">051 คลองยาง</option>
+            <option value="052 แม่ขรี">052 แม่ขรี</option>
+            <option value="053 ต้นโพธิ์">053 ต้นโพธิ์</option>
+            <option value="054 ท่าชนะ">054 ท่าชนะ</option>
+            <option value="055 ไชยา">055 ไชยา</option>
+            <option value="056 มะนาวหวาน">056 มะนาวหวาน</option>
+            <option value="057 ห้วยยอด">057 ห้วยยอด</option>
+            <option value="058 พรหมคีรี">058 พรหมคีรี</option>
+            <option value="059 ลานสกา">059 ลานสกา</option>
+            <option value="060 ท่าชี">060 ท่าชี</option>
+            <option value="061 ทรายขาว">061 ทรายขาว</option>
+            <option value="062 บ่อล้อ">062 บ่อล้อ</option>
+            <option value="063 กงตาก">063 กงตาก</option>
+            <option value="064 ท้ายเหมือง">064 ท้ายเหมือง</option>
+            <option value="065 นบพิตำ">065 นบพิตำ</option>
+            <option value="066 ทับละมุ">066 ทับละมุ</option>
+            <option value="067 ปลายพระยา">067 ปลายพระยา</option>
+            <option value="068 เหนือคลอง">068 เหนือคลอง</option>
+            <option value="069 นาบอน">069 นาบอน</option>
+            <option value="070 พระแสง2">070 พระแสง2</option>
+            <option value="071 เขาวิเศษ">071 เขาวิเศษ</option>
+            <option value="072 ท่าทองใหม่">072 ท่าทองใหม่</option>
+            <option value="073 วิภาวดี">073 วิภาวดี</option>
+            <option value="074 จันดี">074 จันดี</option>
+            <option value="075 เขาทะลุ">075 เขาทะลุ</option>
+            <option value="076 บางขัน">076 บางขัน</option>
+            <option value="077 หนองทะเล">077 หนองทะเล</option>
+            <option value="078 กะปาง">078 กะปาง</option>
+            <option value="079 แยกปฐมพร">079 แยกปฐมพร</option>
+            <option value="080 คลองสงค์">080 คลองสงค์</option>
+            <option value="081 ซีเฟรซ">081 ซีเฟรซ</option>
+            <option value="082 ไสไทย">082 ไสไทย</option>
+            <option value="083 หนองดี">083 หนองดี</option>
+            <option value="084 ถ้ำพรรณรา">084 ถ้ำพรรณรา</option>
+            <option value="085 เกาะลันตา 2">085 เกาะลันตา 2</option>
+            <option value="086 คลองเขม้า">086 คลองเขม้า</option>
+            <option value="087 ย่านตาขาว">087 ย่านตาขาว</option>
+            <option value="088 ในลึก">088 ในลึก</option>
+            <option value="090 ต้นเหรียง">090 ต้นเหรียง</option>
+            <option value="101 ท่าศาลา">101 ท่าศาลา</option>
+            <option value="102 ควนมะพร้าว">102 ควนมะพร้าว</option>
+            <option value="103 หนองขรี">103 หนองขรี</option>
+            <option value="106 สมุย1(ตลาดสีฟ้า)">106 สมุย1(ตลาดสีฟ้า)</option>
+            <option value="107 ตะกั่วป่า">107 ตะกั่วป่า</option>
+            <option value="108 สมุย2(แม่น้ำ)">108 สมุย2(แม่น้ำ)</option>
+            <option value="110 ปากพะยูน">110 ปากพะยูน</option>
+            <option value="111 คุระบุรี">111 คุระบุรี</option>
+            <option value="112 สะทิงพระ">112 สะทิงพระ</option>
+            <option value="113 ขนอม2">113 ขนอม2</option>
+            <option value="114 ระโนด">114 ระโนด</option>
+            <option value="115 บายพาสพัทลุง">115 บายพาสพัทลุง</option>
+            <option value="116 สิชล2">116 สิชล2</option>
+            <option value="117 โมถ่าย">117 โมถ่าย</option>
+            <option value="118 มาบอำมฤต">118 มาบอำมฤต</option>
+            <option value="119 สิงหนคร">119 สิงหนคร</option>
+            <option value="120 ปากน้ำปราณ">120 ปากน้ำปราณ</option>
+            <option value="121 ราไวย์">121 ราไวย์</option>
+            <option value="122 บางสะพานน้อย">122 บางสะพานน้อย</option>
+            <option value="123 บางสะพาน">123 บางสะพาน</option>
+            <option value="124 ทะเลน้อย">124 ทะเลน้อย</option>
+            <option value="125 ท่าแซะ">125 ท่าแซะ</option>
+            <option value="126 สมุย3 ละไม">126 สมุย3 ละไม</option>
+            <option value="128 นาเมืองเพชร">128 นาเมืองเพชร</option>
+            <option value="129 ท่าฉาง">129 ท่าฉาง</option>
+            <option value="130 บางสวรรค์2">130 บางสวรรค์2</option>
+            <option value="131 สมุย 4 ลิปะใหญ่">131 สมุย 4 ลิปะใหญ่</option>
+            <option value="132 บ้านใน">132 บ้านใน</option>
+            <option value="133 ระนอง">133 ระนอง</option>
+            <option value="134 หัวไทร">134 หัวไทร</option>
+            <option value="135 หลังสวน">135 หลังสวน</option>
+            <option value="136 ปากพนัง">136 ปากพนัง</option>
+            <option value="137 ตลาดวาสนา">137 ตลาดวาสนา</option>
+            <option value="138 บ้านกรูดใหม่">138 บ้านกรูดใหม่</option>
+            <option value="139 เขาขาว">139 เขาขาว</option>
+            <option value="140 ดอนสัก">140 ดอนสัก</option>
+            <option value="141 ควนนิยม">141 ควนนิยม</option>
+            <option value="142 ไม้หลา">142 ไม้หลา</option>
+            <option value="143 ทุ่งมะพร้าว">143 ทุ่งมะพร้าว</option>
+            <option value="144 ทุ่งตะโก">144 ทุ่งตะโก</option>
+            <option value="145 สวี">145 สวี</option>
+            <option value="147 ในยาง">147 ในยาง</option>
+            <option value="148 ละงู">148 ละงู</option>
+            <option value="149 เกาะสิเหร่">149 เกาะสิเหร่</option>
+            <option value="150 ลำภูรา">150 ลำภูรา</option>
+            <option value="151 คลองมวน">151 คลองมวน</option>
+            <option value="152 บ้านตาขุน">152 บ้านตาขุน</option>
+            <option value="153 อ่าวลึกใต้">153 อ่าวลึกใต้</option>
+            <option value="154 วังตะกอ">154 วังตะกอ</option>
+            <option value="155 ร่อนพิบูลย์">155 ร่อนพิบูลย์</option>
+            <option value="157 กรุงชิง">157 กรุงชิง</option>
+            <option value="158 บ้านบ่อ">158 บ้านบ่อ</option>
+            <option value="159 ศรีบรรพต">159 ศรีบรรพต</option>
+            <option value="160 ปากน้ำหลังสวน">160 ปากน้ำหลังสวน</option>
+            <option value="161 โกเตง">161 โกเตง</option>
+            <option value="162 โพหัก">162 โพหัก</option>
+            <option value="163 ท่าข้าม">163 ท่าข้าม</option>
+            <option value="164 มิตรภาพระนอง">164 มิตรภาพระนอง</option>
+            <option value="165 มะนัง">165 มะนัง</option>
+            <option value="166 ดอนกรวย">166 ดอนกรวย</option>
+            <option value="167 หน้าทับ">167 หน้าทับ</option>
+            <option value="168 วัดโคก">168 วัดโคก</option>
+            <option value="169 บางแพ">169 บางแพ</option>
+            <option value="170 ควนเนียง">170 ควนเนียง</option>
+            <option value="171 คึกคัก">171 คึกคัก</option>
+            <option value="172 ท่าสะอ้าน">172 ท่าสะอ้าน</option>
+            <option value="173 วัดเพลง">173 วัดเพลง</option>
+            <option value="174 ทุ่งตำเสา">174 ทุ่งตำเสา</option>
+            <option value="175 ร่อนทอง">175 ร่อนทอง</option>
+            <option value="176 กองบิน 56">176 กองบิน 56</option>
+            <option value="177 ทุ่งลุง">177 ทุ่งลุง</option>
+            <option value="178 บ้านไร่ชาวเหนือ">178 บ้านไร่ชาวเหนือ</option>
+            <option value="179 ที่วัง">179 ที่วัง</option>
+            <option value="180 เมืองพัทลุง">180 เมืองพัทลุง</option>
+            <option value="181 ห้วยตะโก">181 ห้วยตะโก</option>
+            <option value="182 นาทวี">182 นาทวี</option>
+            <option value="183 คลองแห้ง">183 คลองแห้ง</option>
+            <option value="185 กุยบุรี">185 กุยบุรี</option>
+            <option value="186 บ้านปริก">186 บ้านปริก</option>
+            <option value="187 ท่าทราย">187 ท่าทราย</option>
+            <option value="188 คูเต่า">188 คูเต่า</option>
+            <option value="189 บางโรง">189 บางโรง</option>
+            <option value="190 สวนหลวง(สค-4)">190 สวนหลวง(สค-4)</option>
+            <option value="191 ทับสะแก(ปข-5)">191 ทับสะแก(ปข-5)</option>
+            <option value="192 ปราณบุรี(ปข-6)">192 ปราณบุรี(ปข-6)</option>
+            <option value="193 นาสาร(สฏ-39)">193 นาสาร(สฏ-39)</option>
+            <option value="194 วัดเทพ (ภก-5)">194 วัดเทพ (ภก-5)</option>
+            <option value="195 หัวหิน102(ปข-8)">195 หัวหิน102(ปข-8)</option>
+            <option value="196 บางรักษ์สมุย (สฏ-40)">196 บางรักษ์สมุย (สฏ-40)</option>
+            <option value="197 อ่าวนาง (กบ-18)">197 อ่าวนาง (กบ-18)</option>
+            <option value="198 ศรีนครินทร์ (พท-10)">198 ศรีนครินทร์ (พท-10)</option>
+            <option value="199 บ้านกลาย (นศ-32)">199 บ้านกลาย (นศ-32)</option>
+            <option value="200 โคกเมา(สข-12)">200 โคกเมา(สข-12)</option>
+            <option value="201 โพไร่หวาน (พบ-1)">201 โพไร่หวาน (พบ-1)</option>
+            <option value="202 บ้านแหลม (พบ-2)">202 บ้านแหลม (พบ-2)</option>
+            <option value="203 บ้านคลองเตย (สข-13)">203 บ้านคลองเตย (สข-13)</option>
+            <option value="204 ทุ่งสง (นศ-33)">204 ทุ่งสง (นศ-33)</option>
+            <option value="206 โคกหนามแท่ง (สบ-1)">206 โคกหนามแท่ง (สบ-1)</option>
+            <option value="207 ดอนยายหอม (นฐ-2)">207 ดอนยายหอม (นฐ-2)</option>
+            <option value="208 หัวถนนสมุย (สฎ-41)">208 หัวถนนสมุย (สฎ-41)</option>
+            <option value="209 ศรีธรรมโศก (นศ-34)">209 ศรีธรรมโศก (นศ-34)</option>
+            <option value="210 ลัคกี้-ตลาดล่าง (สฎ-001)">210 ลัคกี้-ตลาดล่าง (สฎ-001)</option>
+            <option value="211 เกาะหลัก (ปข-9)">211 เกาะหลัก (ปข-9)</option>
+            <option value="212 สมอโพรง (ปข-10)">212 สมอโพรง (ปข-10)</option>
+            <option value="214 สี่แยกวัดโหนด (นศ-35)">214 สี่แยกวัดโหนด (นศ-35)</option>
+            <option value="215 ซอย1 วค.สุราษฎร์ (สฎ-42)">215 ซอย1 วค.สุราษฎร์ (สฎ-42)</option>
+            <option value="216 เลียบทางรถไฟ (อย-2)">216 เลียบทางรถไฟ (อย-2)</option>
+            <option value="217 ช่องสะแก (พบ-3)">217 ช่องสะแก (พบ-3)</option>
+            <option value="218 มวกเหล็ก (สบ-2)">218 มวกเหล็ก (สบ-2)</option>
+            <option value="219 เสนา (อย-3)">219 เสนา (อย-3)</option>
+            <option value="220 ไร่ขิง (นฐ-3)">220 ไร่ขิง (นฐ-3)</option>
+            <option value="221 โกรกกราก (สค-5)">221 โกรกกราก (สค-5)</option>
+            <option value="222 ดอนหว้า (ชพ-13)">222 ดอนหว้า (ชพ-13)</option>
+            <option value="223 อ่างทอง (ชพ-14)">223 อ่างทอง (ชพ-14)</option>
+            <option value="224 หนองปลาหมอ (สบ-3)">224 หนองปลาหมอ (สบ-3)</option>
+            <option value="225 ลำโพ (นบ-1)">225 ลำโพ (นบ-1)</option>
+            <option value="226 รพ.เกษมราษ (สบ-4)">226 รพ.เกษมราษ (สบ-4)</option>
+            <option value="227 ห้วยทราย(สบ-5)">227 ห้วยทราย(สบ-5)</option>
+            <option value="228 ห้วยปริก (นศ-36)">228 ห้วยปริก (นศ-36)</option>
+            <option value="229 มอ.สุราษฎร์ (สฎ-43)">229 มอ.สุราษฎร์ (สฎ-43)</option>
+            <option value="231 บ้านพอน (ภก-6)">231 บ้านพอน (ภก-6)</option>
+            <option value="232 สนามบินสมุย (สฎ-44)">232 สนามบินสมุย (สฎ-44)</option>
+            <option value="233 บ้านหิน (นศ-37)">233 บ้านหิน (นศ-37)</option>
+            <option value="234 ตลาดโรงสี (อย-4)">234 ตลาดโรงสี (อย-4)</option>
+            <option value="235 เกาะลันตา3 (กบ-18)">235 เกาะลันตา3 (กบ-18)</option>
+            <option value="236 ดอนตะโก(รบ-6)">236 ดอนตะโก(รบ-6)</option>
+            <option value="237 ปะทิว (ชพ-15)">237 ปะทิว (ชพ-15)</option>
+            </select>
+
+        <label>ตำแหน่งผู้บันทึก</label>
+        <select id="role" required>
+            <option value="SM">SM</option>
+            <option value="DM">DM</option>
+            <option value="RM">RM</option>
+            <option value="RD">RD</option>
+            <option value="Other">Other</option>
+        </select>
+
+        <label>สภาพอากาศ</label>
+        <select id="weather">
+            <option value="แดดจัด">แดดจัด</option>
+            <option value="ฝนตกหนัก">ฝนตกหนัก</option>
+            <option value="ฟ้าครึ้ม">ฟ้าครึ้ม</option>
+        </select>
+
+        <label>1. เหตุการณ์ในพื้นที่</label>
+        <div class="note">เช่น มีงานกาชาด, ถนนหน้าร้านซ่อม</div>
+        <textarea id="localEvent"></textarea>
+
+        <label>2. เศรษฐกิจ/ราคาสินค้าเกษตร</label>
+        <textarea id="agriPrice"></textarea>
+
+        <label>3. ความเคลื่อนไหวของคู่แข่ง</label>
+        <textarea id="competitor"></textarea>
+
+        <label>4. พฤীবติกรรมลูกค้า</label>
+        <textarea id="customerBehavior"></textarea>
+
+        <label>5. ปัจจัยยอดขายผิดปกติ</label>
+        <textarea id="salesFactor"></textarea>
+
+        <label>6. กิจกรรมสาขา</label>
+        <textarea id="branchActivity"></textarea>
+
+        <label>7. ปัญหา/อุปสรรค</label>
+        <textarea id="issue"></textarea>
+
+        <label>8. สินค้าขายดี</label>
+        <textarea id="topProduct"></textarea>
+
+        <label>9. บันทึกเพื่ออนาคต (ปีหน้า)</label>
+        <textarea id="futureNote"></textarea>
+
+        <button type="button" id="submitBtn" onclick="submitData()">ส่งรายงาน</button>
+    </form>
+</div>
+
+<script>
+    // 🚨 อย่าลืมนำ URL ของ Google Apps Script มาวางตรงนี้นะครับ 🚨
+    const GOOGLE_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzUiSEOYtx-dCLoR_ATivTGQr5OM7BcSTa6tyQlHTHGGGTWhl3RAG9OP_qnqNUyuanTaA/exec"; 
+
+    // เริ่มต้นระบบ LIFF (เพื่อใช้คำสั่งปิดหน้าต่าง LINE)
+    async function initializeLiff() {
+        try {
+            await liff.init({ liffId: "Y2009931818-zFQZbTPZ" }); // ตรงนี้ปล่อยไว้ก่อนได้ครับ แต่อนาคตสามารถเอา LIFF ID มาใส่ได้
+        } catch (err) {
+            console.error('LIFF init failed', err);
+        }
+    }
+    initializeLiff();
+
+    async function submitData() {
+        const branchName = document.getElementById('branchName').value;
+        const role = document.getElementById('role').value;
+        
+        if(!branchName) {
+            alert("กรุณาเลือกสาขาก่อนกดส่งครับ");
+            return;
+        }
+
+        const btn = document.getElementById('submitBtn');
+        btn.innerText = "กำลังบันทึกข้อมูล...";
+        btn.disabled = true;
+
+        const payload = {
+            branchName: branchName,
+            role: role,
+            weather: document.getElementById('weather').value,
+            localEvent: document.getElementById('localEvent').value,
+            agriPrice: document.getElementById('agriPrice').value,
+            competitor: document.getElementById('competitor').value,
+            customerBehavior: document.getElementById('customerBehavior').value,
+            salesFactor: document.getElementById('salesFactor').value,
+            branchActivity: document.getElementById('branchActivity').value,
+            issue: document.getElementById('issue').value,
+            topProduct: document.getElementById('topProduct').value,
+            futureNote: document.getElementById('futureNote').value
+        };
+
+        try {
+            const response = await fetch(GOOGLE_WEB_APP_URL, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+
+            const result = await response.json();
+
+            if(result.status === "success") {
+                alert("✅ บันทึกข้อมูลเรียบร้อยแล้ว!");
+                document.getElementById('reportForm').reset();
+                
+                // สั่งปิดหน้าต่าง LINE อัตโนมัติหลังบันทึกเสร็จ
+                if (liff.isInClient()) {
+                    liff.closeWindow();
+                }
+            } else {
+                alert("❌ เกิดข้อผิดพลาด: " + result.message);
+            }
+        } catch (error) {
+            alert("❌ ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้");
+            console.error(error);
+        } finally {
+            btn.innerText = "ส่งรายงาน";
+            btn.disabled = false;
+        }
+    }
+</script>
+
+</body>
+</html>
