@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>บันทึกรายงานสาขาประจำวัน</title>
+    <style>
+        /* ตกแต่งหน้าตาให้สวยงามและเหมาะกับมือถือ */
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f7fa; color: #333; padding: 15px; margin: 0; }
+        .container { max-width: 100%; background: #ffffff; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        h2 { text-align: center; color: #00c300; margin-bottom: 20px; }
+        label { display: block; margin-top: 15px; font-weight: 600; font-size: 14px; }
+        select, textarea, input { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #dcdcdc; border-radius: 6px; box-sizing: border-box; font-size: 14px; font-family: inherit; }
+        textarea { height: 80px; resize: vertical; }
+        button { width: 100%; padding: 14px; background-color: #00c300; color: white; border: none; border-radius: 6px; margin-top: 25px; font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.3s; }
+        button:disabled { background-color: #a5a5a5; cursor: not-allowed; }
+        .note { font-size: 12px; color: #888; margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>📝 รายงานยอดขายประจำวัน</h2>
+    <form id="reportForm">
+        
+        <label>รหัสและชื่อสาขา</label>
+        <select id="branchName" required>
+            <option value="" disabled selected>-- เลือกสาขา --</option>
+            <option value="001 บ้านส้อง">001 บ้านส้อง</option>
+            <option value="002 พระแสง">002 พระแสง</option>
+            <option value="006 ชัยบุรี">006 ชัยบุรี</option>
+            <option value="อื่นๆ">อื่นๆ</option>
+        </select>
+
+        <label>ตำแหน่งผู้บันทึก</label>
+        <select id="role" required>
+            <option value="SM">SM</option>
+            <option value="DM">DM</option>
+            <option value="RM">RM</option>
+            <option value="RD">RD</option>
+            <option value="Other">Other</option>
+        </select>
+
+        <label>สภาพอากาศ</label>
+        <select id="weather">
+            <option value="แดดจัด">แดดจัด</option>
+            <option value="ฝนตกหนัก">ฝนตกหนัก</option>
+            <option value="ฟ้าครึ้ม">ฟ้าครึ้ม</option>
+        </select>
+
+        <label>1. เหตุการณ์ในพื้นที่</label>
+        <div class="note">เช่น มีงานกาชาด, ถนนหน้าร้านซ่อม</div>
+        <textarea id="localEvent"></textarea>
+
+        <label>2. เศรษฐกิจ/ราคาสินค้าเกษตร</label>
+        <textarea id="agriPrice"></textarea>
+
+        <label>3. ความเคลื่อนไหวของคู่แข่ง</label>
+        <textarea id="competitor"></textarea>
+
+        <label>4. พฤติกรรมลูกค้า</label>
+        <textarea id="customerBehavior"></textarea>
+
+        <label>5. ปัจจัยยอดขายผิดปกติ</label>
+        <textarea id="salesFactor"></textarea>
+
+        <label>6. กิจกรรมสาขา</label>
+        <textarea id="branchActivity"></textarea>
+
+        <label>7. ปัญหา/อุปสรรค</label>
+        <textarea id="issue"></textarea>
+
+        <label>8. สินค้าขายดี</label>
+        <textarea id="topProduct"></textarea>
+
+        <label>9. บันทึกเพื่ออนาคต (ปีหน้า)</label>
+        <textarea id="futureNote"></textarea>
+
+        <button type="button" id="submitBtn" onclick="submitData()">ส่งรายงาน</button>
+    </form>
+</div>
+
+<script>
+    // 🚨 นำลิงก์ URL ที่ได้จาก Google Apps Script มาใส่ในเครื่องหมายคำพูดด้านล่างนี้ 🚨
+    const GOOGLE_WEB_APP_URL = "วาง_URL_ของคุณตรงนี้"; 
+
+    async function submitData() {
+        // ดึงข้อมูลจากช่องกรอก
+        const branchName = document.getElementById('branchName').value;
+        const role = document.getElementById('role').value;
+        
+        // บังคับว่าต้องเลือกสาขาก่อน
+        if(!branchName) {
+            alert("กรุณาเลือกสาขาก่อนกดส่งครับ");
+            return;
+        }
+
+        // เปลี่ยนปุ่มเป็นสถานะกำลังโหลด
+        const btn = document.getElementById('submitBtn');
+        btn.innerText = "กำลังบันทึกข้อมูล...";
+        btn.disabled = true;
+
+        // จัดเตรียมข้อมูลเป็น JSON
+        const payload = {
+            branchName: branchName,
+            role: role,
+            weather: document.getElementById('weather').value,
+            localEvent: document.getElementById('localEvent').value,
+            agriPrice: document.getElementById('agriPrice').value,
+            competitor: document.getElementById('competitor').value,
+            customerBehavior: document.getElementById('customerBehavior').value,
+            salesFactor: document.getElementById('salesFactor').value,
+            branchActivity: document.getElementById('branchActivity').value,
+            issue: document.getElementById('issue').value,
+            topProduct: document.getElementById('topProduct').value,
+            futureNote: document.getElementById('futureNote').value
+        };
+
+        try {
+            // ยิงข้อมูลไปที่ Google Sheets
+            const response = await fetch(GOOGLE_WEB_APP_URL, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+
+            const result = await response.json();
+
+            if(result.status === "success") {
+                alert("✅ บันทึกข้อมูลเรียบร้อยแล้ว!");
+                document.getElementById('reportForm').reset(); // ล้างฟอร์ม
+            } else {
+                alert("❌ เกิดข้อผิดพลาด: " + result.message);
+            }
+        } catch (error) {
+            alert("❌ ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้");
+            console.error(error);
+        } finally {
+            // คืนค่าปุ่มกลับมาเหมือนเดิม
+            btn.innerText = "ส่งรายงาน";
+            btn.disabled = false;
+        }
+    }
+</script>
+
+</body>
+</html>
