@@ -358,12 +358,70 @@
                 } else {
                     console.log("Logged in already");
                 }
-                console.log('LIFF initialized successfully');
+                console.log('LIFF initialized successfully 2');
             } catch (err) {
                 console.error('LIFF init failed', err);
             }
         }
         initializeLiff();
+
+        // async function submitData() {
+        //     const branchName = document.getElementById('branchName').value;
+        //     const role = document.getElementById('role').value;
+
+        //     if (!branchName) {
+        //         alert("กรุณาเลือกสาขาก่อนกดส่งครับ");
+        //         return;
+        //     }
+
+        //     const btn = document.getElementById('submitBtn');
+        //     btn.innerText = "กำลังบันทึกข้อมูล...";
+        //     btn.disabled = true;
+
+        //     const payload = {
+        //         branchName: branchName,
+        //         role: role,
+        //         lineName: lineName,      // ส่งชื่อ LINE ไป
+        //         lineUserId: lineUserId,  // ส่ง User ID ไป
+        //         weather: document.getElementById('weather').value,
+        //         localEvent: document.getElementById('localEvent').value,
+        //         agriPrice: document.getElementById('agriPrice').value,
+        //         competitor: document.getElementById('competitor').value,
+        //         customerBehavior: document.getElementById('customerBehavior').value,
+        //         salesFactor: document.getElementById('salesFactor').value,
+        //         branchActivity: document.getElementById('branchActivity').value,
+        //         issue: document.getElementById('issue').value,
+        //         topProduct: document.getElementById('topProduct').value,
+        //         futureNote: document.getElementById('futureNote').value
+        //     };
+        //     console.log("Payload to send:", payload);
+        //     try {
+        //         const response = await fetch(GOOGLE_WEB_APP_URL, {
+        //             method: 'POST',
+        //             body: JSON.stringify(payload)
+        //         });
+
+        //         const result = await response.json();
+
+        //         if (result.status === "success") {
+        //             alert("✅ บันทึกข้อมูลเรียบร้อยแล้ว!");
+        //             document.getElementById('reportForm').reset();
+
+        //             // สั่งปิดหน้าต่าง LINE อัตโนมัติหลังบันทึกเสร็จ
+        //             if (liff.isInClient()) {
+        //                 liff.closeWindow();
+        //             }
+        //         } else {
+        //             alert("❌ เกิดข้อผิดพลาด: " + result.message);
+        //         }
+        //     } catch (error) {
+        //         alert("❌ ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้");
+        //         console.error(error);
+        //     } finally {
+        //         btn.innerText = "ส่งรายงาน";
+        //         btn.disabled = false;
+        //     }
+        // }
 
         async function submitData() {
             const branchName = document.getElementById('branchName').value;
@@ -377,6 +435,20 @@
             const btn = document.getElementById('submitBtn');
             btn.innerText = "กำลังบันทึกข้อมูล...";
             btn.disabled = true;
+
+            // --- ส่วนที่ดึงข้อมูล LINE เพิ่มเติม ---
+            let lineName = "-";
+            let lineUserId = "-";
+            try {
+                if (liff.isLoggedIn()) {
+                    const profile = await liff.getProfile();
+                    lineName = profile.displayName;
+                    lineUserId = profile.userId;
+                }
+            } catch (err) {
+                console.error("Error getting profile:", err);
+            }
+            // ----------------------------------
 
             const payload = {
                 branchName: branchName,
@@ -394,29 +466,21 @@
                 topProduct: document.getElementById('topProduct').value,
                 futureNote: document.getElementById('futureNote').value
             };
-            console.log("Payload to send:", payload);
+
             try {
                 const response = await fetch(GOOGLE_WEB_APP_URL, {
                     method: 'POST',
                     body: JSON.stringify(payload)
                 });
-
                 const result = await response.json();
-
                 if (result.status === "success") {
                     alert("✅ บันทึกข้อมูลเรียบร้อยแล้ว!");
-                    document.getElementById('reportForm').reset();
-
-                    // สั่งปิดหน้าต่าง LINE อัตโนมัติหลังบันทึกเสร็จ
-                    if (liff.isInClient()) {
-                        liff.closeWindow();
-                    }
+                    liff.closeWindow();
                 } else {
-                    alert("❌ เกิดข้อผิดพลาด: " + result.message);
+                    alert("❌ ข้อผิดพลาด: " + result.message);
                 }
             } catch (error) {
-                alert("❌ ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้");
-                console.error(error);
+                alert("❌ เชื่อมต่อเซิร์ฟเวอร์ไม่ได้");
             } finally {
                 btn.innerText = "ส่งรายงาน";
                 btn.disabled = false;
