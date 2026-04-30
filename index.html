@@ -280,12 +280,15 @@
 
 <script>
     // 🚨 อย่าลืมนำ URL ของ Google Apps Script มาวางตรงนี้นะครับ 🚨
-    const GOOGLE_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbz2PMsAq1WrBFy2ST7I1LAzd1H2yjCa-pRM3fVwcNvPAJltV0yRKGOv_ujxgWgrT9wFDg/exec"; 
+    // const GOOGLE_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbz2PMsAq1WrBFy2ST7I1LAzd1H2yjCa-pRM3fVwcNvPAJltV0yRKGOv_ujxgWgrT9wFDg/exec"; 
+    const GOOGLE_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwbxul5D1nETRd6UKIXJXWjJc2Kci7ma8wguzFALYCF3CNIYVcdsqvBc8IVJWbtj3uj6Q/exec"; 
 
     // เริ่มต้นระบบ LIFF (เพื่อใช้คำสั่งปิดหน้าต่าง LINE)
     async function initializeLiff() {
         try {
-            await liff.init({ liffId: "Y2009931818-zFQZbTPZ" }); // ตรงนี้ปล่อยไว้ก่อนได้ครับ แต่อนาคตสามารถเอา LIFF ID มาใส่ได้
+            // await liff.init({ liffId: "Y2009931818-zFQZbTPZ" }); // ตรงนี้ปล่อยไว้ก่อนได้ครับ แต่อนาคตสามารถเอา LIFF ID มาใส่ได้
+            await liff.init({ liffId: "2009937829-1ooSTxeX" }); // ตรงนี้ปล่อยไว้ก่อนได้ครับ แต่อนาคตสามารถเอา LIFF ID มาใส่ได้
+            console.log('LIFF initialized successfully');
         } catch (err) {
             console.error('LIFF init failed', err);
         }
@@ -319,7 +322,7 @@
             topProduct: document.getElementById('topProduct').value,
             futureNote: document.getElementById('futureNote').value
         };
-
+        console.log("Payload to send:", payload);
         try {
             const response = await fetch(GOOGLE_WEB_APP_URL, {
                 method: 'POST',
