@@ -105,6 +105,7 @@
             font-weight: 600;
             cursor: pointer;
             box-shadow: 0 4px 15px rgba(52, 152, 219, 0.3);
+            font-family: 'Kanit', sans-serif;
         }
 
         button:disabled {
@@ -488,9 +489,15 @@
                 if (!liff.isLoggedIn()) {
                     liff.login();
                 } else {
-                    lineName = profile.displayName; lineUserId = profile.userId;
+                    // ต้องเพิ่มบรรทัดนี้เพื่อดึงข้อมูล Profile
+                    const profile = await liff.getProfile();
+
+                    lineName = profile.displayName;
+                    lineUserId = profile.userId;
+
+                    // ใส่ชื่อลงใน Input
                     document.getElementById('lineDisplayName').value = lineName;
-                    console.log("Logged in already");
+                    console.log("Logged in as:", lineName);
                 }
                 console.log('LIFF initialized successfully 2');
             } catch (err) {
