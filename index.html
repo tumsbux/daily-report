@@ -419,24 +419,29 @@
                 </select>
             </div>
 
-           <div class="form-group">
+            <div class="form-group">
                 <label>สภาพอากาศ :</label>
-            <select id="weather">
-                <option value="แดดจัด">แดดจัด</option>
-                <option value="ฝนตกหนัก">ฝนตกหนัก</option>
-                <option value="ฟ้าครึ้ม">ฟ้าครึ้ม</option>
-            </select>
+                <select id="weather">
+                    <option value="แดดจัด">แดดจัด</option>
+                    <option value="ฝนตกหนัก">ฝนตกหนัก</option>
+                    <option value="ฟ้าครึ้ม">ฟ้าครึ้ม</option>
+                </select>
             </div>
 
-            <div class="form-group"><label>1. เหตุการณ์ในพื้นที่ :</label><div class="note">เช่น มีงานกาชาด, ถนนหน้าร้านซ่อม</div><textarea id="localEvent"></textarea></div>
-            <div class="form-group"><label>2. เศรษฐกิจ/ราคาสินค้าเกษตร :</label><textarea id="agriPrice"></textarea></div>
-            <div class="form-group"><label>3. ความเคลื่อนไหวของคู่แข่ง :</label><textarea id="competitor"></textarea></div>
+            <div class="form-group"><label>1. เหตุการณ์ในพื้นที่ :</label>
+                <div class="note">เช่น มีงานกาชาด, ถนนหน้าร้านซ่อม</div><textarea id="localEvent"></textarea>
+            </div>
+            <div class="form-group"><label>2. เศรษฐกิจ/ราคาสินค้าเกษตร :</label><textarea id="agriPrice"></textarea>
+            </div>
+            <div class="form-group"><label>3. ความเคลื่อนไหวของคู่แข่ง :</label><textarea id="competitor"></textarea>
+            </div>
             <div class="form-group"><label>4. พฤติกรรมลูกค้า :</label><textarea id="customerBehavior"></textarea></div>
             <div class="form-group"><label>5. ปัจจัยยอดขายผิดปกติ :</label><textarea id="salesFactor"></textarea></div>
             <div class="form-group"><label>6. กิจกรรมสาขา :</label><textarea id="branchActivity"></textarea></div>
             <div class="form-group"><label>7. ปัญหา/อุปสรรค :</label><textarea id="issue"></textarea></div>
             <div class="form-group"><label>8. สินค้าขายดี :</label><textarea id="topProduct"></textarea></div>
-            <div class="form-group"><label>9. บันทึกเพื่ออนาคต (ปีหน้า) :</label><textarea id="futureNote"></textarea></div>
+            <div class="form-group"><label>9. บันทึกเพื่ออนาคต (ปีหน้า) :</label><textarea id="futureNote"></textarea>
+            </div>
             <!-- <label>1. เหตุการณ์ในพื้นที่</label>
             <div class="note">เช่น มีงานกาชาด, ถนนหน้าร้านซ่อม</div>
             <textarea id="localEvent"></textarea>
@@ -473,7 +478,7 @@
         // 🚨 อย่าลืมนำ URL ของ Google Apps Script มาวางตรงนี้นะครับ 🚨
         // const GOOGLE_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbz2PMsAq1WrBFy2ST7I1LAzd1H2yjCa-pRM3fVwcNvPAJltV0yRKGOv_ujxgWgrT9wFDg/exec"; 
         const GOOGLE_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwlrgZS-4HhnHIgLxIcrS3s0Z8xdoDiNxVSs7uLanCWgX3jFAzun8G4HbQ2wON1oR-vnA/exec";
-
+        let lineName = "-"; let lineUserId = "-";
         // เริ่มต้นระบบ LIFF (เพื่อใช้คำสั่งปิดหน้าต่าง LINE)
         async function initializeLiff() {
             try {
@@ -483,6 +488,8 @@
                 if (!liff.isLoggedIn()) {
                     liff.login();
                 } else {
+                    lineName = profile.displayName; lineUserId = profile.userId;
+                    document.getElementById('lineDisplayName').value = lineName;
                     console.log("Logged in already");
                 }
                 console.log('LIFF initialized successfully 2');
