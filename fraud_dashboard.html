@@ -278,6 +278,12 @@ async function runAI(mode){
     prompt='วิเคราะห์หา Fraud Cluster ในข้อมูลสาขาค้าปลีก — มีสาขาในทีม DM/RM เดียวกันที่มีสัญญาณคล้ายกันไหม? Pattern ไหนที่น่ากังวล? ตอบภาษาไทย';
     d2=[{label:'Top 30 Risk Stores',data:top30}];
   }
+  if(!window.cowork||!window.cowork.askClaude){
+    ao.innerHTML='<b>⚠ ฟีเจอร์ AI วิเคราะห์ใช้ได้เฉพาะใน Cowork เท่านั้น</b><br>กรุณาเปิดไฟล์ผ่านแอป Cowork Desktop';
+    ao.style.display='block';
+    btns.forEach(b=>b.disabled=false);
+    return;
+  }
   try{
     const res=await window.cowork.askClaude(prompt,d2);
     ao.textContent=res; ao.style.display='block';
@@ -288,6 +294,12 @@ async function stAI(){
   const s=cur;if(!s)return;
   const btn=document.getElementById('stb'),out=document.getElementById('sto');
   btn.disabled=true;btn.textContent='⏳…';out.style.display='none';
+  if(!window.cowork||!window.cowork.askClaude){
+    out.innerHTML='<b>⚠ ฟีเจอร์ AI วิเคราะห์ใช้ได้เฉพาะใน Cowork เท่านั้น</b><br>กรุณาเปิดไฟล์ผ่านแอป Cowork Desktop';
+    out.style.display='block';
+    btn.disabled=false;btn.textContent='✨ AI วิเคราะห์สาขานี้';
+    return;
+  }
   try{
     const res=await window.cowork.askClaude(
       `วิเคราะห์สาขา "${s.code} ${s.name}" (${s.rm_name}) ระดับ ${s.level} คะแนน ${s.score}/100 — โดยเฉพาะ solinetype=C (ยกเลิกบิล) ${s.cancel_cnt} ครั้ง (${s.cancel_rate.toFixed(2)}%) บอก: 1.ความหมายและความน่ากังวล 2.สิ่งที่ควรตรวจสอบก่อน 3.False Positive หรือ True Fraud? ตอบภาษาไทยกระชับ`,
