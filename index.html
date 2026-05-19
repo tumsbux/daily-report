@@ -95,6 +95,18 @@ nav{background:#fff;border-bottom:1px solid #e2e8f0;padding:0 28px;display:flex;
 
 /* CANVAS */
 canvas{max-height:160px!important}
+
+.kpi-section{margin-bottom:20px}
+.kpi-row{display:grid;grid-template-columns:repeat(7,1fr);gap:10px;margin-bottom:10px}
+.kpi-row2{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px}
+.kc{background:#fff;border-radius:12px;padding:13px 15px;border-top:3px solid #6366f1;box-shadow:0 1px 3px rgba(0,0,0,.07)}
+.kc-lbl{font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px}
+.kc-val{font-size:22px;font-weight:800;color:#1e293b;line-height:1}
+.kc-sub{font-size:11px;color:#64748b;margin-top:5px}
+.kc-badge{display:inline-flex;align-items:center;gap:2px;font-size:11px;font-weight:700;padding:1px 6px;border-radius:4px;margin-top:4px}
+.pos{background:#dcfce7;color:#16a34a}
+.neg{background:#fee2e2;color:#dc2626}
+.neu{background:#f1f5f9;color:#475569}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js" crossorigin="anonymous"></script>
 </head>
@@ -131,6 +143,70 @@ canvas{max-height:160px!important}
       <div class="day-num">18</div>
       <div class="day-sub">วันที่ผ่านไป / 31</div>
       <div class="day-bar"><div class="day-bar-fill" style="width:58%"></div></div>
+    </div>
+  </div>
+
+
+  <!-- KPI DETAIL ROWS -->
+  <div class="kpi-section">
+    <div class="kpi-row">
+      <div class="kc" style="border-color:#6366f1">
+        <div class="kc-lbl">ยอดขาย MTD พ.ค. 2026</div>
+        <div class="kc-val" id="k-mtd">฿82.0M</div>
+        <div class="kc-sub">18 วันแรก</div>
+      </div>
+      <div class="kc" style="border-color:#8b5cf6">
+        <div class="kc-lbl">Daily Run Rate</div>
+        <div class="kc-val" id="k-run">฿4.56M</div>
+        <div class="kc-sub">เฉลี่ย/วัน</div>
+      </div>
+      <div class="kc" style="border-color:#3b82f6">
+        <div class="kc-lbl">Projected Full Month</div>
+        <div class="kc-val" id="k-proj">฿141.2M</div>
+        <div class="kc-sub">×31 วัน</div>
+      </div>
+      <div class="kc" style="border-color:#94a3b8">
+        <div class="kc-lbl">พ.ค. 2025 (ทั้งเดือน)</div>
+        <div class="kc-val" id="k-s25">฿122.0M</div>
+        <div class="kc-sub">เทียบเป้า YoY</div>
+      </div>
+      <div class="kc" style="border-color:#10b981">
+        <div class="kc-lbl">Projected YoY</div>
+        <div class="kc-val pos" id="k-yoy">▲ +15.8%</div>
+        <div class="kc-sub">Proj 2026 vs พ.ค. 2025</div>
+      </div>
+      <div class="kc" style="border-color:#f59e0b">
+        <div class="kc-lbl">วันที่เหลือ</div>
+        <div class="kc-val" id="k-days">13 วัน</div>
+        <div class="kc-sub">ผ่านไป 18 วัน</div>
+      </div>
+      <div class="kc" style="border-color:#4f46e5">
+        <div class="kc-lbl">VS Target พ.ค. 26</div>
+        <div class="kc-val pos" id="k-tgt">109.0%</div>
+        <div class="kc-sub">MTD ฿75.2M เป้า</div>
+      </div>
+    </div>
+    <div class="kpi-row2">
+      <div class="kc" style="border-color:#ec4899">
+        <div class="kc-lbl">GP%</div>
+        <div class="kc-val" id="k-gp">33.3%</div>
+        <div class="kc-sub" id="k-gp-sub">฿27.26M GP</div>
+      </div>
+      <div class="kc" style="border-color:#14b8a6">
+        <div class="kc-lbl">AVG Ticket</div>
+        <div class="kc-val">฿<span id="k-ticket">148</span></div>
+        <div class="kc-sub">vs ปี25: ฿143 <span class="kc-badge pos">▲3.5%</span></div>
+      </div>
+      <div class="kc" style="border-color:#f97316">
+        <div class="kc-lbl">บิล/วัน/ร้าน</div>
+        <div class="kc-val" id="k-bills">151</div>
+        <div class="kc-sub">vs ปี25: 136 <span class="kc-badge pos">▲11.4%</span></div>
+      </div>
+      <div class="kc" style="border-color:#ef4444">
+        <div class="kc-lbl">ยอดคืน/ร้าน</div>
+        <div class="kc-val">฿<span id="k-ret">1,541</span></div>
+        <div class="kc-sub" id="k-ret-sub">รวม ฿313K | ฿17,384/วัน</div>
+      </div>
     </div>
   </div>
 
