@@ -118,6 +118,7 @@ canvas{max-height:160px!important}
   <a class="nav-link active" href="index.html">🏠 หน้าหลัก</a>
   <a class="nav-link" href="sales_dashboard_v8.html">📈 Sales</a>
   <a class="nav-link" href="fraud_dashboard.html">🛡️ Fraud</a>
+  <a class="nav-link" href="product_dashboard.html">📦 Product</a>
   <div class="nav-right">
     <span class="date-badge">📅 19 พ.ค. 2569 · วัน 18/31</span>
     <span class="alert-dot">⚠ 4 HIGH</span>
@@ -337,11 +338,11 @@ canvas{max-height:160px!important}
             <div class="ql-text"><h3>Fraud Detection</h3><p>ตรวจสอบความผิดปกติ</p></div>
             <div class="ql-arrow">›</div>
           </a>
-          <div class="ql" style="opacity:.5;cursor:default">
+          <a class="ql" href="product_dashboard.html">
             <div class="ql-icon">📦</div>
-            <div class="ql-text"><h3>Product Analysis</h3><p>Coming soon</p></div>
+            <div class="ql-text"><h3>Product Analysis</h3><p>จำนวนขาย · ยอดขาย · YoY%</p></div>
             <div class="ql-arrow">›</div>
-          </div>
+          </a>
           <div class="ql" style="opacity:.5;cursor:default">
             <div class="ql-icon">👥</div>
             <div class="ql-text"><h3>Customer Report</h3><p>Coming soon</p></div>
@@ -409,10 +410,4 @@ new Chart(document.getElementById('cTrend'),{
     },
     scales:{
       x:{grid:{display:false},ticks:{color:'#94a3b8',font:{size:11}}},
-      y:{grid:{color:'#f1f5f9'},ticks:{color:'#94a3b8',font:{size:10},callback:v=>v+'M'}}
-    }
-  }
-});
-</script>
-</body>
-</html>
+      y:{grid:{color:'#f1

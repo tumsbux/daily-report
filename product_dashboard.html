@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Product Analysis — Tuenjai</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js" crossorigin="anonymous"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Noto Sans Thai',Sarabun,sans-serif;background:#f8fafc;color:#1e293b;font-size:14px}
+nav{background:#1e293b;padding:12px 20px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:100}
+nav h1{font-size:15px;font-weight:700;color:#fff}
+.chip{font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:rgba(255,255,255,.12);color:#e2e8f0}
+.nav-r{margin-left:auto;display:flex;align-items:center;gap:8px}
+.nav-date{font-size:12px;color:#94a3b8}
+.hub-btn{background:#6366f1;color:#fff;border:none;border-radius:7px;padding:5px 13px;font-size:12px;font-weight:600;cursor:pointer;text-decoration:none}
+.page{max-width:1420px;margin:0 auto;padding:20px}
+
+/* Summary cards */
+.sum-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
+.sc{background:#fff;border-radius:12px;padding:16px 18px;border-top:3px solid;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.sc-lbl{font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px}
+.sc-val{font-size:30px;font-weight:800;color:#1e293b;line-height:1}
+.sc-sub{font-size:12px;color:#64748b;margin-top:6px}
+.badge{display:inline-flex;align-items:center;gap:2px;font-size:11px;font-weight:700;padding:2px 7px;border-radius:5px}
+.pos{background:#dcfce7;color:#15803d}.neg{background:#fee2e2;color:#b91c1c}.neu{background:#f1f5f9;color:#475569}
+
+/* Charts row */
+.chart-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px}
+.ccard{background:#fff;border-radius:12px;padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.06);display:flex;flex-direction:column}
+.ccard h3{font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.7px;margin-bottom:12px}
+.ccard canvas{flex:1;min-height:220px}
+
+/* Category bar */
+.cat-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px}
+.cat-card{background:#fff;border-radius:12px;padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.cat-card h3{font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.7px;margin-bottom:12px}
+.cat-bar-wrap{display:flex;flex-direction:column;gap:8px;max-height:280px;overflow-y:auto}
+.cat-bar-row{display:grid;grid-template-columns:130px 1fr 70px 60px;align-items:center;gap:8px;font-size:12px}
+.cat-name{font-weight:600;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pbar-bg{height:8px;background:#f1f5f9;border-radius:4px;overflow:hidden}
+.pbar-fg{height:8px;border-radius:4px;transition:width .4s}
+.cat-amt{text-align:right;font-weight:700;font-size:11px;color:#1e293b}
+.cat-yoy{text-align:right;font-size:11px;font-weight:700}
+
+/* Filters */
+.filter-bar{background:#fff;border-radius:12px;padding:14px 18px;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.filter-bar label{font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px}
+select,input[type=text]{border:1px solid #e2e8f0;border-radius:7px;padding:6px 10px;font-size:12px;color:#374151;background:#fff;outline:none}
+select:focus,input[type=text]:focus{border-color:#6366f1}
+.btn-grp{display:flex;gap:5px}
+.btn-grp button{border:1px solid #e2e8f0;background:#fff;border-radius:7px;padding:5px 12px;font-size:12px;cursor:pointer;font-weight:600;color:#475569}
+.btn-grp button.active{background:#6366f1;color:#fff;border-color:#6366f1}
+.sep{width:1px;height:24px;background:#e2e8f0}
+.result-info{margin-left:auto;font-size:12px;color:#94a3b8}
+
+/* Table */
+.table-wrap{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.06);overflow:hidden}
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead tr{background:#f8fafc;border-bottom:2px solid #e2e8f0}
+th{padding:11px 12px;text-align:left;font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;cursor:pointer;user-select:none}
+th:hover{color:#6366f1}
+th.sort-asc::after{content:' ▲';color:#6366f1}
+th.sort-desc::after{content:' ▼';color:#6366f1}
+tbody tr{border-bottom:1px solid #f1f5f9;transition:background .12s}
+tbody tr:hover{background:#f8fafc}
+td{padding:9px 12px;vertical-align:middle}
+.rank{width:36px;text-align:center;font-weight:700;color:#94a3b8;font-size:11px}
+.prod-name{font-weight:600;color:#1e293b;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prod-sub{font-size:10px;color:#94a3b8;margin-top:1px}
+.num{font-family:monospace;font-weight:700;text-align:right}
+.num-sub{font-size:10px;color:#94a3b8;text-align:right}
+.yoy-cell{text-align:right}
+.gp-bar{width:60px;height:5px;background:#f1f5f9;border-radius:3px;margin-top:3px}
+.gp-fill{height:5px;background:#10b981;border-radius:3px}
+.sample-banner{background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:10px 16px;margin-bottom:14px;font-size:12px;color:#854d0e;display:flex;align-items:center;gap:8px}
+</style>
+</head>
+<body>
+<nav>
+  <span style="font-size:18px">📦</span>
+  <h1>Product Analysis</h1>
+  <span class="chip" id="nProd">—</span>
+  <span class="chip" id="nCat">—</span>
+  <div class="nav-r">
+    <span class="nav-date" id="navDate">—</span>
+    <a class="hub-btn" href="index.html">← Hub</a>
+  </div>
+</nav>
+
+<div class="page">
+
+<!-- Sample data banner -->
+<div class="sample-banner" id="sampleBanner" style="display:none">
+  ⚠ <strong>ข้อมูลตัวอย่าง</strong> — กำลังประมวลผลข้อมูลจริงจาก fact_sales.sql ในพื้นหลัง
+  เมื่อ <code>product_data.json</code> พร้อม ให้รีเฟรชหน้านี้
+</div>
+
+<!-- Summary cards -->
+<div class="sum-row">
+  <div class="sc" style="border-color:#6366f1">
+    <div class="sc-lbl">สินค้าทั้งหมด</div>
+    <div class="sc-val" id="sTotalProd">—</div>
+    <div class="sc-sub">SKU ที่มียอดขาย พ.ค. 2026</div>
+  </div>
+  <div class="sc" style="border-color:#3b82f6">
+    <div class="sc-lbl">ยอดขายรวม (แสดง)</div>
+    <div class="sc-val" id="sTotalSales">—</div>
+    <div class="sc-sub" id="sTotalSalesSub">—</div>
+  </div>
+  <div class="sc" style="border-color:#10b981">
+    <div class="sc-lbl">จำนวนขายรวม</div>
+    <div class="sc-val" id="sTotalQty">—</div>
+    <div class="sc-sub" id="sTotalQtySub">—</div>
+  </div>
+  <div class="sc" style="border-color:#f59e0b">
+    <div class="sc-lbl">หมวดหมู่</div>
+    <div class="sc-val" id="sTotalCat">—</div>
+    <div class="sc-sub">กลุ่มสินค้าที่มียอดขาย</div>
+  </div>
+</div>
+
+<!-- Charts -->
+<div class="chart-row">
+  <div class="ccard">
+    <h3>Top 10 สินค้า — ยอดขาย (฿) พ.ค. 2026 vs 2025</h3>
+    <canvas id="cTopSales"></canvas>
+  </div>
+  <div class="ccard">
+    <h3>Top 10 สินค้า — จำนวนขาย (ชิ้น)</h3>
+    <canvas id="cTopQty"></canvas>
+  </div>
+</div>
+
+<!-- Category breakdown -->
+<div class="cat-row">
+  <div class="cat-card">
+    <h3>ยอดขายตามหมวดหมู่ — พ.ค. 2026</h3>
+    <div class="cat-bar-wrap" id="catBars"></div>
+  </div>
+  <div class="cat-card">
+    <h3>YoY ยอดขายตามหมวดหมู่ (%)</h3>
+    <canvas id="cCatYoy" style="max-height:260px"></canvas>
+  </div>
+</div>
+
+<!-- Filters -->
+<div class="filter-bar">
+  <label>แสดง</label>
+  <div class="btn-grp">
+    <button onclick="setTop(20)" id="btn20" class="active">Top 20</button>
+    <button onclick="setTop(50)" id="btn50">Top 50</button>
+    <button onclick="setTop(100)" id="btn100">Top 100</button>
+    <button onclick="setTop(9999)" id="btnAll">ทั้งหมด</button>
+  </div>
+  <div class="sep"></div>
+  <label>เรียงโดย</label>
+  <div class="btn-grp">
+    <button onclick="setSort('s26')" id="sortS26" class="active">ยอดขาย 2026</button>
+    <button onclick="setSort('q26')" id="sortQ26">จำนวน 2026</button>
+    <button onclick="setSort('s_yoy')" id="sortYoy">YoY %</button>
+  </div>
+  <div class="sep"></div>
+  <label>หมวดหมู่</label>
+  <select id="fCat" onchange="applyFilters()"><option value="">ทั้งหมด</option></select>
+  <label>RM</label>
+  <select id="fRm" onchange="applyFilters()"><option value="">ทั้งหมด</option></select>
+  <div class="sep"></div>
+  <input type="text" id="fSearch" placeholder="🔍 ค้นหาสินค้า..." oninput="applyFilters()" style="width:200px">
+  <span class="result-info" id="resultInfo"></span>
+</div>
+
+<!-- Table -->
+<div class="table-wrap">
+<table>
+<thead>
+<tr>
+  <th class="rank">#</th>
+  <th onclick="toggleSort('name')">ชื่อสินค้า</th>
+  <th onclick="toggleSort('group')">หมวดหมู่</th>
+  <th onclick="toggleSort('q26')" style="text-align:right">จำนวน พ.ค.26</th>
+  <th onclick="toggleSort('q25')" style="text-align:right">จำนวน พ.ค.25</th>
+  <th onclick="toggleSort('q_yoy')" style="text-align:right">QTY YoY</th>
+  <th onclick="toggleSort('s26')" style="text-align:right">ยอดขาย พ.ค.26 (฿)</th>
+  <th onclick="toggleSort('s25')" style="text-align:right">ยอดขาย พ.ค.25 (฿)</th>
+  <th onclick="toggleSort('s_yoy')" style="text-align:right">Sales YoY</th>
+  <th onclick="toggleSort('gp_pct')" style="text-align:right">GP%</th>
+</tr>
+</thead>
+<tbody id="tbody"></tbody>
+</table>
+</div>
+</div>
+
+<script>
+let D = null, filtered = [], topN = 20, sortKey = 's26', sortDir = -1, catFilter = '', rmFilter = '', search = '';
+
+async function loadData(){
+  try {
+    const r = await fetch('product_data.json?t=' + Date.now());
+    D = await r.json();
+    if(D.is_sample) document.getElementById('sampleBanner').style.display='flex';
+    init();
+  } catch(e){
+    document.getElementById('sampleBanner').style.display='flex';
+    document.getElementById('sampleBanner').innerHTML='❌ ไม่พบ product_data.json — กรุณารัน <code>python build_product_data.py</code> ก่อน';
+  }
+}
+
+function fmt(n){ return n==null?'—':(n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(0)+'K':Math.round(n).toLocaleString()); }
+function fmtFull(n){ return n==null?'—':Math.round(n).toLocaleString(); }
+function yoyBadge(v){ if(v==null) return '<span class="badge neu">N/A</span>';
+  const cls = v>=0?'pos':'neg'; return `<span class="badge ${cls}">${v>=0?'▲':'▼'}${Math.abs(v).toFixed(1)}%</span>`; }
+function colorHex(v){ return v>=10?'#16a34a':v>=-5?'#0ea5e9':'#dc2626'; }
+
+function init(){
+  // Nav
+  document.getElementById('navDate').textContent = '📅 ' + (D.generated||'');
+  document.getElementById('nCat').textContent = D.categories.length + ' หมวด';
+  document.getElementById('nProd').textContent = D.products.length + ' SKU';
+
+  // Category filter
+  const fc = document.getElementById('fCat');
+  [...new Set(D.products.map(p=>p.group))].sort().forEach(g=>{
+    const o=document.createElement('option'); o.value=g; o.textContent=g; fc.appendChild(o);
+  });
+
+  // RM filter
+  const fr = document.getElementById('fRm');
+  D.rm_list.forEach(rm=>{
+    const o=document.createElement('option'); o.value=rm; o.textContent=rm; fr.appendChild(o);
+  });
+
+  drawCharts();
+  drawCats();
+  applyFilters();
+}
+
+function drawCharts(){
+  const top10s = [...D.products].sort((a,b)=>b.s26-a.s26).slice(0,10);
+  const top10q = [...D.products].sort((a,b)=>b.q26-a.q26).slice(0,10);
+  const labels_s = top10s.map(p=>p.name.slice(0,15));
+  const labels_q = top10q.map(p=>p.name.slice(0,15));
+
+  new Chart(document.getElementById('cTopSales'),{
+    type:'bar',
+    data:{labels:labels_s,datasets:[
+      {label:'พ.ค. 2026',data:top10s.map(p=>p.s26),backgroundColor:'rgba(99,102,241,.8)',borderRadius:4},
+      {label:'พ.ค. 2025',data:top10s.map(p=>p.s25),backgroundColor:'rgba(148,163,184,.5)',borderRadius:4},
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',
+      plugins:{legend:{labels:{color:'#475569',font:{size:10}},position:'top'},
+               tooltip:{callbacks:{label:c=>' ฿'+c.raw.toLocaleString()}}},
+      scales:{x:{ticks:{color:'#94a3b8',font:{size:9},callback:v=>v>=1e6?(v/1e6).toFixed(1)+'M':v+''},
+                  grid:{color:'#f1f5f9'}},
+              y:{ticks:{color:'#374151',font:{size:9}},grid:{display:false}}}}
+  });
+
+  new Chart(document.getElementById('cTopQty'),{
+    type:'bar',
+    data:{labels:labels_q,datasets:[
+      {label:'พ.ค. 2026',data:top10q.map(p=>p.q26),backgroundColor:'rgba(16,185,129,.75)',borderRadius:4},
+      {label:'พ.ค. 2025',data:top10q.map(p=>p.q25),backgroundColor:'rgba(148,163,184,.5)',borderRadius:4},
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',
+      plugins:{legend:{labels:{color:'#475569',font:{size:10}},position:'top'},
+               tooltip:{callbacks:{label:c=>' '+c.raw.toLocaleString()+' ชิ้น'}}},
+      scales:{x:{ticks:{color:'#94a3b8',font:{size:9}},grid:{color:'#f1f5f9'}},
+              y:{ticks:{color:'#374151',font:{size:9}},grid:{display:false}}}}
+  });
+
+  // Category YoY chart
+  const cats = D.categories.slice(0,10);
+  new Chart(document.getElementById('cCatYoy'),{
+    type:'bar',
+    data:{labels:cats.map(c=>c.group.slice(0,12)),datasets:[{
+      label:'YoY %',
+      data:cats.map(c=>c.s_yoy),
+      backgroundColor:cats.map(c=>c.s_yoy>=0?'rgba(16,185,129,.75)':'rgba(239,68,68,.7)'),
+      borderRadius:5
+    }]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},
+               tooltip:{callbacks:{label:c=>c.raw?.toFixed(1)+'%'}}},
+      scales:{x:{ticks:{color:'#374151',font:{size:9}},grid:{display:false}},
+              y:{ticks:{color:'#94a3b8',font:{size:9},callback:v=>v+'%'},
+                 grid:{color:'#f1f5f9'},
+                 afterDataLimits:axis=>{axis.min=Math.min(axis.min,-5);}}}}
+  });
+}
+
+function drawCats(){
+  const cats = D.categories;
+  const maxS = Math.max(...cats.map(c=>c.sales26));
+  const html = cats.slice(0,12).map(c=>{
+    const pct = (c.sales26/maxS*100).toFixed(0);
+    const yoyC = c.s_yoy>=0?'#16a34a':'#dc2626';
+    const yoyT = c.s_yoy==null?'—':(c.s_yoy>=0?'▲':'▼')+Math.abs(c.s_yoy).toFixed(1)+'%';
+    return `<div class="cat-bar-row">
+      <div class="cat-name" title="${c.group}">${c.group}</div>
+      <div class="pbar-bg"><div class="pbar-fg" style="width:${pct}%;background:#6366f1"></div></div>
+      <div class="cat-amt">${fmt(c.sales26)}</div>
+      <div class="cat-yoy" style="color:${yoyC}">${yoyT}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('catBars').innerHTML = html;
+}
+
+function applyFilters(){
+  catFilter = document.getElementById('fCat').value;
+  rmFilter  = document.getElementById('fRm').value;
+  search    = document.getElementById('fSearch').value.toLowerCase().trim();
+
+  filtered = D.products.filter(p=>{
+    if(catFilter && p.group !== catFilter) return false;
+    if(search && !p.name.toLowerCase().includes(search) && !p.brand.toLowerCase().includes(search)) return false;
+    return true;
+  });
+
+  // Sort
+  filtered.sort((a,b)=>{
+    const va = a[sortKey]??-Infinity, vb = b[sortKey]??-Infinity;
+    return sortDir * (vb - va);
+  });
+
+  // Update summary
+  const s26Tot = filtered.reduce((s,p)=>s+p.s26, 0);
+  const s25Tot = filtered.reduce((s,p)=>s+p.s25, 0);
+  const q26Tot = filtered.reduce((s,p)=>s+p.q26, 0);
+  const q25Tot = filtered.reduce((s,p)=>s+p.q25, 0);
+  const yoy = s25Tot ? ((s26Tot/s25Tot-1)*100).toFixed(1) : null;
+  const qyoy= q25Tot ? ((q26Tot/q25Tot-1)*100).toFixed(1) : null;
+  const cats = new Set(filtered.map(p=>p.group)).size;
+
+  document.getElementById('sTotalProd').textContent  = filtered.length.toLocaleString();
+  document.getElementById('sTotalSales').textContent = fmt(s26Tot);
+  document.getElementById('sTotalSalesSub').innerHTML= `vs 2025: ${fmt(s25Tot)} ${yoyBadge(yoy?+yoy:null)}`;
+  document.getElementById('sTotalQty').textContent   = fmt(q26Tot);
+  document.getElementById('sTotalQtySub').innerHTML  = `vs 2025: ${fmt(q25Tot)} ${yoyBadge(qyoy?+qyoy:null)}`;
+  document.getElementById('sTotalCat').textContent   = cats;
+
+  renderTable(filtered.slice(0, topN));
+  document.getElementById('resultInfo').textContent =
+    `แสดง ${Math.min(topN,filtered.length).toLocaleString()} / ${filtered.length.toLocaleString()} รายการ`;
+}
+
+function renderTable(rows){
+  const tb = document.getElementById('tbody');
+  tb.innerHTML = rows.map((p, i)=>`
+    <tr>
+      <td class="rank">${i+1}</td>
+      <td>
+        <div class="prod-name" title="${p.name}">${p.name}</div>
+        <div class="prod-sub">${p.brand||''}${p.type?' · '+p.type:''}</div>
+      </td>
+      <td><span style="font-size:11px;color:#64748b">${p.group||'—'}</span></td>
+      <td class="num">${fmtFull(p.q26)}</td>
+      <td class="num" style="color:#94a3b8">${fmtFull(p.q25)}</td>
+      <td class="yoy-cell">${yoyBadge(p.q_yoy)}</td>
+      <td class="num">฿${fmtFull(p.s26)}</td>
+      <td class="num" style="color:#94a3b8">฿${fmtFull(p.s25)}</td>
+      <td class="yoy-cell">${yoyBadge(p.s_yoy)}</td>
+      <td>
+        <div style="text-align:right;font-weight:700;font-size:11px;color:#10b981">${p.gp_pct}%</div>
+        <div class="gp-bar"><div class="gp-fill" style="width:${Math.min(p.gp_pct,60)/60*100}%"></div></div>
+      </td>
+    </tr>`).join('');
+}
+
+function setTop(n){
+  topN=n;
+  ['btn20','btn50','btn100','btnAll'].forEach(id=>document.getElementById(id).classList.remove('active'));
+  const map={20:'btn20',50:'btn50',100:'btn100',9999:'btnAll'};
+  document.getElementById(map[n]).classList.add('active');
+  applyFilters();
+}
+
+function setSort(key){
+  if(sortKey===key) sortDir*=-1; else { sortKey=key; sortDir=-1; }
+  ['sortS26','sortQ26','sortYoy'].forEach(id=>document.getElementById(id).classList.remove('active'));
+  const map={s26:'sortS26',q26:'sortQ26',s_yoy:'sortYoy'};
+  if(map[key]) document.getElementById(map[key]).classList.add('active');
+  applyFilters();
+}
+
+let sortCol=null, sortColDir=-1;
+function toggleSort(col){
+  if(sortCol===col) sortColDir*=-1; else {sortCol=col; sortColDir=-1;}
+  sortKey=col; sortDir=sortColDir;
+  // Update header classes
+  document.querySelectorAll('th').forEach(th=>th.classList.remove('sort-asc','sort-desc'));
+  event.target.classList.add(sortColDir>0?'sort-asc':'sort-desc');
+  applyFilters();
+}
+
+loadData();
+</script>
+</body>
+</html>
