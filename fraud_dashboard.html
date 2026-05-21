@@ -279,8 +279,15 @@ async function runAI(mode){
     d2=[{label:'Top 30 Risk Stores',data:top30}];
   }
   if(!window.cowork||!window.cowork.askClaude){
-    ao.innerHTML='<b>⚠ ฟีเจอร์ AI วิเคราะห์ใช้ได้เฉพาะใน Cowork เท่านั้น</b><br>กรุณาเปิดไฟล์ผ่านแอป Cowork Desktop';
+    const dataStr=d2?'\n\nข้อมูล (JSON):\n'+JSON.stringify(d2,null,2):'';
+    const fullPrompt=prompt+dataStr;
+    navigator.clipboard.writeText(fullPrompt).then(()=>{
+      ao.innerHTML='<div style="background:#e8f5e9;border:1px solid #4caf50;border-radius:8px;padding:12px;">'+'<b>✅ คัดลอก Prompt ไป Clipboard แล้ว!</b><br><br>'+'<span style="color:#1a5276">1. กำลังเปิด Claude.ai ในแท็บใหม่<br>'+'2. วาง (Ctrl+V) ใน chat แล้วกด Enter</span></div>';
+    }).catch(()=>{
+      ao.innerHTML='<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:12px;">'+'<b>⚠ คัดลอกอัตโนมัติไม่ได้ — กรุณาคัดลอก prompt ด้านล่าง:</b><br>'+'<textarea style="width:100%;height:120px;margin-top:8px;font-size:12px;">'+fullPrompt+'</textarea></div>';
+    });
     ao.style.display='block';
+    window.open('https://claude.ai/new','_blank');
     btns.forEach(b=>b.disabled=false);
     return;
   }
@@ -295,8 +302,14 @@ async function stAI(){
   const btn=document.getElementById('stb'),out=document.getElementById('sto');
   btn.disabled=true;btn.textContent='⏳…';out.style.display='none';
   if(!window.cowork||!window.cowork.askClaude){
-    out.innerHTML='<b>⚠ ฟีเจอร์ AI วิเคราะห์ใช้ได้เฉพาะใน Cowork เท่านั้น</b><br>กรุณาเปิดไฟล์ผ่านแอป Cowork Desktop';
+    const sp=`วิเคราะห์สาขา "${s.code} ${s.name}" (${s.rm_name}) ระดับ ${s.level} คะแนน ${s.score}/100\n`+`คืน: ${s.ret_rate.toFixed(2)}% | ยกเลิกบิล: ${s.cancel_rate.toFixed(2)}% (${s.cancel_cnt} ครั้ง) | GP Dev: ${s.gp_dev.toFixed(2)}%\n`+`บอก: 1.ความหมายและความน่ากังวล 2.สิ่งที่ควรตรวจสอบก่อน 3.False Positive หรือ True Fraud? ตอบภาษาไทย`;
+    navigator.clipboard.writeText(sp).then(()=>{
+      out.innerHTML='<div style="background:#e8f5e9;border:1px solid #4caf50;border-radius:8px;padding:10px;">'+'<b>✅ คัดลอก Prompt แล้ว!</b><br><span style="color:#1a5276">เปิด Claude.ai แล้ว — วาง (Ctrl+V) แล้ว Enter</span></div>';
+    }).catch(()=>{
+      out.innerHTML='<textarea style="width:100%;height:100px;font-size:11px;">'+sp+'</textarea>';
+    });
     out.style.display='block';
+    window.open('https://claude.ai/new','_blank');
     btn.disabled=false;btn.textContent='✨ AI วิเคราะห์สาขานี้';
     return;
   }
