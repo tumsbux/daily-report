@@ -517,8 +517,8 @@ function renderRtu(){
     const rc=r.repeat_so>10?'cred':r.repeat_so>3?'corange':'';
     return `<tr>
       <td><b>${r.rtuname}</b></td>
-      <td style="color:var(--blue);font-weight:600">${r.fullname||'?'}</td>
-      <td>${r.whs}</td><td>${r.store_name}</td><td>${r.dm}</td><td>${r.rm}</td>
+      <td style="color:var(--blue);font-weight:600">${r.fullname||'–'}</td>
+      <td>${r.whs}</td><td>${r.store_name}</td><td>${r.dm==='?'?'–':r.dm}</td><td>${r.rm==='?'?'–':r.rm}</td>
       <td>${r.returns}</td><td class="amt">฿${fmt(r.amount)}</td>
       <td class="${rc}">${r.repeat_so>0?'⚠️ '+r.repeat_so:r.repeat_so}</td>
       <td class="${zc}">${pct(r.zero_pct)}</td>
@@ -545,13 +545,13 @@ function renderSo(){
     const lc=r.lines>=10?'bH':r.lines>=4?'bM':'bL';
     // Look up cashier fullname from rtu data
     const rtuRow=(D.data['ALL'].rtu||[]).find(x=>x.rtuname===r.cashier);
-    const fname=rtuRow?rtuRow.fullname:'?';
+    const fname=rtuRow?rtuRow.fullname:'–';
     return `<tr>
       <td><b>${r.rtsono}</b></td>
       <td><span class="badge ${lc}">${r.lines}</span></td>
       <td class="amt">฿${fmt(r.amount)}</td>
       <td>${r.cashier}</td><td style="color:var(--blue)">${fname}</td>
-      <td>${r.store}</td><td>${r.store_name}</td><td>${r.dm}</td><td>${r.rm}</td>
+      <td>${r.store}</td><td>${r.store_name}</td><td>${r.dm==='?'?'–':r.dm}</td><td>${r.rm==='?'?'–':r.rm}</td>
       <td>${r.zero_cust>0?'<span class="badge bM">'+r.zero_cust+'</span>':'0'}</td>
       <td>${r.date?r.date.substring(0,10):'-'}</td>
     </tr>`;
@@ -611,7 +611,7 @@ function renderStore(){
   rows.sort((a,b)=>{const va=a[stSort.col]??'';const vb=b[stSort.col]??'';return(typeof va==='number'?(va-vb):va.localeCompare(vb,'th'))*stSort.dir;});
   document.getElementById('st-count').textContent=rows.length+' ร้าน';
   document.getElementById('st-body').innerHTML=rows.map(r=>`<tr>
-    <td>${r.whs}</td><td><b>${r.store_name}</b></td><td>${r.dm}</td><td>${r.rm}</td>
+    <td>${r.whs}</td><td><b>${r.store_name}</b></td><td>${r.dm==='?'?'–':r.dm}</td><td>${r.rm==='?'?'–':r.rm}</td>
     <td>${r.returns}</td><td>${r.cashiers}</td>
     <td class="amt">฿${fmt(r.amount)}</td>
     <td class="${r.zero_pct>=50?'cred':r.zero_pct>=30?'corange':'cgreen'}">${pct(r.zero_pct)}</td>
@@ -626,7 +626,7 @@ function sortDm(col){dmSort=dmSort.col===col?{col,dir:-dmSort.dir}:{col,dir:-1};
 function renderDm(){
   const m=document.getElementById('dm-month').value;
   const rmF=document.getElementById('dm-rm').value;
-  let rows=(D.data[m]||D.data['ALL']).dm.filter(r=>!rmF||r.rm===rmF);
+  let rows=(D.data[m]||D.data['ALL']).dm.filter(r=>r.dm!=='?'&&(!rmF||r.rm===rmF));
   rows.sort((a,b)=>{const va=a[dmSort.col]??'';const vb=b[dmSort.col]??'';return(typeof va==='number'?(va-vb):va.localeCompare(vb,'th'))*dmSort.dir;});
   document.getElementById('dm-body').innerHTML=rows.map(r=>`<tr>
     <td><b>${r.dm}</b></td><td>${r.rm}</td><td>${r.stores}</td><td>${r.cashiers}</td>
@@ -635,12 +635,11 @@ function renderDm(){
     <td class="${r.zero_pct>=50?'cred':r.zero_pct>=40?'corange':'cgreen'}">${pct(r.zero_pct)}</td>
   </tr>`).join('');
 
-  // Charts
-  const known=rows.filter(r=>r.dm!=='?');
-  mkChart('ch-dm-amt','bar',known.map(r=>r.dm),known.map(r=>r.amount),
-    known.map(r=>'rgba(79,70,229,.6)'),{horiz:true});
-  mkChart('ch-dm-zero','bar',known.map(r=>r.dm),known.map(r=>r.zero_pct),
-    known.map(r=>r.zero_pct>=50?'rgba(220,38,38,.7)':r.zero_pct>=40?'rgba(217,119,6,.7)':'rgba(22,197,94,.5)'),{horiz:true});
+  // Charts (rows already excludes '?')
+  mkChart('ch-dm-amt','bar',rows.map(r=>r.dm),rows.map(r=>r.amount),
+    rows.map(r=>'rgba(79,70,229,.6)'),{horiz:true});
+  mkChart('ch-dm-zero','bar',rows.map(r=>r.dm),rows.map(r=>r.zero_pct),
+    rows.map(r=>r.zero_pct>=50?'rgba(220,38,38,.7)':r.zero_pct>=40?'rgba(217,119,6,.7)':'rgba(22,197,94,.5)'),{horiz:true});
 }
 renderDm();
 
@@ -649,7 +648,7 @@ let rmSort={col:'amount',dir:-1};
 function sortRm(col){rmSort=rmSort.col===col?{col,dir:-rmSort.dir}:{col,dir:-1};renderRm();}
 function renderRm(){
   const m=document.getElementById('rm-month').value;
-  let rows=(D.data[m]||D.data['ALL']).rm;
+  let rows=(D.data[m]||D.data['ALL']).rm.filter(r=>r.rm!=='?');
   rows.sort((a,b)=>{const va=a[rmSort.col]??'';const vb=b[rmSort.col]??'';return(typeof va==='number'?(va-vb):va.localeCompare(vb,'th'))*rmSort.dir;});
   document.getElementById('rm-body').innerHTML=rows.map(r=>`<tr>
     <td><b>${r.rm}</b></td><td>${r.dms}</td><td>${r.stores}</td><td>${r.cashiers}</td>
@@ -661,9 +660,4 @@ function renderRm(){
   mkChart('ch-rm-amt','bar',rows.map(r=>r.rm),rows.map(r=>r.amount),
     ['rgba(220,38,38,.7)','rgba(217,119,6,.7)','rgba(22,197,94,.6)','rgba(124,58,237,.6)','rgba(148,163,184,.5)'],{horiz:true});
   mkChart('ch-rm-zero','bar',rows.map(r=>r.rm),rows.map(r=>r.zero_pct),
-    rows.map(r=>r.zero_pct>=50?'rgba(220,38,38,.7)':'rgba(217,119,6,.6)'),{horiz:true});
-}
-renderRm();
-</script>
-</body>
-</html>
+    row
