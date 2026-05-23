@@ -426,6 +426,9 @@ function renderOvKpi(d) {
   ].map(k=>`<div class="kcard ${k.c}"><div class="klabel">${k.l}</div><div class="kval">${k.v}</div><div class="ksub">${k.sub}</div></div>`).join('');
 }
 
+// UTC→Bangkok: hours 0-5 recorded in UTC, shift +7 for display only
+function dispH(h){return h<6?h+7:h;}
+
 function renderOvCharts(d) {
   // RM bar
   const rm = d.rm.filter(r=>r.rm!=='?');
@@ -434,7 +437,7 @@ function renderOvCharts(d) {
 
   // Period donut
   const hs = d.hour; const hmap = {};
-  hs.forEach(h=>{const p=h.hour>=22||h.hour<=5?'🌙 ดึก':h.hour<=11?'🌅 เช้า':h.hour<=17?'☀️ บ่าย':'🌆 เย็น';hmap[p]=(hmap[p]||0)+h.amount;});
+  hs.forEach(h=>{const dh=dispH(h.hour);const p=dh>=22||dh<=5?'🌙 ดึก':dh<=11?'🌅 เช้า':dh<=17?'☀️ บ่าย':'🌆 เย็น';hmap[p]=(hmap[p]||0)+h.amount;});
   const perLabels=Object.keys(hmap); const perVals=Object.values(hmap);
   if(charts['ch-ov-period']) charts['ch-ov-period'].destroy();
   charts['ch-ov-period'] = new Chart(document.getElementById('ch-ov-period'),{
@@ -448,8 +451,8 @@ function renderOvCharts(d) {
     {extra:{fill:true,backgroundColor:'rgba(220,38,38,.08)'}});
 
   // Hour bar
-  mkChart('ch-ov-hour','bar',hs.map(h=>String(h.hour).padStart(2,'0')+':00'),hs.map(h=>h.amount),
-    hs.map(h=>(h.hour>=22||h.hour<=5)?'rgba(124,58,237,.75)':(h.hour>=15&&h.hour<=21)?'rgba(217,119,6,.65)':'rgba(79,70,229,.35)'));
+  mkChart('ch-ov-hour','bar',hs.map(h=>String(dispH(h.hour)).padStart(2,'0')+':00'),hs.map(h=>h.amount),
+    hs.map(h=>{const dh=dispH(h.hour);return(dh>=22||dh<=5)?'rgba(124,58,237,.75)':(dh>=15&&dh<=21)?'rgba(217,119,6,.65)':'rgba(79,70,229,.35)';}));
 
   // Fraud breakdown donut
   const s = d.stats;
@@ -565,19 +568,19 @@ function renderTime(){
   const m=document.getElementById('tm-month').value;
   const d=(D.data[m]||D.data['ALL']);
   const hs=d.hour; const total=d.stats.total_amount;
-  const nightAmt=hs.filter(h=>h.hour>=22||h.hour<=5).reduce((s,h)=>s+h.amount,0);
-  const peakAmt=hs.filter(h=>h.hour>=15&&h.hour<=21).reduce((s,h)=>s+h.amount,0);
+  const nightAmt=hs.filter(h=>{const dh=dispH(h.hour);return dh>=22||dh<=5;}).reduce((s,h)=>s+h.amount,0);
+  const peakAmt=hs.filter(h=>{const dh=dispH(h.hour);return dh>=15&&dh<=21;}).reduce((s,h)=>s+h.amount,0);
   document.getElementById('tm-kpi').innerHTML=[
     {l:'🌙 ดึก (22:00–05:59)',v:'฿'+fmt(nightAmt),sub:pct(nightAmt/total*100)+' ของทั้งหมด',c:'kp'},
     {l:'🌆 ช่วง 15:00–21:59',v:'฿'+fmt(peakAmt),sub:pct(peakAmt/total*100)+' ของทั้งหมด',c:'ko'},
   ].map(k=>`<div class="kcard ${k.c}"><div class="klabel">${k.l}</div><div class="kval">${k.v}</div><div class="ksub">${k.sub}</div></div>`).join('');
 
-  mkChart('ch-tm-hour','bar',hs.map(h=>String(h.hour).padStart(2,'0')+':00'),hs.map(h=>h.amount),
-    hs.map(h=>(h.hour>=22||h.hour<=5)?'rgba(124,58,237,.8)':(h.hour>=15&&h.hour<=21)?'rgba(217,119,6,.7)':'rgba(79,70,229,.35)'));
+  mkChart('ch-tm-hour','bar',hs.map(h=>String(dispH(h.hour)).padStart(2,'0')+':00'),hs.map(h=>h.amount),
+    hs.map(h=>{const dh=dispH(h.hour);return(dh>=22||dh<=5)?'rgba(124,58,237,.8)':(dh>=15&&dh<=21)?'rgba(217,119,6,.7)':'rgba(79,70,229,.35)';}));
 
   // Period donut
   const hmap={};
-  hs.forEach(h=>{const p=h.hour>=22||h.hour<=5?'🌙 ดึก':h.hour<=11?'🌅 เช้า':h.hour<=17?'☀️ บ่าย':'🌆 เย็น';hmap[p]=(hmap[p]||0)+h.amount;});
+  hs.forEach(h=>{const dh=dispH(h.hour);const p=dh>=22||dh<=5?'🌙 ดึก':dh<=11?'🌅 เช้า':dh<=17?'☀️ บ่าย':'🌆 เย็น';hmap[p]=(hmap[p]||0)+h.amount;});
   if(charts['ch-tm-period']) charts['ch-tm-period'].destroy();
   charts['ch-tm-period'] = new Chart(document.getElementById('ch-tm-period'),{
     type:'doughnut',data:{labels:Object.keys(hmap),datasets:[{data:Object.values(hmap),backgroundColor:['#7c3aed','#16a34a','#d97706','#0ea5e9'],borderWidth:0}]},
@@ -585,11 +588,12 @@ function renderTime(){
   });
 
   document.getElementById('tm-body').innerHTML=hs.map(h=>{
-    const isN=h.hour>=22||h.hour<=5; const isP=h.hour>=15&&h.hour<=21;
+    const dh=dispH(h.hour);
+    const isN=dh>=22||dh<=5; const isP=dh>=15&&dh<=21;
     const p2=(h.amount/total*100).toFixed(1);
     const cl=isN?'cpurple':isP?'corange':'';
-    return `<tr><td class="${cl}"><b>${String(h.hour).padStart(2,'0')}:00</b></td>
-      <td>${isN?'🌙 ดึก':isP?'🌆 เย็น-ค่ำ':h.hour<=11?'🌅 เช้า':'☀️ บ่าย'}</td>
+    return `<tr><td class="${cl}"><b>${String(dh).padStart(2,'0')}:00</b></td>
+      <td>${isN?'🌙 ดึก':isP?'🌆 เย็น-ค่ำ':dh<=11?'🌅 เช้า':'☀️ บ่าย'}</td>
       <td>${h.returns.toLocaleString()}</td><td class="amt">฿${fmt(h.amount)}</td>
       <td><div style="display:flex;align-items:center;gap:5px"><div style="width:${Math.round(parseFloat(p2)*5)}px;height:5px;background:${isN?'#7c3aed':isP?'#d97706':'#4f46e5'};border-radius:3px"></div>${p2}%</div></td>
     </tr>`;
@@ -658,11 +662,4 @@ function renderRm(){
   </tr>`).join('');
 
   mkChart('ch-rm-amt','bar',rows.map(r=>r.rm),rows.map(r=>r.amount),
-    ['rgba(220,38,38,.7)','rgba(217,119,6,.7)','rgba(22,197,94,.6)','rgba(124,58,237,.6)','rgba(148,163,184,.5)'],{horiz:true});
-  mkChart('ch-rm-zero','bar',rows.map(r=>r.rm),rows.map(r=>r.zero_pct),
-    rows.map(r=>r.zero_pct>=50?'rgba(220,38,38,.7)':'rgba(217,119,6,.6)'),{horiz:true});
-}
-renderRm();
-</script>
-</body>
-</html>
+    ['rgba(220,38,38,.7)','rgba(217,119,6,.7)','rgba(22,197,94,.6)','rgba(124,58,237,.6)','rgba(148,163,184
