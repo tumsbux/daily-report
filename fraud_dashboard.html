@@ -486,10 +486,10 @@ function renderStoreRisk(){
       <td><div class="sbar-wrap"><div class="sbar"><div class="sbar-fill" style="width:${sc}%;background:${scolor}"></div></div><span class="snum" style="color:${scolor}">${sc}</span></div></td>
       <td><span class="badge ${lc}">${r.level}</span></td>
       <td class="${r.ret_rate>1.5?'cred':r.ret_rate>0.8?'corange':'cgreen'}">${pct(r.ret_rate)}</td>
-      <td class="${r.cancel_rate>5?'cred':r.cancel_rate>2?'corange':'cgreen'}">${pct(r.cancel_rate)}</td>
+      <td class="${r.zero_pct>5?'cred':r.zero_pct>2?'corange':'cgreen'}">${pct(r.zero_pct)}</td>
       <td class="amt">฿${fmt(r.ret_mtd)}</td>
-      <td>${r.ret_flag_cnt}</td>
-      <td class="${r.gp_dev>1?'cred':r.gp_dev>0.5?'corange':'cgreen'}">${(r.gp_dev||0).toFixed(2)}</td>
+      <td>${r.ret_cnt}</td>
+      <td class="${(r.gp_dev||0)>1?'cred':(r.gp_dev||0)>0.5?'corange':'cgreen'}">${((r.gp_dev||0)||0).toFixed(2)}</td>
     </tr>`;
   }).join('');
 }
@@ -554,7 +554,7 @@ function renderSo(){
       <td>${r.cashier}</td><td style="color:var(--blue)">${fname}</td>
       <td>${r.store}</td><td>${r.store_name}</td><td>${r.dm==='?'?'–':r.dm}</td><td>${r.rm==='?'?'–':r.rm}</td>
       <td>${r.zero>0?'<span class="badge bM">'+r.zero+'</span>':'0'}</td>
-      <td>${r.date?r.date.substring(0,10):'-'}</td>
+      <td>${r.date?new Date(r.date).toISOString().substring(0,10):'-'}</td>
     </tr>`;
   }).join('');
 }
