@@ -127,7 +127,7 @@ tr:last-child td{border-bottom:none}
   <div class="tnav act" onclick="showTab('overview',this)">📊 Overview</div>
   <div class="tnav" onclick="showTab('store-risk',this)">🏪 Store Risk</div>
   <div class="tnav" onclick="showTab('rtu',this)">👤 พนักงาน (rtuname)</div>
-  <div class="tnav" onclick="showTab('rtsono',this)">🧾 rtsono ซ้ำ</div>
+  <div class="tnav" onclick="showTab('rtsono',this)">🧾 Return Bill</div>
   <div class="tnav" onclick="showTab('time',this)">🕐 เวลา</div>
   <div class="tnav" onclick="showTab('store',this)">🗂️ ร้าน</div>
   <div class="tnav" onclick="showTab('dm',this)">👔 DM</div>
@@ -244,7 +244,7 @@ tr:last-child td{border-bottom:none}
     <span class="rcount" id="so-count"></span>
   </div>
   <div class="twrap">
-    <div class="thead-title">🧾 Sale Order ที่มีการคืนซ้ำ (>1 line ต่อบิล)</div>
+    <div class="thead-title">🧾 Return Bill — คลิกแถวเพื่อดูรายการสินค้า</div>
     <table>
       <thead><tr>
         <th>rtsono</th><th>Lines</th><th>Amount (฿)</th>
@@ -563,26 +563,74 @@ allRm.forEach(v=>{const el=document.getElementById('so-rm');if(el)el.innerHTML+=
 renderRtu();
 
 // ══ RTSONO ═══════════════════════════════════════════════════════════════════
+var soDetData={};
+function soRowClick(tr){
+  var next=tr.nextElementSibling;
+  if(next&&next.classList.contains('so-det-row')){
+    next.remove();
+    tr.style.background='';
+    tr.cells[0].firstChild.nodeValue='▶ ';
+    return;
+  }
+  var idx=parseInt(tr.getAttribute('data-idx'),10);
+  var det=soDetData[idx]||[];
+  var rows='';
+  if(det.length===0){
+    rows='<tr><td colspan="4" style="padding:8px 12px;color:#94a3b8">ไม่มีข้อมูลสินค้า</td></tr>';
+  } else {
+    for(var k=0;k<det.length;k++){
+      var d=det[k];
+      rows+='<tr>'
+        +'<td style="padding:4px 12px;border-bottom:1px solid #e2e8f0;font-family:monospace;font-size:11px">'+esc(d.parcode||d.barcode||'?')+'</td>'
+        +'<td style="padding:4px 12px;border-bottom:1px solid #e2e8f0">'+esc(d.idesc||'')+'</td>'
+        +'<td style="padding:4px 12px;text-align:right;border-bottom:1px solid #e2e8f0">'+(d.qty||0)+'</td>'
+        +'<td style="padding:4px 12px;text-align:right;border-bottom:1px solid #e2e8f0">฿'+fmt(d.amt)+'</td>'
+        +'</tr>';
+    }
+  }
+  var detRow=document.createElement('tr');
+  detRow.className='so-det-row';
+  detRow.innerHTML='<td colspan="11" style="padding:0;background:#f8fafc">'
+    +'<table style="width:100%;border-collapse:collapse;font-size:12px">'
+    +'<thead><tr>'
+    +'<th style="padding:5px 12px;text-align:left;background:#f1f5f9;color:#64748b">Parent Code</th>'
+    +'<th style="padding:5px 12px;text-align:left;background:#f1f5f9;color:#64748b">ชื่อสินค้า</th>'
+    +'<th style="padding:5px 12px;text-align:right;background:#f1f5f9;color:#64748b">return_qty</th>'
+    +'<th style="padding:5px 12px;text-align:right;background:#f1f5f9;color:#64748b">allocated_net (฿)</th>'
+    +'</tr></thead><tbody>'+rows+'</tbody></table></td>';
+  tr.insertAdjacentElement('afterend',detRow);
+  tr.style.background='#f1f5f9';
+  tr.cells[0].firstChild.nodeValue='▼ ';
+}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function renderSo(){
-  const m=document.getElementById('so-month').value;
-  const rmF=document.getElementById('so-rm').value;
-  let rows=(D.data[m]||D.data['ALL']).multi_so.filter(r=>!rmF||r.rm===rmF);
-  document.getElementById('so-count').textContent=(D.data[curMonth]||D.data['ALL']).stats.multi_so_count+' bills';
-  document.getElementById('so-body').innerHTML=rows.map(r=>{
-    const lc=r.lines>=10?'bH':r.lines>=4?'bM':'bL';
-    // Look up cashier fullname from rtu data
-    const rtuRow=(D.data['ALL'].rtu||[]).find(x=>x.rtuname===r.cashier);
-    const fname=rtuRow?rtuRow.fullname:'–';
-    return `<tr>
-      <td><b>${r.rtsono}</b></td>
-      <td><span class="badge ${lc}">${r.lines}</span></td>
-      <td class="amt">฿${fmt(r.amount)}</td>
-      <td>${r.cashier}</td><td style="color:var(--blue)">${fname}</td>
-      <td>${r.store}</td><td>${r.store_name}</td><td>${r.dm==='?'?'–':r.dm}</td><td>${r.rm==='?'?'–':r.rm}</td>
-      <td>${r.zero>0?'<span class="badge bM">'+r.zero+'</span>':'0'}</td>
-      <td>${r.date?new Date(r.date).toISOString().substring(0,10):'-'}</td>
-    </tr>`;
-  }).join('');
+  var m=document.getElementById('so-month').value;
+  var rmF=document.getElementById('so-rm').value;
+  var data=(D.data[m]||D.data['ALL']);
+  var rows=(data.so||[]).filter(function(r){return !rmF||r.rm===rmF;});
+  document.getElementById('so-count').textContent=rows.length+' bills';
+  soDetData={};
+  var html='';
+  for(var i=0;i<rows.length;i++){
+    var r=rows[i];
+    soDetData[i]=r.detail||[];
+    var lc=r.lines>=10?'bH':r.lines>=4?'bM':'bL';
+    var rtuRow=(D.data['ALL'].rtu||[]).find(function(x){return x.rtuname===r.cashier;});
+    var fname=rtuRow?rtuRow.fullname:'–';
+    html+='<tr class="so-row" data-idx="'+i+'" onclick="soRowClick(this)" style="cursor:pointer;user-select:none">'
+      +'<td>▶ <b>'+esc(r.rtsono)+'</b></td>'
+      +'<td><span class="badge '+lc+'">'+r.lines+'</span></td>'
+      +'<td class="amt">฿'+fmt(r.amount)+'</td>'
+      +'<td>'+esc(r.cashier)+'</td>'
+      +'<td style="color:var(--blue)">'+esc(fname)+'</td>'
+      +'<td>'+esc(r.store)+'</td><td>'+esc(r.store_name)+'</td>'
+      +'<td>'+(r.dm==='?'?'–':esc(r.dm))+'</td>'
+      +'<td>'+(r.rm==='?'?'–':esc(r.rm))+'</td>'
+      +'<td>'+(r.zero>0?'<span class="badge bM">'+r.zero+'</span>':'0')+'</td>'
+      +'<td>'+(r.date?new Date(r.date).toISOString().substring(0,10):'-')+'</td>'
+      +'</tr>';
+  }
+  document.getElementById('so-body').innerHTML=html;
 }
 renderSo();
 
@@ -726,38 +774,4 @@ function runAIRtu(mode){
     d2=[{label:'พนักงานเสี่ยง',data:risky}];
   } else if(mode===1){
     const top=md.rtu.slice(0,20).map(r=>({name:r.fullname,rtuname:r.rtuname,store:r.store_name,returns:r.returns,amount:r.amount,zero_pct:r.zero_pct,unique_so:r.unique_so,repeat_so:r.repeat_so}));
-    prompt='วิเคราะห์ pattern การคืนสินค้าของพนักงานค้าปลีก — zero_pct คือ % บิลที่ customer code=0000 (ไม่ระบุลูกค้า), repeat_so คือใบคืนที่ซ้ำกัน สรุป pattern ที่ผิดปกติและสิ่งที่ควรตรวจสอบ ตอบภาษาไทย';
-    d2=[{label:'Return Pattern',data:top}];
-  } else {
-    const top30=md.rtu.slice(0,30).map(r=>({name:r.fullname,rtuname:r.rtuname,store:r.store_name,dm:r.dm,rm:r.rm,amount:r.amount,zero_pct:r.zero_pct,score:r.fraud_score}));
-    prompt='วิเคราะห์หา Cashier Fraud Cluster — มีพนักงานในสาขา/DM/RM เดียวกันที่มีรูปแบบคล้ายกันไหม? น่าจะเป็นการโกงเดี่ยวหรือเป็นกลุ่ม? ตอบภาษาไทย';
-    d2=[{label:'Top 30 Cashiers',data:top30}];
-  }
-  _aiSend(prompt,d2,ao,btns);
-}
-
-function _aiSend(prompt,d2,ao,btns){
-  if(!window.cowork||!window.cowork.askClaude){
-    const dataStr=d2?'\n\nข้อมูล (JSON):\n'+JSON.stringify(d2,null,2):'';
-    const fullPrompt=prompt+dataStr;
-    navigator.clipboard.writeText(fullPrompt).then(()=>{
-      ao.innerHTML='<div style="background:#e8f5e9;border:1px solid #4caf50;border-radius:8px;padding:12px;"><b>✅ คัดลอก Prompt ไป Clipboard แล้ว!</b><br><br><span style="color:#1a5276">1. กำลังเปิด Claude.ai ในแท็บใหม่<br>2. วาง (Ctrl+V) ใน chat แล้วกด Enter</span></div>';
-    }).catch(()=>{
-      ao.innerHTML='<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:12px;"><b>⚠ คัดลอกอัตโนมัติไม่ได้</b><br><textarea style="width:100%;height:120px;margin-top:8px;font-size:12px;">'+fullPrompt+'</textarea></div>';
-    });
-    ao.style.display='block';
-    window.open('https://claude.ai/new','_blank');
-    btns.forEach(b=>b.disabled=false);
-    return;
-  }
-  (async()=>{
-    try{
-      const res=await window.cowork.askClaude(prompt,d2);
-      ao.textContent=res; ao.style.display='block';
-    }catch(e){ao.textContent='Error: '+e.message;ao.style.display='block';}
-    btns.forEach(b=>b.disabled=false);
-  })();
-}
-</script>
-</body>
-</html>
+    prompt='วิเคราะห์ pattern การคืนสินค้าของพนักงานค้าปลีก — zero_pct คือ % บิลที่
