@@ -444,7 +444,7 @@ function renderOvKpi(d) {
   document.getElementById('ov-kpi').innerHTML = [
     {l:'Total Return Amount',v:'฿'+fmt(s.total_amount),sub:fmt(s.total_rows)+' รายการ',c:'kr'},
     {l:'🚩 cust=0000',v:'฿'+fmt(s.zero_amount),sub:fmt(s.zero_rows)+' rows · '+pct(s.zero_rows/s.total_rows*100),c:'ko'},
-    {l:'🧾 Return Bill',v:s.multi_so_count+' bills',sub:'฿'+fmt(s.multi_so_amount),c:'kr'},
+    {l:'🧾 Return Bill',v:fmt(s.total_rows)+' bills',sub:'฿'+fmt(s.total_amount),c:'kr'},
     {l:'🌙 After-hours (22–05)',v:'฿'+fmt(s.night_amount),sub:'ชั่วโมง 22:00–05:59',c:'kp'},
     {l:'👤 Cashiers',v:fmt(s.unique_rtu),sub:s.unique_stores+' ร้าน',c:'kb'},
   ].map(k=>`<div class="kcard ${k.c}"><div class="klabel">${k.l}</div><div class="kval">${k.v}</div><div class="ksub">${k.sub}</div></div>`).join('');
