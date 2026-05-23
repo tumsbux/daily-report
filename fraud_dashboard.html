@@ -382,7 +382,8 @@ const mCnt = sr.filter(s=>s.level==='MEDIUM').length;
 const lCnt = sr.filter(s=>s.level==='LOW').length;
 document.getElementById('nav-chips').innerHTML =
   `<span class="chip ch">⚠ ${hCnt} HIGH</span><span class="chip cm">⚡ ${mCnt} MEDIUM</span><span class="chip cl">✓ ${lCnt} LOW</span>`;
-document.getElementById('nav-date').textContent = '📅 '+D.generated.split(' ')[0]+' · วัน 1–21 พ.ค.';
+const _lastDay=(D.data['2026-05']||D.data['ALL']).day.reduce((mx,d)=>Math.max(mx,d.day),0)||22;
+document.getElementById('nav-date').textContent = '📅 '+D.generated.split(' ')[0]+' · วัน 1–'+_lastDay+' พ.ค.';
 document.getElementById('footer').textContent = 'Fraud Detection · Updated '+D.generated;
 
 // ══ TAB SWITCH ════════════════════════════════════════════════════════════════
@@ -662,4 +663,11 @@ function renderRm(){
   </tr>`).join('');
 
   mkChart('ch-rm-amt','bar',rows.map(r=>r.rm),rows.map(r=>r.amount),
-    ['rgba(220,38,38,.7)','rgba(217,119,6,.7)','rgba(22,197,94,.6)','rgba(124,58,237,.6)','rgba(148,163,184
+    ['rgba(220,38,38,.7)','rgba(217,119,6,.7)','rgba(22,197,94,.6)','rgba(124,58,237,.6)','rgba(148,163,184,.5)'],{horiz:true});
+  mkChart('ch-rm-zero','bar',rows.map(r=>r.rm),rows.map(r=>r.zero_pct),
+    rows.map(r=>r.zero_pct>=50?'rgba(220,38,38,.7)':'rgba(217,119,6,.6)'),{horiz:true});
+}
+renderRm();
+</script>
+</body>
+</html>
