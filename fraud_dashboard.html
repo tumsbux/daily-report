@@ -463,6 +463,7 @@ function renderOvCharts(d) {
 }
 
 renderOvKpi(d0); renderOvCharts(d0);
+renderStoreRisk(); renderRtu(); renderSo(); renderTime(); renderStore(); renderDm(); renderRm();
 
 // ══ STORE RISK ═══════════════════════════════════════════════════════════════
 let srSort={col:'score',dir:-1};
@@ -552,7 +553,7 @@ function renderSo(){
       <td class="amt">฿${fmt(r.amount)}</td>
       <td>${r.cashier}</td><td style="color:var(--blue)">${fname}</td>
       <td>${r.store}</td><td>${r.store_name}</td><td>${r.dm==='?'?'–':r.dm}</td><td>${r.rm==='?'?'–':r.rm}</td>
-      <td>${r.zero_cust>0?'<span class="badge bM">'+r.zero_cust+'</span>':'0'}</td>
+      <td>${r.zero>0?'<span class="badge bM">'+r.zero+'</span>':'0'}</td>
       <td>${r.date?r.date.substring(0,10):'-'}</td>
     </tr>`;
   }).join('');
