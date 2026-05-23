@@ -132,10 +132,10 @@ canvas{max-height:160px!important}
       <h1>ภาพรวมธุรกิจ — พฤษภาคม 2569</h1>
       <p>ข้อมูลอัพเดทอัตโนมัติทุกเช้า · 203 สาขา · 4 RM · 15 DM</p>
       <div class="hero-kpis">
-        <div class="hero-kpi"><div class="hk-val">94.0M</div><div class="hk-lab">ยอดขาย MTD (฿)</div></div>
-        <div class="hero-kpi"><div class="hk-val">102%</div><div class="hk-lab">vs เป้า MTD</div></div>
-        <div class="hero-kpi"><div class="hk-val">132.5M</div><div class="hk-lab">Projected (฿)</div></div>
-        <div class="hero-kpi"><div class="hk-val">+8.6%</div><div class="hk-lab">YoY Projected</div></div>
+        <div class="hero-kpi"><div class="hk-val">98.0M</div><div class="hk-lab">ยอดขาย MTD (฿)</div></div>
+        <div class="hero-kpi"><div class="hk-val">107%</div><div class="hk-lab">vs เป้า MTD</div></div>
+        <div class="hero-kpi"><div class="hk-val">138.1M</div><div class="hk-lab">Projected (฿)</div></div>
+        <div class="hero-kpi"><div class="hk-val">+13.2%</div><div class="hk-lab">YoY Projected</div></div>
         <div class="hero-kpi"><div class="hk-val">33.25%</div><div class="hk-lab">GP%</div></div>
       </div>
     </div>
@@ -152,7 +152,7 @@ canvas{max-height:160px!important}
     <div class="kpi-row2">
       <div class="kc" style="border-color:#8b5cf6">
         <div class="kc-lbl">Daily Run Rate</div>
-        <div class="kc-val" id="k-run">฿4.27M</div>
+        <div class="kc-val" id="k-run">฿4.46M</div>
         <div class="kc-sub">เฉลี่ย/วัน</div>
       </div>
       <div class="kc" style="border-color:#14b8a6">
@@ -162,7 +162,7 @@ canvas{max-height:160px!important}
       </div>
       <div class="kc" style="border-color:#f97316">
         <div class="kc-lbl">บิล/วัน/ร้าน</div>
-        <div class="kc-val" id="k-bills">143</div>
+        <div class="kc-val" id="k-bills">149</div>
         <div class="kc-sub">vs ปี25: 136 <span class="kc-badge pos" id="k-bills-badge">▲11.4%</span></div>
       </div>
       <div class="kc" style="border-color:#ef4444">
@@ -186,17 +186,17 @@ canvas{max-height:160px!important}
         <div class="skpi-grid">
           <div class="skpi">
             <div class="skpi-label">ยอดขาย MTD</div>
-            <div class="skpi-val">94.0M</div>
+            <div class="skpi-val">98.0M</div>
             <div class="skpi-sub pos">▲ 109% vs เป้า</div>
           </div>
           <div class="skpi">
             <div class="skpi-label">Projected เต็มเดือน</div>
-            <div class="skpi-val">132.5M</div>
+            <div class="skpi-val">138.1M</div>
             <div class="skpi-sub pos">▲ +15.8% YoY</div>
           </div>
           <div class="skpi">
             <div class="skpi-label">บิล/วัน</div>
-            <div class="skpi-val">29044</div>
+            <div class="skpi-val">30318</div>
             <div class="skpi-sub pos">▲ +8.4% YoY</div>
           </div>
         </div>
@@ -324,10 +324,10 @@ canvas{max-height:160px!important}
 <script>
 // RM data from sales dashboard
 const RM_DATA = [
-  {name:'RM1 จริยา', stores:50, sales:25607447, proj:36083225, yoy:8.4, pct:100.8},
-  {name:'RM2 จินตนา', stores:58, sales:30433404, proj:42883447, yoy:9.9, pct:103.1},
-  {name:'RM3 ฐานพัฒน์', stores:36, sales:11188128, proj:15765081, yoy:14.8, pct:105.5},
-  {name:'RM4 สุพรรษา', stores:59, sales:26790224, proj:37749847, yoy:5.0, pct:101.3}
+  {name:'RM1 จริยา', stores:50, sales:26685119, proj:37601760, yoy:12.9, pct:105.1},
+  {name:'RM2 จินตนา', stores:58, sales:31836119, proj:44859976, yoy:15.0, pct:107.8},
+  {name:'RM3 ฐานพัฒน์', stores:36, sales:11633556, proj:16392738, yoy:19.4, pct:109.8},
+  {name:'RM4 สุพรรษา', stores:59, sales:27880654, proj:39286362, yoy:9.3, pct:105.4}
 ];
 
 // Populate RM table
@@ -352,7 +352,7 @@ RM_DATA.forEach(r=>{
 
 // Trend chart — 2026 vs 2025
 const months  = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.'];
-const m26vals = [133.8,119.0,122.1,129.6,94.0];   // May = MTD
+const m26vals = [133.8,119.0,122.1,129.6,98.0];   // May = MTD
 const m25vals = [132.3,110.1,122.3,127.2,129.6];   // May 2025 full month
 
 new Chart(document.getElementById('cTrend'),{
