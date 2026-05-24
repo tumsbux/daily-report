@@ -239,22 +239,23 @@ def build_month(sub, barmap=None, prodmap=None):
     st['zp'] = (st['zero'] / st['returns'] * 100).round(1)
     st = st.sort_values('amount', ascending=False)
 
-    # DM
+    # DM  (returns = distinct rtsono bills; zp based on row count)
     dm = sub.groupby(['dm','rm']).agg(
-        returns=('rtno','count'), amount=('allocated_net_amount','sum'),
-        stores=('whs','nunique'), cashiers=('rtuname','nunique'), zero=('is_zero','sum'),
-    ).reset_index()
-    dm['zp'] = (dm['zero'] / dm['returns'] * 100).round(1)
-    dm = dm.sort_values('amount', ascending=False)
-
-    # RM
-    rm = sub.groupby('rm').agg(
-        returns=('rtno','count'), amount=('allocated_net_amount','sum'),
+        returns=('rtsono','nunique'), amount=('allocated_net_amount','sum'),
         stores=('whs','nunique'), cashiers=('rtuname','nunique'),
-        zero=('is_zero','sum'), dms=('dm','nunique'),
+        zero=('is_zero','sum'), row_cnt=('rtno','count'),
     ).reset_index()
-    rm['zp'] = (rm['zero'] / rm['returns'] * 100).round(1)
-    rm = rm.sort_values('amount', ascending=False)
+    dm['zp'] = (dm['zero'] / dm['row_cnt'] * 100).round(1)
+    dm = dm.drop(columns=['row_cnt']).sort_values('amount', ascending=False)
+
+    # RM  (returns = distinct rtsono bills; zp based on row count)
+    rm = sub.groupby('rm').agg(
+        returns=('rtsono','nunique'), amount=('allocated_net_amount','sum'),
+        stores=('whs','nunique'), cashiers=('rtuname','nunique'),
+        zero=('is_zero','sum'), dms=('dm','nunique'), row_cnt=('rtno','count'),
+    ).reset_index()
+    rm['zp'] = (rm['zero'] / rm['row_cnt'] * 100).round(1)
+    rm = rm.drop(columns=['row_cnt']).sort_values('amount', ascending=False)
 
     # Hour / Day
     hr = sub.groupby('hour').agg(returns=('rtno','count'), amount=('allocated_net_amount','sum')).reset_index()
@@ -325,7 +326,7 @@ def main():
     print('[4/5] Building analysis data ...')
     out = {"gen": datetime.now().strftime("%Y-%m-%d %H:%M"),
            "months": months, "data": {},
-           "sr_count": {"H": h, "M": m, "L": l}}
+           "sr": sr, "sr_count": {"H": h, "M": m, "L": l}}
     out["data"]["ALL"] = build_month(df, barmap, prodmap)
     for mo in months:
         out["data"][mo] = build_month(df[df["month"] == mo], barmap, prodmap)
@@ -352,8 +353,9 @@ def main():
     print()
     print("=" * 60)
     print("  OK  Fraud Analysis updated!")
+
     print(f'  Total return: {out["data"]["ALL"]["stats"]["total"]:,.0f} baht')
-    print(f'  RT count (distinct): {out["data"]["ALL"]["stats"]["n"]:,}')
+    print(f'  RT count (distinct rtsono): {out["data"]["ALL"]["stats"]["n"]:,}')
     print(f'  Stores (HIGH risk): {h}')
     print("=" * 60)
 
