@@ -1225,4 +1225,10 @@ function reasonRowClick(tr){
   inner+='</table>';
   var det=document.createElement('tr');
   det.className='reason-det-row';
-  det.innerHTML='<td colspan="7" style="padding:
+  det.innerHTML='<td colspan="7" style="padding:8px 16px;background:#f8fafc">'+inner+'</td>';
+  tr.parentNode.insertBefore(det, tr.nextSibling);
+}
+
+</script>
+</body>
+</html>
