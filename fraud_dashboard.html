@@ -241,7 +241,7 @@ tr:last-child td{border-bottom:none}
   <div class="fbar">
     <label>📅 เดือน:</label><select id="so-month" onchange="renderSo()"><option value="ALL">ทั้งหมด</option></select>
     <label>RM:</label><select id="so-rm" onchange="renderSo()"><option value="">ทั้งหมด</option></select>
-    <button id="so-view-btn" onclick="soToggleView()" style="margin-left:12px;padding:4px 12px;border:1px solid var(--border);border-radius:6px;background:var(--card);cursor:pointer;font-size:13px">👤 ดูตามพนักงาน</button><button id="so-prod-btn" onclick="soToggleProd()" style="margin-left:6px;padding:4px 12px;border:1px solid var(--border);border-radius:6px;background:var(--card);cursor:pointer;font-size:13px">🏷 ดูตามสินค้า</button>
+    <button id="so-view-btn" onclick="soToggleView()" style="margin-left:12px;padding:4px 12px;border:1px solid var(--border);border-radius:6px;background:var(--card);cursor:pointer;font-size:13px">👤 ดูตามพนักงาน</button><button id="so-prod-btn" onclick="soToggleProd()" style="margin-left:6px;padding:4px 12px;border:1px solid var(--border);border-radius:6px;background:var(--card);cursor:pointer;font-size:13px">🏷 ดูตามสินค้า</button><button id="so-store-btn" onclick="soToggleStore()" style="margin-left:6px;padding:4px 12px;border:1px solid var(--border);border-radius:6px;background:var(--card);cursor:pointer;font-size:13px">🏪 ดูตามร้าน</button>
     <span class="rcount" id="so-count"></span>
   </div>
   <div class="twrap">
@@ -616,6 +616,13 @@ function soToggleProd(){
   document.getElementById('so-view-btn').textContent = '👤 ดูตามพนักงาน';
   renderSo();
 }
+function soToggleStore(){
+  soViewMode = (soViewMode==='store') ? 'bill' : 'store';
+  document.getElementById('so-store-btn').style.fontWeight = soViewMode==='store' ? 'bold' : 'normal';
+  document.getElementById('so-prod-btn').style.fontWeight = 'normal';
+  document.getElementById('so-view-btn').textContent = '👤 ดูตามพนักงาน';
+  renderSo();
+}
 function renderSo(){
   var m=document.getElementById('so-month').value;
   var rmF=document.getElementById('so-rm').value;
@@ -624,6 +631,7 @@ function renderSo(){
   document.getElementById('so-count').textContent=(rmF?rows.length:(data.stats.total_rows||rows.length))+' bills';
   if(soViewMode==='user'){ renderSoByUser(rows, data); return; }
   if(soViewMode==='product'){ renderSoProduct(data); return; }
+  if(soViewMode==='store'){ renderSoByStore(data, rmF); return; }
   // ── Bill view ──────────────────────────────────────────────────────────────
   document.getElementById('so-thead-row').innerHTML=
     '<th>rtsono</th><th>Lines</th><th>Amount (฿)</th>'
@@ -957,6 +965,81 @@ function _aiSend(prompt,d2,ao,btns){
 }
 
 // ══ SO PRODUCT VIEW ══════════════════════════════════════════════════════════
+var soStoreSort={col:'amount',dir:-1};
+function sortSoStore(col){
+  soStoreSort=soStoreSort.col===col?{col:col,dir:-soStoreSort.dir}:{col:col,dir:-1};
+  var m=document.getElementById('so-month').value;
+  var rmF=document.getElementById('so-rm').value;
+  renderSoByStore(D.data[m]||D.data['ALL'], rmF);
+}
+function renderSoByStore(data, rmF){
+  var rows=(data.store||[]).filter(function(r){ return !rmF||r.rm===rmF; });
+  var col=soStoreSort.col, dir=soStoreSort.dir;
+  rows.sort(function(a,b){ return dir*(typeof a[col]==='number'?a[col]-b[col]:(a[col]||'').localeCompare(b[col]||'','th')); });
+  document.getElementById('so-count').textContent=rows.length+' ร้าน';
+  var arrow=function(c){ return col===c?(dir===-1?'↓':'↑'):''; };
+  var ths='<th onclick="sortSoStore(&quot;whs&quot;)" style="cursor:pointer">WHS '+arrow('whs')+'</th>'
+    +'<th onclick="sortSoStore(&quot;store_name&quot;)" style="cursor:pointer">ร้าน '+arrow('store_name')+'</th>'
+    +'<th>DM</th><th>RM</th>'
+    +'<th onclick="sortSoStore(&quot;returns&quot;)" style="cursor:pointer;text-align:right">ครั้ง '+arrow('returns')+'</th>'
+    +'<th onclick="sortSoStore(&quot;cashiers&quot;)" style="cursor:pointer;text-align:right">พนักงาน '+arrow('cashiers')+'</th>'
+    +'<th onclick="sortSoStore(&quot;amount&quot;)" style="cursor:pointer;text-align:right">Amount (฿) '+arrow('amount')+'</th>'
+    +'<th onclick="sortSoStore(&quot;zero_pct&quot;)" style="cursor:pointer;text-align:right">CUST=0000% '+arrow('zero_pct')+'</th>'
+    +'<th onclick="sortSoStore(&quot;zero_cust&quot;)" style="cursor:pointer;text-align:right">ZERO_CUST '+arrow('zero_cust')+'</th>';
+  document.getElementById('so-thead-row').innerHTML=ths;
+  var html='';
+  rows.forEach(function(r,i){
+    html+='<tr class="so-row" data-store-whs="'+soEsc(r.whs)+'" onclick="soStoreRowClick(this)" style="cursor:pointer;user-select:none">'
+      +'<td>'+soEsc(r.whs)+'</td>'
+      +'<td><b>'+soEsc(r.store_name)+'</b></td>'
+      +'<td>'+(r.dm==='?'?'–':soEsc(r.dm||''))+'</td>'
+      +'<td>'+(r.rm==='?'?'–':soEsc(r.rm||''))+'</td>'
+      +'<td style="text-align:right">'+r.returns+'</td>'
+      +'<td style="text-align:right">'+r.cashiers+'</td>'
+      +'<td class="amt" style="text-align:right">฿'+fmt(r.amount)+'</td>'
+      +'<td style="text-align:right" class="'+(r.zero_pct>=50?'cred':r.zero_pct>=30?'corange':'cgreen')+'">'+pct(r.zero_pct)+'</td>'
+      +'<td style="text-align:right">'+r.zero_cust+'</td>'
+      +'</tr>';
+  });
+  document.getElementById('so-body').innerHTML=html;
+}
+function soStoreRowClick(tr){
+  var next=tr.nextElementSibling;
+  if(next&&next.classList.contains('sostore-det-row')){next.remove();return;}
+  var whs=tr.getAttribute('data-store-whs');
+  var m=document.getElementById('so-month').value;
+  var rtuRows=(D.data[m]||D.data['ALL']).rtu.filter(function(r){return r.whs===whs;});
+  rtuRows.sort(function(a,b){return b.fraud_score-a.fraud_score;});
+  var inner='<table style="width:100%;font-size:12px;border-collapse:collapse">'
+    +'<tr style="background:#f8fafc;color:#64748b">'
+    +'<th style="padding:4px 8px;text-align:left">rtuname</th>'
+    +'<th style="padding:4px 8px;text-align:left">ชื่อ-สกุล</th>'
+    +'<th style="padding:4px 8px;text-align:right">ครั้ง</th>'
+    +'<th style="padding:4px 8px;text-align:right">Amount (฿)</th>'
+    +'<th style="padding:4px 8px;text-align:right">CUST=0000%</th>'
+    +'<th style="padding:4px 8px;text-align:right">Score</th>'
+    +'</tr>';
+  if(rtuRows.length===0){
+    inner+='<tr><td colspan="6" style="padding:8px;color:#94a3b8;text-align:center">ไม่มีข้อมูลพนักงาน</td></tr>';
+  } else {
+    rtuRows.forEach(function(r){
+      var sc=r.fraud_score>=60?'cred':r.fraud_score>=40?'corange':'cgreen';
+      inner+='<tr style="border-top:1px solid #f1f5f9">'
+        +'<td style="padding:4px 8px;color:var(--blue)">'+soEsc(r.rtuname)+'</td>'
+        +'<td style="padding:4px 8px">'+soEsc(r.fullname||'–')+'</td>'
+        +'<td style="padding:4px 8px;text-align:right">'+r.returns+'</td>'
+        +'<td style="padding:4px 8px;text-align:right">฿'+fmt(r.amount)+'</td>'
+        +'<td style="padding:4px 8px;text-align:right" class="'+sc+'">'+pct(r.zero_pct)+'</td>'
+        +'<td style="padding:4px 8px;text-align:right" class="'+sc+'">'+r.fraud_score+'</td>'
+        +'</tr>';
+    });
+  }
+  inner+='</table>';
+  var det=document.createElement('tr');
+  det.className='sostore-det-row';
+  det.innerHTML='<td colspan="9" style="padding:8px 16px;background:#f8fafc">'+inner+'</td>';
+  tr.parentNode.insertBefore(det,tr.nextSibling);
+}
 var soProdSort={col:'amount',dir:-1};
 var soProdData={};
 function sortSoProd(col){
