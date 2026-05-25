@@ -1159,8 +1159,8 @@ function renderSoByReason(data){
   soReasonData={};
   var html='';
   // Summary row totals
-  var sumBills=0, sumAmt=0;
-  for(var k=0;k<rows.length;k++){ sumBills+=rows[k].bills||0; sumAmt+=rows[k].amount||0; }
+  var sumBills=0, sumAmt=0, sumReturns=0;
+  for(var k=0;k<rows.length;k++){ sumBills+=rows[k].bills||0; sumAmt+=rows[k].amount||0; sumReturns+=rows[k].returns||0; }
   for(var i=0;i<rows.length;i++){
     var r=rows[i];
     soReasonData[i]=r.bills_list||[];
@@ -1170,22 +1170,22 @@ function renderSoByReason(data){
       +'<td style="color:#94a3b8;font-size:12px">'+(i+1)+'</td>'
       +'<td>▶ <strong>'+soEsc(r.rtrdesc||'(ไม่ระบุ)')+'</strong></td>'
       +'<td style="text-align:right">'+fmt(r.returns)+'</td>'
-      +'<td style="text-align:right"><span class="badge bL">'+r.bills+'</span></td>'
+      +'<td style="text-align:right"><span class="badge bL">'+fmt(r.bills)+'</span></td>'
       +'<td style="text-align:right;min-width:110px">'
         +'<span style="font-weight:600;color:var(--blue)">'+pct+'%</span> '
         +'<span style="display:inline-block;width:'+barW+'px;height:6px;background:var(--blue);opacity:0.25;border-radius:3px;vertical-align:middle"></span>'
       +'</td>'
       +'<td class="amt" style="text-align:right">฿'+fmt(r.amount)+'</td>'
-      +'<td style="text-align:right">'+r.stores+'</td>'
-      +'<td style="text-align:right">'+r.cashiers+'</td>'
+      +'<td style="text-align:right">'+fmt(r.stores)+'</td>'
+      +'<td style="text-align:right">'+fmt(r.cashiers)+'</td>'
       +'</tr>';
   }
   // Grand total footer row
   var totalPct=grandTotal>0?(sumBills/grandTotal*100).toFixed(1):'0.0';
   html+='<tr style="background:#f8fafc;font-weight:600;border-top:2px solid var(--border)">'
     +'<td colspan="2" style="padding:6px 8px;color:#374151">รวมทั้งหมด</td>'
-    +'<td></td>'
-    +'<td style="text-align:right;padding:4px 8px"><span class="badge bL">'+sumBills+'</span></td>'
+    +'<td style="text-align:right;padding:4px 8px">'+fmt(sumReturns)+'</td>'
+    +'<td style="text-align:right;padding:4px 8px"><span class="badge bL">'+fmt(sumBills)+'</span></td>'
     +'<td style="text-align:right;padding:4px 8px;color:var(--blue)">'+totalPct+'%</td>'
     +'<td class="amt" style="text-align:right;padding:4px 8px">฿'+fmt(sumAmt)+'</td>'
     +'<td colspan="2"></td>'
@@ -1225,10 +1225,4 @@ function reasonRowClick(tr){
   inner+='</table>';
   var det=document.createElement('tr');
   det.className='reason-det-row';
-  det.innerHTML='<td colspan="7" style="padding:8px 16px;background:#f8fafc">'+inner+'</td>';
-  tr.parentNode.insertBefore(det, tr.nextSibling);
-}
-
-</script>
-</body>
-</html>
+  det.innerHTML='<td colspan="7" style="padding:
