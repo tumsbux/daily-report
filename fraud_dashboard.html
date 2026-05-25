@@ -241,12 +241,13 @@ tr:last-child td{border-bottom:none}
   <div class="fbar">
     <label>📅 เดือน:</label><select id="so-month" onchange="renderSo()"><option value="ALL">ทั้งหมด</option></select>
     <label>RM:</label><select id="so-rm" onchange="renderSo()"><option value="">ทั้งหมด</option></select>
+    <button id="so-view-btn" onclick="soToggleView()" style="margin-left:12px;padding:4px 12px;border:1px solid var(--border);border-radius:6px;background:var(--card);cursor:pointer;font-size:13px">👤 ดูตามพนักงาน</button>
     <span class="rcount" id="so-count"></span>
   </div>
   <div class="twrap">
     <div class="thead-title">🧾 Return Bill — คลิกแถวเพื่อดูรายการสินค้า</div>
     <table>
-      <thead><tr>
+      <thead><tr id="so-thead-row">
         <th>rtsono</th><th>Lines</th><th>Amount (฿)</th>
         <th>rtuname</th><th>ชื่อ-สกุล</th>
         <th>WHS</th><th>ร้าน</th><th>DM</th><th>RM</th>
@@ -600,12 +601,25 @@ function soRowClick(tr){
   tr.style.background='#f1f5f9';
   tr.cells[0].firstChild.nodeValue='▼ ';
 }
+var soViewMode='bill'; // 'bill' or 'user'
+function soToggleView(){
+  soViewMode = soViewMode==='bill' ? 'user' : 'bill';
+  document.getElementById('so-view-btn').textContent = soViewMode==='bill' ? '👤 ดูตามพนักงาน' : '🧾 ดูตามบิล';
+  renderSo();
+}
 function renderSo(){
   var m=document.getElementById('so-month').value;
   var rmF=document.getElementById('so-rm').value;
   var data=D.data[m]||D.data['ALL'];
   var rows=(data.multi_so||[]).filter(function(r){return !rmF||r.rm===rmF;});
   document.getElementById('so-count').textContent=(rmF?rows.length:(data.stats.total_rows||rows.length))+' bills';
+  if(soViewMode==='user'){ renderSoByUser(rows, data); return; }
+  // ── Bill view ──────────────────────────────────────────────────────────────
+  document.getElementById('so-thead-row').innerHTML=
+    '<th>rtsono</th><th>Lines</th><th>Amount (฿)</th>'
+    +'<th>rtuname</th><th>ชื่อ-สกุล</th>'
+    +'<th>WHS</th><th>ร้าน</th><th>DM</th><th>RM</th>'
+    +'<th>cust=0000</th><th>วันที่</th><th>เวลา</th>';
   soDetData={};
   var html='';
   for(var i=0;i<rows.length;i++){
@@ -629,6 +643,90 @@ function renderSo(){
       +'</tr>';
   }
   document.getElementById('so-body').innerHTML=html;
+}
+function renderSoByUser(rows, data){
+  // ── User-grouped view ──────────────────────────────────────────────────────
+  document.getElementById('so-thead-row').innerHTML=
+    '<th>ชื่อ-สกุล</th><th>rtuname</th><th>WHS</th><th>ร้าน</th>'
+    +'<th>DM</th><th>RM</th>'
+    +'<th style="text-align:right">จำนวนบิล</th>'
+    +'<th style="text-align:right">ยอดรวม (฿)</th>'
+    +'<th style="text-align:right">cust=0000</th>';
+  // Group by cashier
+  var groups={};
+  for(var i=0;i<rows.length;i++){
+    var r=rows[i]; var key=r.cashier||'–';
+    if(!groups[key]) groups[key]={cashier:r.cashier,store:r.store,store_name:r.store_name,dm:r.dm,rm:r.rm,bills:[],amount:0,zero:0};
+    groups[key].bills.push(r);
+    groups[key].amount+=r.amount||0;
+    groups[key].zero+=r.zero||0;
+  }
+  // Sort by amount desc
+  var gArr=Object.values(groups).sort(function(a,b){return b.amount-a.amount;});
+  soDetData={};
+  var html='';
+  for(var g=0;g<gArr.length;g++){
+    var gr=gArr[g];
+    var rtuRow=(data.rtu||[]).find(function(x){return x.rtuname===gr.cashier;});
+    var fname=rtuRow?rtuRow.fullname:(gr.cashier||'–');
+    html+='<tr class="so-row" data-ug="'+g+'" onclick="soUserRowClick(this,'+g+')" style="cursor:pointer;user-select:none;background:var(--hover)">'
+      +'<td><b style="color:var(--blue)">▶ '+soEsc(fname)+'</b></td>'
+      +'<td>'+soEsc(gr.cashier)+'</td>'
+      +'<td>'+soEsc(gr.store)+'</td>'
+      +'<td>'+soEsc(gr.store_name)+'</td>'
+      +'<td>'+(gr.dm==='?'?'–':soEsc(gr.dm))+'</td>'
+      +'<td>'+(gr.rm==='?'?'–':soEsc(gr.rm))+'</td>'
+      +'<td style="text-align:right"><span class="badge bL">'+gr.bills.length+'</span></td>'
+      +'<td class="amt" style="text-align:right">฿'+fmt(gr.amount)+'</td>'
+      +'<td style="text-align:right">'+(gr.zero>0?'<span class="badge bM">'+gr.zero+'</span>':'0')+'</td>'
+      +'</tr>'
+      +'<tr id="so-ug-det-'+g+'" style="display:none"><td colspan="9" style="padding:0 8px 12px 24px">'
+      +'<table style="width:100%;font-size:12px;border-collapse:collapse" id="so-ug-tbl-'+g+'"></table>'
+      +'</td></tr>';
+    soDetData[g]=gr.bills;
+  }
+  document.getElementById('so-body').innerHTML=html;
+}
+var soUserOpen={};
+function soUserRowClick(tr,g){
+  var det=document.getElementById('so-ug-det-'+g);
+  if(!det) return;
+  var isOpen=soUserOpen[g];
+  soUserOpen[g]=!isOpen;
+  tr.cells[0].firstChild.nodeValue=(isOpen?'▶ ':'▼ ')+tr.cells[0].firstChild.nodeValue.substring(2);
+  if(isOpen){ det.style.display='none'; return; }
+  det.style.display='';
+  var bills=soDetData[g]||[];
+  var h='<thead><tr style="background:var(--header-bg);color:var(--header-text)">'
+    +'<th style="padding:4px 8px">rtsono</th><th>Lines</th><th>Amount</th>'
+    +'<th>วันที่</th><th>เวลา</th><th>cust=0000</th></tr></thead><tbody>';
+  for(var i=0;i<bills.length;i++){
+    var b=bills[i];
+    var lc=b.lines>=10?'bH':b.lines>=4?'bM':'bL';
+    h+='<tr style="border-bottom:1px solid var(--border)">'
+      +'<td style="padding:3px 8px"><b>'+soEsc(b.rtsono)+'</b></td>'
+      +'<td><span class="badge '+lc+'">'+b.lines+'</span></td>'
+      +'<td class="amt">฿'+fmt(b.amount)+'</td>'
+      +'<td>'+(b.date?new Date(b.date).toISOString().substring(0,10):'-')+'</td>'
+      +'<td>'+soEsc(b.time||'-')+'</td>'
+      +'<td>'+(b.zero>0?'<span class="badge bM">'+b.zero+'</span>':'0')+'</td>'
+      +'</tr>';
+    // Product detail rows
+    var det=b.detail||[];
+    for(var d=0;d<det.length;d++){
+      var p=det[d];
+      var iname=p.idesc||(p.parcode&&p.parcode!==p.barcode?'['+p.parcode+']':'['+p.barcode+']');
+      var icolor=p.idesc?'inherit':'#94a3b8';
+      h+='<tr style="background:var(--hover)">'
+        +'<td style="padding:2px 8px 2px 24px;font-size:11px;color:#64748b" colspan="2">'+soEsc(p.barcode)+'</td>'
+        +'<td colspan="2" style="font-size:11px;color:'+icolor+'">'+soEsc(iname)+'</td>'
+        +'<td style="font-size:11px">qty: '+p.qty+'</td>'
+        +'<td style="font-size:11px;text-align:right">฿'+fmt(p.amt)+'</td>'
+        +'</tr>';
+    }
+  }
+  h+='</tbody>';
+  document.getElementById('so-ug-tbl-'+g).innerHTML=h;
 }
 renderSo();
 
