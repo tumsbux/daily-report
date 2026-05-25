@@ -206,8 +206,8 @@ async function loadData(){
   }
 }
 
-function fmt(n){ return n==null?'—':(n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(0)+'K':Math.round(n).toLocaleString()); }
-function fmtFull(n){ return n==null?'—':Math.round(n).toLocaleString(); }
+function fmt(n){ return n==null?'—':Math.round(n||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,','); }
+function fmtFull(n){ return n==null?'—':Math.round(n||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,','); }
 function yoyBadge(v){ if(v==null) return '<span class="badge neu">N/A</span>';
   const cls = v>=0?'pos':'neg'; return `<span class="badge ${cls}">${v>=0?'▲':'▼'}${Math.abs(v).toFixed(1)}%</span>`; }
 function colorHex(v){ return v>=10?'#16a34a':v>=-5?'#0ea5e9':'#dc2626'; }
@@ -249,8 +249,8 @@ function drawCharts(){
     ]},
     options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',
       plugins:{legend:{labels:{color:'#475569',font:{size:10}},position:'top'},
-               tooltip:{callbacks:{label:c=>' ฿'+c.raw.toLocaleString()}}},
-      scales:{x:{ticks:{color:'#94a3b8',font:{size:9},callback:v=>v>=1e6?(v/1e6).toFixed(1)+'M':v+''},
+               tooltip:{callbacks:{label:c=>' ฿'+Math.round(c.raw||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')}}},
+      scales:{x:{ticks:{color:'#94a3b8',font:{size:9},callback:v=>v.toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')},
                   grid:{color:'#f1f5f9'}},
               y:{ticks:{color:'#374151',font:{size:9}},grid:{display:false}}}}
   });
@@ -263,7 +263,7 @@ function drawCharts(){
     ]},
     options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',
       plugins:{legend:{labels:{color:'#475569',font:{size:10}},position:'top'},
-               tooltip:{callbacks:{label:c=>' '+c.raw.toLocaleString()+' ชิ้น'}}},
+               tooltip:{callbacks:{label:c=>' '+Math.round(c.raw||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')+' ชิ้น'}}},
       scales:{x:{ticks:{color:'#94a3b8',font:{size:9}},grid:{color:'#f1f5f9'}},
               y:{ticks:{color:'#374151',font:{size:9}},grid:{display:false}}}}
   });
@@ -331,7 +331,7 @@ function applyFilters(){
   const qyoy= q25Tot ? ((q26Tot/q25Tot-1)*100).toFixed(1) : null;
   const cats = new Set(filtered.map(p=>p.group)).size;
 
-  document.getElementById('sTotalProd').textContent  = filtered.length.toLocaleString();
+  document.getElementById('sTotalProd').textContent  = filtered.length.toString().replace(/\B(?=(\d{3})+(?!\d))/g,',');
   document.getElementById('sTotalSales').textContent = fmt(s26Tot);
   document.getElementById('sTotalSalesSub').innerHTML= `vs 2025: ${fmt(s25Tot)} ${yoyBadge(yoy?+yoy:null)}`;
   document.getElementById('sTotalQty').textContent   = fmt(q26Tot);
@@ -340,7 +340,7 @@ function applyFilters(){
 
   renderTable(filtered.slice(0, topN));
   document.getElementById('resultInfo').textContent =
-    `แสดง ${Math.min(topN,filtered.length).toLocaleString()} / ${filtered.length.toLocaleString()} รายการ`;
+    `แสดง ${Math.min(topN,filtered.length).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')} / ${filtered.length.toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')} รายการ`;
 }
 
 function renderTable(rows){

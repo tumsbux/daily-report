@@ -212,14 +212,11 @@ const MTH = {"2025-05": "พ.ค. 25", "2025-06": "มิ.ย. 25", "2025-07": "
 const S=D.summary, RM=D.rm, DM=D.dm, ST=D.stores;
 const MONTHS26=S.months26, MONTHS25=S.months25;
 
-const B=n=>n==null?'–':'฿'+Math.round(n).toLocaleString('th-TH');
+const B=n=>n==null?'–':'฿'+Math.round(n||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',');
 const Bs=n=>{
   if(n==null)return'–';
   const abs=Math.abs(n);
-  if(abs>=1e9)return'฿'+(n/1e9).toFixed(2)+'B';
-  if(abs>=1e6)return'฿'+(n/1e6).toFixed(2)+'M';
-  if(abs>=1e3)return'฿'+(n/1e3).toFixed(0)+'K';
-  return'฿'+Math.round(n).toLocaleString();
+  return'฿'+Math.round(n||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',');
 };
 const yoySpan=v=>{
   if(v==null)return'<span class="b-gray badge">–</span>';
@@ -268,8 +265,8 @@ function drawMonthChart(canvasId, m26, m25, projMay=null){
     ]},
     options:{responsive:true,maintainAspectRatio:false,
       plugins:{legend:{position:'top',labels:{boxWidth:12,font:{size:11}}},
-        tooltip:{mode:'index',intersect:false,callbacks:{label:ctx=>ctx.raw!=null?` ${ctx.dataset.label}: ฿${ctx.raw.toFixed(2)}M`:null}}},
-      scales:{y:{ticks:{callback:v=>'฿'+v.toFixed(1)+'M',font:{size:10}},grid:{color:'#f1f5f9'}},x:{ticks:{font:{size:10}}}}}
+        tooltip:{mode:'index',intersect:false,callbacks:{label:ctx=>ctx.raw!=null?` ${ctx.dataset.label}: ฿${Math.round(ctx.raw||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')}`:null}}},
+      scales:{y:{ticks:{callback:v=>'฿'+Math.round(v||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,','),font:{size:10}},grid:{color:'#f1f5f9'}},x:{ticks:{font:{size:10}}}}}
   });
 }
 
@@ -302,14 +299,14 @@ function renderHome(){
   <div class="kpi k-teal"><div class="kpi-lbl">พ.ค. 2025 (ทั้งเดือน)</div><div class="kpi-val">${Bs(S.total_s25)}</div><div class="kpi-sub">เทียบเป้า YoY</div></div>
   <div class="kpi ${yoy>=0?'k-green':'k-red'}"><div class="kpi-lbl">Projected YoY</div><div class="kpi-val" style="color:${yc}">${yoy>=0?'▲ +':'▼ '}${Math.abs(yoy).toFixed(1)}%</div><div class="kpi-sub">Proj 2026 vs พ.ค. 2025</div></div>
   <div class="kpi k-blue"><div class="kpi-lbl">วันที่เหลือ</div><div class="kpi-val">${S.days_remaining} วัน</div><div class="kpi-sub">ผ่านไป ${S.days_elapsed} วัน</div></div>
-  <div class="kpi ${S.total_pct_target>=100?'k-green':'k-red'}"><div class="kpi-lbl">vs Target พ.ค. 26</div><div class="kpi-val">${S.total_pct_target!=null?S.total_pct_target.toFixed(1)+'%':'–'}</div><div class="kpi-sub">MTD ฿${S.total_mtd_target!=null?(S.total_mtd_target/1e6).toFixed(1)+'M':'–'} เป้า</div></div>
+  <div class="kpi ${S.total_pct_target>=100?'k-green':'k-red'}"><div class="kpi-lbl">vs Target พ.ค. 26</div><div class="kpi-val">${S.total_pct_target!=null?S.total_pct_target.toFixed(1)+'%':'–'}</div><div class="kpi-sub">MTD ฿${S.total_mtd_target!=null?Math.round(S.total_mtd_target||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,','):'–'} เป้า</div></div>
   <div class="kpi k-teal"><div class="kpi-lbl">GP%</div><div class="kpi-val">${(S.total_gp_pct||0).toFixed(1)}%</div><div class="kpi-sub">฿${((S.total_gp_mtd||0)/1e6).toFixed(2)}M GP</div></div>
-  <div class="kpi k-purple"><div class="kpi-lbl">Avg Ticket</div><div class="kpi-val">฿${(S.total_ticket_avg||0).toLocaleString()}</div>
+  <div class="kpi k-purple"><div class="kpi-lbl">Avg Ticket</div><div class="kpi-val">฿${(S.total_ticket_avg||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')}</div>
       <div class="kpi-sub">vs ปี25: ฿${S.total_ticket_avg_25||0} ${S.total_ticket_avg_yoy!=null?(S.total_ticket_avg_yoy>=0?'<span style="color:#16a34a">▲'+S.total_ticket_avg_yoy.toFixed(1)+'%</span>':'<span style="color:#dc2626">▼'+Math.abs(S.total_ticket_avg_yoy).toFixed(1)+'%</span>'):''}</div></div>
-  <div class="kpi k-blue"><div class="kpi-lbl">บิล/วัน/ร้าน</div><div class="kpi-val">${Math.round((S.total_daily_txn||0)/(S.store_cnt||1)).toLocaleString()}</div>
-      <div class="kpi-sub">vs ปี25: ${Math.round((S.total_daily_txn_25||0)/(S.store_cnt||1)).toLocaleString()} ${S.total_txn_yoy!=null?(S.total_txn_yoy>=0?'<span style="color:#16a34a">▲'+S.total_txn_yoy.toFixed(1)+'%</span>':'<span style="color:#dc2626">▼'+Math.abs(S.total_txn_yoy).toFixed(1)+'%</span>'):''}</div></div>
-  <div class="kpi k-red"><div class="kpi-lbl">ยอดคืน/ร้าน</div><div class="kpi-val">฿${(S.total_ret_per_store||0).toLocaleString()}</div>
-      <div class="kpi-sub">รวม ฿${((S.total_ret_mtd||0)/1e3).toFixed(0)}K | ฿${(S.total_ret_daily||0).toLocaleString()}/วัน</div></div>
+  <div class="kpi k-blue"><div class="kpi-lbl">บิล/วัน/ร้าน</div><div class="kpi-val">${Math.round((S.total_daily_txn||0)/(S.store_cnt||1)).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')}</div>
+      <div class="kpi-sub">vs ปี25: ${Math.round((S.total_daily_txn_25||0)/(S.store_cnt||1)).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')} ${S.total_txn_yoy!=null?(S.total_txn_yoy>=0?'<span style="color:#16a34a">▲'+S.total_txn_yoy.toFixed(1)+'%</span>':'<span style="color:#dc2626">▼'+Math.abs(S.total_txn_yoy).toFixed(1)+'%</span>'):''}</div></div>
+  <div class="kpi k-red"><div class="kpi-lbl">ยอดคืน/ร้าน</div><div class="kpi-val">฿${(S.total_ret_per_store||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')}</div>
+      <div class="kpi-sub">รวม ฿${((S.total_ret_mtd||0)/1e3).toFixed(0)}K | ฿${(S.total_ret_daily||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')}/วัน</div></div>
 </div>
 
 <div class="hero">
@@ -347,9 +344,9 @@ function renderHome(){
     <td>${B(r.daily)}</td><td><strong>${Bs(r.proj)}</strong></td>
     <td>${yoySpan(r.proj_yoy)}</td>
     <td>${tgtBadge(r.proj_vs_tgt)}</td>
-    <td style="text-align:right">฿${(r.ticket_avg||0).toLocaleString()}<br><small style="color:${(r.ticket_avg_yoy||0)>=0?'#16a34a':'#dc2626'}">${r.ticket_avg_yoy!=null?((r.ticket_avg_yoy>=0?'▲+':'▼')+r.ticket_avg_yoy.toFixed(1)+'%'):''}</small></td>
-    <td style="text-align:right">${Math.round((r.daily_txn||0)/(r.cnt||1)).toLocaleString()}<br><small style="color:${(r.txn_yoy||0)>=0?'#16a34a':'#dc2626'}">${r.txn_yoy!=null?((r.txn_yoy>=0?'▲+':'▼')+r.txn_yoy.toFixed(1)+'%'):''}</small></td>
-    <td style="text-align:right;color:#dc2626">฿${(r.ret_per_store||0).toLocaleString()}</td>
+    <td style="text-align:right">฿${(r.ticket_avg||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')}<br><small style="color:${(r.ticket_avg_yoy||0)>=0?'#16a34a':'#dc2626'}">${r.ticket_avg_yoy!=null?((r.ticket_avg_yoy>=0?'▲+':'▼')+r.ticket_avg_yoy.toFixed(1)+'%'):''}</small></td>
+    <td style="text-align:right">${Math.round((r.daily_txn||0)/(r.cnt||1)).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')}<br><small style="color:${(r.txn_yoy||0)>=0?'#16a34a':'#dc2626'}">${r.txn_yoy!=null?((r.txn_yoy>=0?'▲+':'▼')+r.txn_yoy.toFixed(1)+'%'):''}</small></td>
+    <td style="text-align:right;color:#dc2626">฿${(r.ret_per_store||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')}</td>
     <td style="text-align:center">${r.cnt}</td><td class="arrow">›</td>
   </tr>`).join('')}</tbody>
 </table></div>
@@ -364,9 +361,9 @@ function renderHome(){
     <td>${B(d.daily)}</td><td><strong>${Bs(d.proj)}</strong></td>
     <td>${yoySpan(d.proj_yoy)}</td>
     <td>${tgtBadge(d.proj_vs_tgt)}</td>
-    <td style="text-align:right">฿${(d.ticket_avg||0).toLocaleString()}<br><small style="color:${(d.ticket_avg_yoy||0)>=0?'#16a34a':'#dc2626'}">${d.ticket_avg_yoy!=null?((d.ticket_avg_yoy>=0?'▲+':'▼')+d.ticket_avg_yoy.toFixed(1)+'%'):''}</small></td>
-    <td style="text-align:right">${Math.round((d.daily_txn||0)/(d.cnt||1)).toLocaleString()}<br><small style="color:${(d.txn_yoy||0)>=0?'#16a34a':'#dc2626'}">${d.txn_yoy!=null?((d.txn_yoy>=0?'▲+':'▼')+d.txn_yoy.toFixed(1)+'%'):''}</small></td>
-    <td style="text-align:right;color:#dc2626">฿${(d.ret_per_store||0).toLocaleString()}</td>
+    <td style="text-align:right">฿${(d.ticket_avg||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')}<br><small style="color:${(d.ticket_avg_yoy||0)>=0?'#16a34a':'#dc2626'}">${d.ticket_avg_yoy!=null?((d.ticket_avg_yoy>=0?'▲+':'▼')+d.ticket_avg_yoy.toFixed(1)+'%'):''}</small></td>
+    <td style="text-align:right">${Math.round((d.daily_txn||0)/(d.cnt||1)).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')}<br><small style="color:${(d.txn_yoy||0)>=0?'#16a34a':'#dc2626'}">${d.txn_yoy!=null?((d.txn_yoy>=0?'▲+':'▼')+d.txn_yoy.toFixed(1)+'%'):''}</small></td>
+    <td style="text-align:right;color:#dc2626">฿${(d.ret_per_store||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')}</td>
     <td style="text-align:center">${d.cnt}</td><td class="arrow">›</td>
   </tr>`).join('')}</tbody>
 </table></div>`;
@@ -410,9 +407,9 @@ function renderRM(){
     <td>${B(d.daily)}</td><td><strong>${Bs(d.proj)}</strong></td>
     <td>${yoySpan(d.proj_yoy)}</td>
     <td>${tgtBadge(d.proj_vs_tgt)}</td>
-    <td style="text-align:right">฿${(d.ticket_avg||0).toLocaleString()}<br><small style="color:${(d.ticket_avg_yoy||0)>=0?'#16a34a':'#dc2626'}">${d.ticket_avg_yoy!=null?((d.ticket_avg_yoy>=0?'▲+':'▼')+d.ticket_avg_yoy.toFixed(1)+'%'):''}</small></td>
-    <td style="text-align:right">${Math.round((d.daily_txn||0)/(d.cnt||1)).toLocaleString()}<br><small style="color:${(d.txn_yoy||0)>=0?'#16a34a':'#dc2626'}">${d.txn_yoy!=null?((d.txn_yoy>=0?'▲+':'▼')+d.txn_yoy.toFixed(1)+'%'):''}</small></td>
-    <td style="text-align:right;color:#dc2626">฿${(d.ret_per_store||0).toLocaleString()}</td>
+    <td style="text-align:right">฿${(d.ticket_avg||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')}<br><small style="color:${(d.ticket_avg_yoy||0)>=0?'#16a34a':'#dc2626'}">${d.ticket_avg_yoy!=null?((d.ticket_avg_yoy>=0?'▲+':'▼')+d.ticket_avg_yoy.toFixed(1)+'%'):''}</small></td>
+    <td style="text-align:right">${Math.round((d.daily_txn||0)/(d.cnt||1)).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')}<br><small style="color:${(d.txn_yoy||0)>=0?'#16a34a':'#dc2626'}">${d.txn_yoy!=null?((d.txn_yoy>=0?'▲+':'▼')+d.txn_yoy.toFixed(1)+'%'):''}</small></td>
+    <td style="text-align:right;color:#dc2626">฿${(d.ret_per_store||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')}</td>
     <td style="text-align:center">${d.cnt}</td><td class="arrow">›</td>
   </tr>`).join('')}</tbody>
 </table></div>
@@ -466,9 +463,9 @@ function storeTable(list,tid){
     <td>${B(s.daily)}</td><td><strong>${Bs(s.proj)}</strong></td>
     <td>${yoySpan(s.proj_yoy)}</td>
     <td>${tgtBadge(s.proj_vs_tgt)}</td>
-    <td style="text-align:right">฿${(s.ticket_avg||0).toLocaleString()}<br><small style="color:${(s.ticket_avg_yoy||0)>=0?'#16a34a':'#dc2626'}">${s.ticket_avg_yoy!=null?((s.ticket_avg_yoy>=0?'▲+':'▼')+s.ticket_avg_yoy.toFixed(1)+'%'):''}</small></td>
-    <td style="text-align:right">${(s.daily_txn||0).toLocaleString()}<br><small style="color:${(s.txn_yoy||0)>=0?'#16a34a':'#dc2626'}">${s.txn_yoy!=null?((s.txn_yoy>=0?'▲+':'▼')+s.txn_yoy.toFixed(1)+'%'):''}</small></td>
-    <td style="text-align:right;color:#dc2626">${(s.ret_mtd||0)>0?'฿'+(s.ret_mtd||0).toLocaleString():'–'}</td>
+    <td style="text-align:right">฿${(s.ticket_avg||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')}<br><small style="color:${(s.ticket_avg_yoy||0)>=0?'#16a34a':'#dc2626'}">${s.ticket_avg_yoy!=null?((s.ticket_avg_yoy>=0?'▲+':'▼')+s.ticket_avg_yoy.toFixed(1)+'%'):''}</small></td>
+    <td style="text-align:right">${(s.daily_txn||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')}<br><small style="color:${(s.txn_yoy||0)>=0?'#16a34a':'#dc2626'}">${s.txn_yoy!=null?((s.txn_yoy>=0?'▲+':'▼')+s.txn_yoy.toFixed(1)+'%'):''}</small></td>
+    <td style="text-align:right;color:#dc2626">${(s.ret_mtd||0)>0?'฿'+(s.ret_mtd||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,','):'–'}</td>
     <td class="arrow">›</td>
   </tr>`).join('')}</tbody>
 </table></div>`;
@@ -507,12 +504,12 @@ function renderStore(){
     <div class="kpi k-amber"><div class="kpi-lbl">Daily Run Rate</div><div class="kpi-val">${Bs(Math.round(daily))}</div><div class="kpi-sub">/วัน</div></div>
     <div class="kpi k-purple"><div class="kpi-lbl">Projected Full Month</div><div class="kpi-val">${Bs(Math.round(proj))}</div></div>
     <div class="kpi ${(s.proj_yoy||0)>=0?'k-green':'k-red'}"><div class="kpi-lbl">Projected YoY</div><div class="kpi-val" style="color:${yc}">${(s.proj_yoy||0)>=0?'+':''}${s.proj_yoy?.toFixed(1)}%</div></div>
-    <div class="kpi k-teal"><div class="kpi-lbl">Avg Ticket</div><div class="kpi-val">฿${(s.ticket_avg||0).toLocaleString()}</div>
+    <div class="kpi k-teal"><div class="kpi-lbl">Avg Ticket</div><div class="kpi-val">฿${(s.ticket_avg||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')}</div>
     <div class="kpi-sub">vs ปี25: ฿${s.ticket_avg_25||0} ${s.ticket_avg_yoy!=null?(s.ticket_avg_yoy>=0?'<span style=\'color:#16a34a\'>▲+'+s.ticket_avg_yoy.toFixed(1)+'%</span>':'<span style=\'color:#dc2626\'>▼'+Math.abs(s.ticket_avg_yoy).toFixed(1)+'%</span>'):''}</div></div>
-    <div class="kpi k-blue"><div class="kpi-lbl">บิล/วัน</div><div class="kpi-val">${(s.daily_txn||0).toLocaleString()}</div>
+    <div class="kpi k-blue"><div class="kpi-lbl">บิล/วัน</div><div class="kpi-val">${(s.daily_txn||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')}</div>
     <div class="kpi-sub">vs ปี25: ${s.daily_txn_25||0} ${s.txn_yoy!=null?(s.txn_yoy>=0?'<span style=\'color:#16a34a\'>▲+'+s.txn_yoy.toFixed(1)+'%</span>':'<span style=\'color:#dc2626\'>▼'+Math.abs(s.txn_yoy).toFixed(1)+'%</span>'):''}</div></div>
     <div class="kpi k-teal"><div class="kpi-lbl">GP%</div><div class="kpi-val">${(s.gp_pct||0).toFixed(1)}%</div><div class="kpi-sub">฿${((s.gp_mtd||0)/1e3).toFixed(0)}K GP</div></div>
-    <div class="kpi k-red"><div class="kpi-lbl">ยอดคืน MTD</div><div class="kpi-val">${(s.ret_mtd||0)>0?'฿'+(s.ret_mtd||0).toLocaleString():'–'}</div><div class="kpi-sub">฿${(s.ret_daily||0).toLocaleString()}/วัน</div></div>
+    <div class="kpi k-red"><div class="kpi-lbl">ยอดคืน MTD</div><div class="kpi-val">${(s.ret_mtd||0)>0?'฿'+(s.ret_mtd||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,','):'–'}</div><div class="kpi-sub">฿${(s.ret_daily||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')}/วัน</div></div>
     ${s.pct_target!=null?`<div class="kpi ${s.pct_target>=100?'k-green':'k-red'}"><div class="kpi-lbl">vs เป้า</div><div class="kpi-val">${s.pct_target.toFixed(1)}%</div><div class="kpi-sub">เป้า ฿${((s.target||0)/1e6).toFixed(1)}M</div></div>`:''}
   </div>
 </div>
@@ -660,12 +657,12 @@ function renderExec(){
     <div style="display:flex;gap:12px;margin-top:8px">
       <div class="exec-kpi-box" style="flex:1;text-align:center">
         <div class="exec-kpi-box-lbl">👥 Customers (บิล MTD)</div>
-        <div class="exec-kpi-box-val">${(S.total_txn||0).toLocaleString()}</div>
+        <div class="exec-kpi-box-val">${(S.total_txn||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')}</div>
         <div class="exec-kpi-box-sub ${gCls(txnGrowth)}">${gSign(txnGrowth)}${txnGrowth.toFixed(2)}%</div>
       </div>
       <div class="exec-kpi-box" style="flex:1;text-align:center">
         <div class="exec-kpi-box-lbl">🛒 Avg Ticket</div>
-        <div class="exec-kpi-box-val">฿${(S.total_ticket_avg||0).toLocaleString()}</div>
+        <div class="exec-kpi-box-val">฿${(S.total_ticket_avg||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')}</div>
         <div class="exec-kpi-box-sub ${gCls(taGrowth)}">${gSign(taGrowth)}${taGrowth.toFixed(2)}%</div>
       </div>
     </div>
