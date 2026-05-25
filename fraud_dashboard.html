@@ -1127,7 +1127,7 @@ function prodRowClick(tr){
   inner+='</table>';
   var det=document.createElement('tr');
   det.className='prod-det-row';
-  det.innerHTML='<td colspan="7" style="padding:8px 16px;background:#f8fafc">'+inner+'</td>';
+  det.innerHTML='<td colspan="8" style="padding:8px 16px;background:#f8fafc">'+inner+'</td>';
   tr.parentNode.insertBefore(det, tr.nextSibling);
 }
 
@@ -1144,29 +1144,52 @@ function renderSoByReason(data){
   rows.sort(function(a,b){ return dir*(a[col]>b[col]?1:a[col]<b[col]?-1:0); });
   document.getElementById('so-count').textContent=rows.length+' เหตุผล';
   var arrow=function(c){ return col===c?(dir===-1?'↓':'↑'):''; };
+  // Grand total bills = sum of all reason bills (most accurate denominator)
+  var grandTotal=(data.stats&&data.stats.total_rows)?data.stats.total_rows:0;
+  if(!grandTotal){ var gt=0; for(var k=0;k<rows.length;k++) gt+=rows[k].bills||0; grandTotal=gt; }
   var ths='<th>#</th>'
     +'<th style="cursor:pointer" onclick="sortSoReason(&quot;rtrdesc&quot;)">เหตุผลการคืน '+arrow('rtrdesc')+'</th>'
     +'<th style="text-align:right;cursor:pointer" onclick="sortSoReason(&quot;returns&quot;)">รายการ '+arrow('returns')+'</th>'
     +'<th style="text-align:right;cursor:pointer" onclick="sortSoReason(&quot;bills&quot;)">จำนวนบิล '+arrow('bills')+'</th>'
+    +'<th style="text-align:right">% ของทั้งหมด</th>'
     +'<th style="text-align:right;cursor:pointer" onclick="sortSoReason(&quot;amount&quot;)">ยอดรวม (฿) '+arrow('amount')+'</th>'
     +'<th style="text-align:right;cursor:pointer" onclick="sortSoReason(&quot;stores&quot;)">ร้าน '+arrow('stores')+'</th>'
     +'<th style="text-align:right;cursor:pointer" onclick="sortSoReason(&quot;cashiers&quot;)">พนักงาน '+arrow('cashiers')+'</th>';
   document.getElementById('so-thead-row').innerHTML=ths;
   soReasonData={};
   var html='';
+  // Summary row totals
+  var sumBills=0, sumAmt=0;
+  for(var k=0;k<rows.length;k++){ sumBills+=rows[k].bills||0; sumAmt+=rows[k].amount||0; }
   for(var i=0;i<rows.length;i++){
     var r=rows[i];
     soReasonData[i]=r.bills_list||[];
+    var pct=grandTotal>0?(r.bills/grandTotal*100).toFixed(1):'0.0';
+    var barW=grandTotal>0?Math.round(r.bills/grandTotal*80):0;
     html+='<tr class="so-row" data-ridx="'+i+'" onclick="reasonRowClick(this)" style="cursor:pointer;user-select:none">'
       +'<td style="color:#94a3b8;font-size:12px">'+(i+1)+'</td>'
       +'<td>▶ <strong>'+soEsc(r.rtrdesc||'(ไม่ระบุ)')+'</strong></td>'
       +'<td style="text-align:right">'+fmt(r.returns)+'</td>'
       +'<td style="text-align:right"><span class="badge bL">'+r.bills+'</span></td>'
+      +'<td style="text-align:right;min-width:110px">'
+        +'<span style="font-weight:600;color:var(--blue)">'+pct+'%</span> '
+        +'<span style="display:inline-block;width:'+barW+'px;height:6px;background:var(--blue);opacity:0.25;border-radius:3px;vertical-align:middle"></span>'
+      +'</td>'
       +'<td class="amt" style="text-align:right">฿'+fmt(r.amount)+'</td>'
       +'<td style="text-align:right">'+r.stores+'</td>'
       +'<td style="text-align:right">'+r.cashiers+'</td>'
       +'</tr>';
   }
+  // Grand total footer row
+  var totalPct=grandTotal>0?(sumBills/grandTotal*100).toFixed(1):'0.0';
+  html+='<tr style="background:#f8fafc;font-weight:600;border-top:2px solid var(--border)">'
+    +'<td colspan="2" style="padding:6px 8px;color:#374151">รวมทั้งหมด</td>'
+    +'<td></td>'
+    +'<td style="text-align:right;padding:4px 8px"><span class="badge bL">'+sumBills+'</span></td>'
+    +'<td style="text-align:right;padding:4px 8px;color:var(--blue)">'+totalPct+'%</td>'
+    +'<td class="amt" style="text-align:right;padding:4px 8px">฿'+fmt(sumAmt)+'</td>'
+    +'<td colspan="2"></td>'
+    +'</tr>';
   document.getElementById('so-body').innerHTML=html;
 }
 function reasonRowClick(tr){
