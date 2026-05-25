@@ -693,7 +693,8 @@ function soUserRowClick(tr,g){
   if(!det) return;
   var isOpen=soUserOpen[g];
   soUserOpen[g]=!isOpen;
-  tr.cells[0].firstChild.nodeValue=(isOpen?'▶ ':'▼ ')+tr.cells[0].firstChild.nodeValue.substring(2);
+  var b=tr.cells[0].querySelector('b');
+  if(b) b.innerHTML=(isOpen?'▶ ':'▼ ')+b.innerHTML.replace(/^[▶▼]\s*/,'');
   if(isOpen){ det.style.display='none'; return; }
   det.style.display='';
   var bills=soDetData[g]||[];
