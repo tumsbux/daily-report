@@ -151,6 +151,19 @@ py inject_fraud_only.py
 | เวลา (rttime) | HH:MM | 14:30 |
 | คลังที่แสดง | whs ≤ 500 (ยกเว้น 901, 999) | 001–499 |
 
+**หมายเหตุ (ภายใน):** MySQL TIME ถูก pandas serialize เป็น milliseconds (เช่น `53286000` = `14:48`) — JavaScript ใช้ฟังก์ชัน `fmtTime(ms)` แปลงก่อนแสดงผล ไม่ควรแก้ค่าใน fraud_data.json โดยตรง
+
+---
+
+## 9. การแก้ไขที่ผ่านมา (Fixes Log)
+
+| วันที่ | ปัญหา | การแก้ไข |
+|--------|-------|---------|
+| 27-05-2026 | วันที่ในแท็บ Return Bill แสดงเป็น `yyyy-mm-dd` | แก้ JS ใช้ `dd-mm-yyyy` ทุกจุด |
+| 27-05-2026 | เวลาแสดงเป็นตัวเลข ms (เช่น `77942000`) | เพิ่มฟังก์ชัน `fmtTime(ms)` แปลงเป็น `HH:MM` |
+| 27-05-2026 | `inject_fraud_only.py` crash เมื่อชื่อสินค้า/ร้านมีวงเล็บ `{}` | เปลี่ยนจาก brace-counting เป็น `json.JSONDecoder.raw_decode()` |
+| 27-05-2026 | fraud_dashboard.html เสียหาย (truncated) จาก inject ผิดพลาด | สร้างใหม่จาก git commit `08bfd04` + inject ข้อมูลสด |
+
 ---
 
 *อัปเดตล่าสุด: 27 พฤษภาคม 2569 · MySQL live · สร้างโดย Claude (Cowork mode)*
