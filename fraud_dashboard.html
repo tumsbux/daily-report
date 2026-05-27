@@ -568,6 +568,8 @@ renderRtu();
 // ══ RTSONO ═══════════════════════════════════════════════════════════════════
 var soDetData={};
 function soEsc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function fmtTime(ms){if(!ms&&ms!==0)return '-';var s=Math.floor(ms/1000);var h=Math.floor(s/3600);var mn=Math.floor((s%3600)/60);return ('0'+h).slice(-2)+':'+('0'+mn).slice(-2);}
+
 function soRowClick(tr){
   var next=tr.nextElementSibling;
   if(next&&next.classList.contains('so-det-row')){
@@ -670,8 +672,8 @@ function renderSo(){
       +'<td>'+(r.dm==='?'?'–':soEsc(r.dm))+'</td>'
       +'<td>'+(r.rm==='?'?'–':soEsc(r.rm))+'</td>'
       +'<td>'+(r.zero>0?'<span class="badge bM">'+r.zero+'</span>':'0')+'</td>'
-      +'<td>'+(r.date?new Date(r.date).toISOString().substring(0,10):'-')+'</td>'
-      +'<td>'+soEsc(r.time||'-')+'</td>'
+      +'<td>'+(r.date?(function(){var x=new Date(r.date);return ('0'+x.getDate()).slice(-2)+'-'+('0'+(x.getMonth()+1)).slice(-2)+'-'+x.getFullYear();})():'-')+'</td>'
+      +'<td>'+fmtTime(r.time)+'</td>'
       +'</tr>';
   }
   document.getElementById('so-body').innerHTML=html;
@@ -740,8 +742,8 @@ function soUserRowClick(tr,g){
       +'<td style="padding:3px 8px"><b>'+soEsc(b.rtsono)+'</b></td>'
       +'<td><span class="badge '+lc+'">'+b.lines+'</span></td>'
       +'<td class="amt">฿'+fmt(b.amount)+'</td>'
-      +'<td>'+(b.date?new Date(b.date).toISOString().substring(0,10):'-')+'</td>'
-      +'<td>'+soEsc(b.time||'-')+'</td>'
+      +'<td>'+(b.date?(function(){var x=new Date(b.date);return ('0'+x.getDate()).slice(-2)+'-'+('0'+(x.getMonth()+1)).slice(-2)+'-'+x.getFullYear();})():'-')+'</td>'
+      +'<td>'+fmtTime(b.time)+'</td>'
       +'<td>'+(b.zero>0?'<span class="badge bM">'+b.zero+'</span>':'0')+'</td>'
       +'</tr>';
     // Product detail rows
@@ -1121,7 +1123,7 @@ function prodRowClick(tr){
       +'<td style="padding:4px 8px;text-align:right">'+fmt(b.return_qty)+'</td>'
       +'<td style="padding:4px 8px;text-align:right">฿'+fmt(b.amt)+'</td>'
       +(function(){if(!b.return_date)return '<td style="padding:4px 8px;white-space:nowrap">-</td>';var x=new Date(b.return_date);return '<td style="padding:4px 8px;white-space:nowrap">'+('0'+x.getDate()).slice(-2)+'-'+('0'+(x.getMonth()+1)).slice(-2)+'-'+x.getFullYear()+'</td>';})()
-      +'<td style="padding:4px 8px;white-space:nowrap">'+soEsc(b.rttime||'')+'</td>'
+      +'<td style="padding:4px 8px;white-space:nowrap">'+fmtTime(b.rttime)+'</td>'
       +'</tr>';
   }
   inner+='</table>';
@@ -1219,7 +1221,7 @@ function reasonRowClick(tr){
       +'<td style="padding:4px 8px">'+soEsc(b.whs||'')+' '+soEsc(b.store_name||'')+'</td>'
       +'<td style="padding:4px 8px;text-align:right">฿'+fmt(b.amt)+'</td>'
       +'<td style="padding:4px 8px">'+(dt||'-')+'</td>'
-      +'<td style="padding:4px 8px;white-space:nowrap">'+soEsc(b.rttime||'')+'</td>'
+      +'<td style="padding:4px 8px;white-space:nowrap">'+fmtTime(b.rttime)+'</td>'
       +'</tr>';
   }
   inner+='</table>';
