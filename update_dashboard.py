@@ -154,7 +154,8 @@ for row in _whsdd_rows:
     day = int(float(str(row.get('whsdddd') or 0)))
     if day == 0: continue
     tar = float(row.get('whsddptar') or 0)
-    act = float(row.get('whsddpact') or 0)
+    # whsddpact may lag 1-2 days; fall back to whsddpnetamt so recent days are recognised as finalized
+    act = float(row.get('whsddpact') or row.get('whsddpnetamt') or 0)
     txn = int(float(row.get('whsddtotdoc') or 0))
     store_tar_monthly[no] += tar
     if day <= DAYS_ELAPSED:
@@ -772,5 +773,4 @@ if os.path.exists(FRAUD_FILE) and os.path.exists(FRAUD_JSON):
         print('  WARNING fraud_dashboard.html data inject failed: %s' % _e)
         # Fallback: at least update the date badge
         try:
-            with open(FRAUD_FILE, encoding='utf-8') as _ff: _fhtml = _ff.read()
-            _fraud_badge = '%d %s %d \u00b7 \u0e27\u0e31
+      

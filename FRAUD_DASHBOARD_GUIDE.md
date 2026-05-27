@@ -14,6 +14,8 @@
 | `rebuild_fraud_analysis.py` | ดึง MySQL → คำนวณ → บันทึก fraud_data.json | — |
 | `inject_fraud_only.py` | อ่าน fraud_data.json → inject → push GitHub | — |
 | `run_inject_fraud.bat` | รัน inject_fraud_only.py (ดับเบิ้ลคลิกได้) | — |
+| `update_dashboard.py` | อัปเดต sales_dashboard + index.html → push GitHub | `run_daily_update.bat` |
+| `fetch_missing_facts.py` | ดึง factXX.txt ที่ขาดหายจาก MySQL | `run_daily_update.bat` |
 | `fraud_analysis.html` | ~~Legacy (returnall.txt)~~ ไม่ใช้งานแล้ว | — |
 
 ---
@@ -25,7 +27,7 @@ Dashboard นี้ประกอบด้วย **8 แท็บ:**
 | แท็บ | คำอธิบาย |
 |------|---------|
 | 📊 Overview | KPI รวม + กราฟ RM / Hour / Day |
-| 🏪 Store Risk | อัตราคืนสินค้า % เทียบยอดขาย May |
+| 🏪 Store Risk | อัตราคืนสินค้า % เทียบยอดขาย May + **GP DEV** |
 | 👤 พนักงาน | rtuname + ชื่อเต็ม + Fraud Score + Repeat SO |
 | 🧾 rtsono ซ้ำ | บิลที่มีการคืนมากกว่า 1 รายการ |
 | 🕐 เวลา | วิเคราะห์เวลาคืน (ดึก/เช้า/บ่าย/เย็น) |
@@ -62,16 +64,49 @@ Fraud Score = (Amount/MaxAmount × 40)
 
 ---
 
-## 4. วิธีอัปเดตข้อมูล
+## 4. GP DEV (แท็บ Store Risk)
+
+```
+GP DEV = GP% ของสาขา − GP% เฉลี่ยทั้งเชน
+
+ค่าลบ (เช่น −3.50) = สาขามี GP% ต่ำกว่าเฉลี่ย → น่าสงสัย
+ค่าบวก (เช่น +2.10) = สาขามี GP% สูงกว่าเฉลี่ย → ปกติ
+```
+
+**แหล่งข้อมูล GP DEV:**
+- Primary: `data-lake.fact_sales` (net_sales_amt, total_cost)
+- Fallback 1: `MYPOS2018_CENTER.whsdd` (whsddpnetamt, whsddpnetcost)
+- Fallback 2: `target.txt` (offline เท่านั้น)
+
+**ถ้า GP DEV = 0.00 ทุกสาขา** → รัน `py rebuild_fraud_analysis.py --no-push` แล้ว `py inject_fraud_only.py` เพื่อรีเฟรชข้อมูล
+
+---
+
+## 5. แหล่งข้อมูล Sales Dashboard (update_dashboard.py)
+
+| ลำดับ | แหล่งข้อมูล | ใช้สำหรับ |
+|-------|------------|----------|
+| Primary | `MYPOS2018_CENTER.whsdd` | เป้า (whsddptar) + ยอดขายจริงรายวัน (whsddpnetamt) |
+| Fallback | `target.txt` | ใช้ถ้า MySQL ไม่ได้ → ข้อมูลอาจล้าช้า |
+| Supplement | `factXX.txt` | วันที่ยังไม่ Finalize ใน whsdd |
+
+**หมายเหตุ:** `whsddpact` อาจอัปเดตช้า 1–2 วัน ระบบจะใช้ `whsddpnetamt` แทนโดยอัตโนมัติ เพื่อให้วันที่ Dashboard ถูกต้อง (today − 1)
+
+---
+
+## 6. วิธีอัปเดตข้อมูล
 
 ### อัตโนมัติ (ทุกวัน 08:00 น.)
-`run_daily_update.bat` รัน `rebuild_fraud_analysis.py --no-push` แล้วรัน `update_dashboard.py`  
-จากนั้น `inject_fraud_only.py` inject fraud_data.json → fraud_dashboard.html แล้ว push GitHub
+`run_daily_update.bat` รันตามลำดับ:
+1. `fetch_missing_facts.py` — ดึง factXX.txt ที่ขาดหายจาก MySQL
+2. `rebuild_fraud_analysis.py --no-push` — คำนวณ GP DEV + fraud score → บันทึก fraud_data.json
+3. `update_dashboard.py` — ดึงเป้าจาก `MYPOS2018_CENTER.whsdd` → อัปเดต sales dashboard → push GitHub
+4. `inject_fraud_only.py` — inject fraud_data.json → fraud_dashboard.html → push GitHub
 
 ### อัปเดต fraud_dashboard เพียงอย่างเดียว (รวดเร็ว)
-ดับเบิ้ลคลิก `run_inject_fraud.bat` — ดึงข้อมูลจาก MySQL, inject ลงใน HTML, push GitHub  
-หรือรันด้วย Terminal:
+ดับเบิ้ลคลิก `run_inject_fraud.bat` หรือรันด้วย Terminal:
 ```
+cd "F:\co work dashboard"
 py rebuild_fraud_analysis.py --no-push
 py inject_fraud_only.py
 ```
@@ -79,15 +114,16 @@ py inject_fraud_only.py
 ### ข้อมูลดึงจาก MySQL โดยตรง
 | ตาราง | หน้าที่ |
 |------|---------|
-| `fact_returns` | บิลคืนสินค้า (rtstatus='U', 3 เดือนล่าสุด) |
-| `dim_users` | rtuname → ชื่อเต็มพนักงาน |
-| `dim_branch` | store_code → ชื่อร้าน / DM / RM |
+| `data-lake.fact_returns` | บิลคืนสินค้า (rtstatus='U', 3 เดือนล่าสุด) |
+| `data-lake.fact_sales` | ยอดขาย MTD + ต้นทุน (GP DEV) |
+| `data-lake.dim_branch` | store_code → ชื่อร้าน / DM / RM |
+| `MYPOS2018_CENTER.whsdd` | เป้ารายวัน (whsddptar) + ยอดขายจริง (whsddpnetamt) |
 
 **กรองออก:** `warehouse_code NOT IN ('901', '999')`
 
 ---
 
-## 5. อัปเดต UI (เปลี่ยนหน้าตา Dashboard)
+## 7. อัปเดต UI (เปลี่ยนหน้าตา Dashboard)
 
 ถ้าต้องการเพิ่มคอลัมน์ / เปลี่ยนสี / เพิ่มกราฟ:
 
@@ -99,7 +135,7 @@ py inject_fraud_only.py
 
 ---
 
-## 6. GitHub Pages
+## 8. GitHub Pages
 
 | URL | ไฟล์ |
 |-----|------|
@@ -114,56 +150,20 @@ py inject_fraud_only.py
 - `product_dashboard.html`
 - `product_data.json`
 
+**หมายเหตุ:** `update_dashboard.py` และ `db_config.json` ไม่ถูก push ขึ้น GitHub (มีข้อมูล credentials)
+
 ---
 
-## 7. โครงสร้าง Flow
+## 9. โครงสร้าง Flow
 
 ```
 [ทุกวัน 08:00 น. — run_daily_update.bat]
         │
-        ├─ [1] rebuild_fraud_analysis.py --no-push
+        ├─ [1] fetch_missing_facts.py
+        │         └─ ดึง fact_sales จาก MySQL → เขียน factXX.txt ที่ขาดหาย
+        │
+        ├─ [2] rebuild_fraud_analysis.py --no-push
         │         ├─ เชื่อม MySQL data-lake
         │         ├─ ดึง fact_returns (rtstatus='U', ยกเว้น whs 901/999)
-        │         ├─ join dim_users (rtuname → ชื่อเต็ม)
         │         ├─ join dim_branch (store → DM/RM)
-        │         ├─ คำนวณ fraud score per cashier
-        │         ├─ คำนวณ store risk (return rate)
-        │         └─ บันทึก fraud_data.json
-        │
-        ├─ [2] update_dashboard.py
-        │         ├─ อ่าน target.txt + factDD.txt
-        │         ├─ อัปเดต sales_dashboard_v8.html + index.html
-        │         └─ push ทุกไฟล์ → GitHub Pages
-        │
-        └─ [3] inject_fraud_only.py (หรือ run_inject_fraud.bat)
-                  ├─ อ่าน fraud_data.json
-                  ├─ inject → fraud_dashboard.html (แทน const D = {...})
-                  └─ push fraud_dashboard.html + fraud_data.json → GitHub
-```
-
----
-
-## 8. รูปแบบข้อมูล (Data Format)
-
-| ฟิลด์ | รูปแบบ | ตัวอย่าง |
-|-------|--------|---------|
-| วันที่ (return_date) | dd-mm-yyyy | 03-05-2026 |
-| เวลา (rttime) | HH:MM | 14:30 |
-| คลังที่แสดง | whs ≤ 500 (ยกเว้น 901, 999) | 001–499 |
-
-**หมายเหตุ (ภายใน):** MySQL TIME ถูก pandas serialize เป็น milliseconds (เช่น `53286000` = `14:48`) — JavaScript ใช้ฟังก์ชัน `fmtTime(ms)` แปลงก่อนแสดงผล ไม่ควรแก้ค่าใน fraud_data.json โดยตรง
-
----
-
-## 9. การแก้ไขที่ผ่านมา (Fixes Log)
-
-| วันที่ | ปัญหา | การแก้ไข |
-|--------|-------|---------|
-| 27-05-2026 | วันที่ในแท็บ Return Bill แสดงเป็น `yyyy-mm-dd` | แก้ JS ใช้ `dd-mm-yyyy` ทุกจุด |
-| 27-05-2026 | เวลาแสดงเป็นตัวเลข ms (เช่น `77942000`) | เพิ่มฟังก์ชัน `fmtTime(ms)` แปลงเป็น `HH:MM` |
-| 27-05-2026 | `inject_fraud_only.py` crash เมื่อชื่อสินค้า/ร้านมีวงเล็บ `{}` | เปลี่ยนจาก brace-counting เป็น `json.JSONDecoder.raw_decode()` |
-| 27-05-2026 | fraud_dashboard.html เสียหาย (truncated) จาก inject ผิดพลาด | สร้างใหม่จาก git commit `08bfd04` + inject ข้อมูลสด |
-
----
-
-*อัปเดตล่าสุด: 27 พฤษภาคม 2569 · MySQL live · สร้างโดย Claude (Cowork mode)*
+        │         ├─ คำนว�
