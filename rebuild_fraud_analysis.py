@@ -107,6 +107,33 @@ def _query_returns_full(cfg, months_back=3):
     print(f'  MySQL returns: {len(df):,} rows | {bills:,} bills | from {start}')
     return df
 
+def _query_whsdd_sales_cost(cfg, year_month):
+    """Fallback: MTD sales + cost from MYPOS2018_CENTER.whsdd (used when fact_sales unavailable).
+    Returns (sales_map, cost_map) where each is {whs: float}."""
+    yr, mo = year_month.split('-')
+    conn = _mysql_conn(cfg)
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT LPAD(whsddno, 3, '0') AS whs,
+               SUM(whsddpnetamt)      AS sales_mtd,
+               SUM(whsddpnetcost)     AS cost_mtd
+        FROM MYPOS2018_CENTER.whsdd
+        WHERE whsddyyyy = %s AND whsddmm = %s
+          AND whsddno NOT IN ('901', '999')
+        GROUP BY whsddno
+    """, (int(yr), int(mo)))
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    sales_map = {r['whs']: float(r['sales_mtd'] or 0) for r in rows}
+    cost_map  = {r['whs']: float(r['cost_mtd']  or 0) for r in rows}
+    total_s = sum(sales_map.values())
+    total_c = sum(cost_map.values())
+    avg_gp  = round((total_s - total_c) / total_s * 100, 2) if total_s else 0
+    print(f'  whsdd fallback: {len(sales_map):,} stores | '
+          f'฿{total_s:,.0f} | avg GP%={avg_gp:.1f}%')
+    return sales_map, cost_map
+
 def _query_sales_mtd(cfg):
     """Current-month net sales + cost per store from fact_sales.
     Returns (sales_map, cost_map) where each is {whs: float}."""
@@ -338,20 +365,30 @@ def compute_store_risk(df, branches_or_cfg=None):
         cfg = _load_db_config()
 
     # ── Get MTD sales + cost ──────────────────────────────────────────────────
+    max_mo    = df['month'].max()   # needed for fallback queries
     sales_map = {}
     cost_map  = {}
+
+    # Primary: data-lake.fact_sales
     if cfg:
         try:
             sales_map, cost_map = _query_sales_mtd(cfg)
         except Exception as e:
-            print(f'  MySQL sales error: {e}')
+            print(f'  MySQL fact_sales error: {e}')
 
+    # Fallback 1: MYPOS2018_CENTER.whsdd
+    if not sales_map and cfg:
+        try:
+            sales_map, cost_map = _query_whsdd_sales_cost(cfg, max_mo)
+        except Exception as e:
+            print(f'  MySQL whsdd fallback error: {e}')
+
+    # Fallback 2: target.txt (offline mode only)
     if not sales_map and os.path.exists(TARGET):
         try:
             tgt = pd.read_csv(TARGET, sep='\t', dtype=str, on_bad_lines='skip')
             tgt['whsddpnetamt']  = pd.to_numeric(tgt.get('whsddpnetamt'),  errors='coerce')
             tgt['whsddpnetcost'] = pd.to_numeric(tgt.get('whsddpnetcost'), errors='coerce')
-            max_mo = df['month'].max()
             yr, mo = max_mo.split('-')
             tgt_mo = tgt[(tgt['whsddyyyy'] == yr) & (tgt['whsddmm'] == str(int(mo)).zfill(2))].copy()
             tgt_mo['whs'] = tgt_mo['whsddno'].str.zfill(3)
@@ -362,7 +399,6 @@ def compute_store_risk(df, branches_or_cfg=None):
             print(f'  target.txt error: {e}')
 
     # ── Aggregations for latest month ─────────────────────────────────────────
-    max_mo  = df['month'].max()
     ret_mo  = df[df['month'] == max_mo]
 
     store_meta = df.groupby('whs').agg(
@@ -598,37 +634,4 @@ def build_month(sub, barmap=None, prodmap=None):
         'hour':    _rec(hr),
         'day':     _rec(dy),
         'so':      so_list[:500],
-        'product': _build_product_agg(sub),
-        'reason':  _build_reason_agg(sub),
-    }
-
-# ── PUSH TO GITHUB ─────────────────────────────────────────────────────────────
-def push_github():
-    import subprocess
-    try:
-        res = subprocess.run(
-            ['git', '-C', FOLDER, 'status', '--porcelain', 'fraud_data.json'],
-            capture_output=True, text=True)
-        if not res.stdout.strip():
-            print('  GitHub: no changes — skipped push'); return
-        subprocess.run(['git', '-C', FOLDER, 'add', 'fraud_data.json'], check=True)
-        today = datetime.now().strftime('%Y-%m-%d %H:%M')
-        subprocess.run(['git', '-C', FOLDER, 'commit', '-m', f'fraud data update {today}'], check=True)
-        subprocess.run(['git', '-C', FOLDER, 'push'], check=True)
-        print('  GitHub: pushed OK')
-    except Exception as e:
-        print(f'  GitHub push failed: {e}')
-
-# ── MAIN ───────────────────────────────────────────────────────────────────────
-def main():
-    print('=' * 60)
-    print('  Fraud Analysis Rebuilder  (MySQL-native)')
-    print('=' * 60)
-
-    cfg = _load_db_config()
-
-    print('[1/4] Loading user map ...')
-    umap = load_users()
-    print(f'      {len(umap):,} users')
-
-    print('[2/4] Loading returns (MySQ
+        'product': _build_product_agg(su
