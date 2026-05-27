@@ -411,7 +411,25 @@ def compute_store_risk(df, branches_or_cfg=None):
     zero_by = ret_mo.groupby('whs')['is_zero'].mean() * 100
     cnt_by  = ret_mo.groupby('whs').size()
 
-    all_whs = set(store_meta.keys()) | set(sales_map.keys())
+    # Valid store codes only: numeric, 1–500 (excludes 901, 999, and any non-store codes)
+    def _valid_whs(code):
+        try:
+            n = int(code)
+            return 1 <= n <= 500
+        except Exception:
+            return False
+
+    all_whs = {w for w in (set(store_meta.keys()) | set(sales_map.keys()))
+               if _valid_whs(w)}
+
+    # If cost_map is missing or all-zero (fact_sales.total_cost may be unpopulated),
+    # fall back to MYPOS2018_CENTER.whsdd.whsddpnetcost which is always populated
+    if cfg and not any(v for v in cost_map.values() if v):
+        try:
+            _, cost_map = _query_whsdd_sales_cost(cfg, max_mo)
+            print(f'  GP cost: fallback to MYPOS2018_CENTER.whsdd ({len(cost_map)} stores)')
+        except Exception as e:
+            print(f'  whsdd cost fallback error: {e}')
 
     # Chain-average GP% (used to compute per-store deviation)
     total_s_all = sum(float(sales_map.get(w, 0)) for w in all_whs)
@@ -613,25 +631,4 @@ def build_month(sub, barmap=None, prodmap=None):
     dy['day'] = dy['day'].astype(int); dy = dy.sort_values('day')
 
     za = float(sub[sub['is_zero']]['amount'].sum())
-    na = float(hr[hr['hour'].isin([22, 23])]['amount'].sum()) if len(hr) else 0.0
-
-    return {
-        'stats': {
-            'n':          int(sub['rtsono'].nunique()),
-            'total':      float(sub['amount'].sum()),
-            'n_rtu':      int(sub['rtuname'].nunique()),
-            'n_store':    int(sub['whs'].nunique()),
-            'n_zero':     int(sub['is_zero'].sum()),
-            'zero_amt':   za,
-            'n_so_dup':   int(len(so)),
-            'so_dup_amt': float(so['amount'].sum()),
-            'night_amt':  na,
-        },
-        'rtu':     _rec(rtu.head(600)),
-        'store':   _rec(st.head(250)),
-        'dm':      _rec(dm),
-        'rm':      _rec(rm),
-        'hour':    _rec(hr),
-        'day':     _rec(dy),
-        'so':      so_list[:500],
-        'product': _build_product_agg(su
+    na = float(hr[hr['hour'].isin([22, 23])]['amou
