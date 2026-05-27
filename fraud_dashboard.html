@@ -518,7 +518,7 @@ function renderStoreRisk(){
       <td class="${r.zero_pct>5?'cred':r.zero_pct>2?'corange':'cgreen'}">${pct(r.zero_pct)}</td>
       <td class="amt">฿${fmt(r.ret_mtd)}</td>
       <td>${r.ret_cnt}</td>
-      <td class="${(r.gp_dev||0)>1?'cred':(r.gp_dev||0)>0.5?'corange':'cgreen'}">${((r.gp_dev||0)||0).toFixed(2)}</td>
+      <td class="${(r.gp_dev||0)<-1?'cred':(r.gp_dev||0)<0?'corange':'cgreen'}">${((r.gp_dev||0)||0).toFixed(2)}</td>
     </tr>`;
   }).join('');
 }
@@ -1117,118 +1117,4 @@ function prodRowClick(tr){
     inner+='<tr style="border-top:1px solid #f1f5f9">'
       +'<td style="padding:4px 8px;color:var(--blue)">'+soEsc(b.rtsono||'')+'</td>'
       +'<td style="padding:4px 8px">'+soEsc(b.cashier||'')+(b.fullname?' · '+soEsc(b.fullname):'')+'</td>'
-      +'<td style="padding:4px 8px">'+soEsc(b.whs||'')+' '+soEsc(b.store_name||'')+'</td>'
-      +'<td style="padding:4px 8px;text-align:right">'+fmt(b.return_qty)+'</td>'
-      +'<td style="padding:4px 8px;text-align:right">฿'+fmt(b.amt)+'</td>'
-      +(function(){if(!b.return_date)return '<td style="padding:4px 8px;white-space:nowrap">-</td>';var x=new Date(b.return_date);return '<td style="padding:4px 8px;white-space:nowrap">'+('0'+x.getDate()).slice(-2)+'-'+('0'+(x.getMonth()+1)).slice(-2)+'-'+x.getFullYear()+'</td>';})()
-      +'<td style="padding:4px 8px;white-space:nowrap">'+soEsc(b.rttime||'')+'</td>'
-      +'</tr>';
-  }
-  inner+='</table>';
-  var det=document.createElement('tr');
-  det.className='prod-det-row';
-  det.innerHTML='<td colspan="8" style="padding:8px 16px;background:#f8fafc">'+inner+'</td>';
-  tr.parentNode.insertBefore(det, tr.nextSibling);
-}
-
-var soReasonSort={col:'amount',dir:-1};
-var soReasonData={};
-function sortSoReason(col){
-  soReasonSort=soReasonSort.col===col?{col:col,dir:-soReasonSort.dir}:{col:col,dir:-1};
-  var m=document.getElementById('so-month').value;
-  renderSoByReason(D.data[m]||D.data['ALL']);
-}
-function renderSoByReason(data){
-  var rows=(data.reason||[]).slice();
-  var col=soReasonSort.col, dir=soReasonSort.dir;
-  rows.sort(function(a,b){ return dir*(a[col]>b[col]?1:a[col]<b[col]?-1:0); });
-  document.getElementById('so-count').textContent=rows.length+' เหตุผล';
-  var arrow=function(c){ return col===c?(dir===-1?'↓':'↑'):''; };
-  // Grand total bills = sum of all reason bills (most accurate denominator)
-  var grandTotal=(data.stats&&data.stats.total_rows)?data.stats.total_rows:0;
-  if(!grandTotal){ var gt=0; for(var k=0;k<rows.length;k++) gt+=rows[k].bills||0; grandTotal=gt; }
-  var ths='<th>#</th>'
-    +'<th style="cursor:pointer" onclick="sortSoReason(&quot;rtrdesc&quot;)">เหตุผลการคืน '+arrow('rtrdesc')+'</th>'
-    +'<th style="text-align:right;cursor:pointer" onclick="sortSoReason(&quot;returns&quot;)">รายการ '+arrow('returns')+'</th>'
-    +'<th style="text-align:right;cursor:pointer" onclick="sortSoReason(&quot;bills&quot;)">จำนวนบิล '+arrow('bills')+'</th>'
-    +'<th style="text-align:right">% ของทั้งหมด</th>'
-    +'<th style="text-align:right;cursor:pointer" onclick="sortSoReason(&quot;amount&quot;)">ยอดรวม (฿) '+arrow('amount')+'</th>'
-    +'<th style="text-align:right;cursor:pointer" onclick="sortSoReason(&quot;stores&quot;)">ร้าน '+arrow('stores')+'</th>'
-    +'<th style="text-align:right;cursor:pointer" onclick="sortSoReason(&quot;cashiers&quot;)">พนักงาน '+arrow('cashiers')+'</th>';
-  document.getElementById('so-thead-row').innerHTML=ths;
-  soReasonData={};
-  var html='';
-  // Summary row totals
-  var sumBills=0, sumAmt=0, sumReturns=0;
-  for(var k=0;k<rows.length;k++){ sumBills+=rows[k].bills||0; sumAmt+=rows[k].amount||0; sumReturns+=rows[k].returns||0; }
-  for(var i=0;i<rows.length;i++){
-    var r=rows[i];
-    soReasonData[i]=r.bills_list||[];
-    var pct=grandTotal>0?(r.bills/grandTotal*100).toFixed(1):'0.0';
-    var barW=grandTotal>0?Math.round(r.bills/grandTotal*80):0;
-    html+='<tr class="so-row" data-ridx="'+i+'" onclick="reasonRowClick(this)" style="cursor:pointer;user-select:none">'
-      +'<td style="color:#94a3b8;font-size:12px">'+(i+1)+'</td>'
-      +'<td>▶ <strong>'+soEsc(r.rtrdesc||'(ไม่ระบุ)')+'</strong></td>'
-      +'<td style="text-align:right">'+fmt(r.returns)+'</td>'
-      +'<td style="text-align:right"><span class="badge bL">'+fmt(r.bills)+'</span></td>'
-      +'<td style="text-align:right;min-width:110px">'
-        +'<span style="font-weight:600;color:var(--blue)">'+pct+'%</span> '
-        +'<span style="display:inline-block;width:'+barW+'px;height:6px;background:var(--blue);opacity:0.25;border-radius:3px;vertical-align:middle"></span>'
-      +'</td>'
-      +'<td class="amt" style="text-align:right">฿'+fmt(r.amount)+'</td>'
-      +'<td style="text-align:right">'+fmt(r.stores)+'</td>'
-      +'<td style="text-align:right">'+fmt(r.cashiers)+'</td>'
-      +'</tr>';
-  }
-  // Grand total footer row
-  var totalPct=grandTotal>0?(sumBills/grandTotal*100).toFixed(1):'0.0';
-  html+='<tr style="background:#f8fafc;font-weight:600;border-top:2px solid var(--border)">'
-    +'<td colspan="2" style="padding:6px 8px;color:#374151">รวมทั้งหมด</td>'
-    +'<td style="text-align:right;padding:4px 8px">'+fmt(sumReturns)+'</td>'
-    +'<td style="text-align:right;padding:4px 8px"><span class="badge bL">'+fmt(sumBills)+'</span></td>'
-    +'<td style="text-align:right;padding:4px 8px;color:var(--blue)">'+totalPct+'%</td>'
-    +'<td class="amt" style="text-align:right;padding:4px 8px">฿'+fmt(sumAmt)+'</td>'
-    +'<td colspan="2"></td>'
-    +'</tr>';
-  document.getElementById('so-body').innerHTML=html;
-}
-function reasonRowClick(tr){
-  var next=tr.nextElementSibling;
-  if(next&&next.classList.contains('reason-det-row')){
-    next.remove(); tr.cells[1].innerHTML='▶ '+tr.cells[1].innerHTML.substring(2); return;
-  }
-  tr.cells[1].innerHTML='▼ '+tr.cells[1].innerHTML.substring(2);
-  var idx=parseInt(tr.getAttribute('data-ridx'),10);
-  var bills=soReasonData[idx]||[];
-  var inner='<table style="width:100%;font-size:12px;border-collapse:collapse">'
-    +'<tr style="background:#f8fafc;color:#64748b">'
-    +'<th style="padding:4px 8px;text-align:left">RTSONO</th>'
-    +'<th style="padding:4px 8px;text-align:left">พนักงาน</th>'
-    +'<th style="padding:4px 8px;text-align:left">ร้าน</th>'
-    +'<th style="padding:4px 8px;text-align:right">ยอด (฿)</th>'
-    +'<th style="padding:4px 8px;text-align:left;white-space:nowrap;min-width:92px">วันที่</th>'
-    +'<th style="padding:4px 8px;text-align:left;white-space:nowrap;min-width:54px">เวลา</th>'
-    +'</tr>';
-  for(var j=0;j<bills.length;j++){
-    var b=bills[j];
-    var dt='';
-    if(b.return_date){var x=new Date(b.return_date);dt=('0'+x.getDate()).slice(-2)+'-'+('0'+(x.getMonth()+1)).slice(-2)+'-'+x.getFullYear();}
-    inner+='<tr style="border-top:1px solid #f1f5f9">'
-      +'<td style="padding:4px 8px;color:var(--blue)">'+soEsc(b.rtsono||'')+'</td>'
-      +'<td style="padding:4px 8px">'+soEsc(b.cashier||'')+(b.fullname?' · '+soEsc(b.fullname):'')+'</td>'
-      +'<td style="padding:4px 8px">'+soEsc(b.whs||'')+' '+soEsc(b.store_name||'')+'</td>'
-      +'<td style="padding:4px 8px;text-align:right">฿'+fmt(b.amt)+'</td>'
-      +'<td style="padding:4px 8px">'+(dt||'-')+'</td>'
-      +'<td style="padding:4px 8px;white-space:nowrap">'+soEsc(b.rttime||'')+'</td>'
-      +'</tr>';
-  }
-  inner+='</table>';
-  var det=document.createElement('tr');
-  det.className='reason-det-row';
-  det.innerHTML='<td colspan="7" style="padding:8px 16px;background:#f8fafc">'+inner+'</td>';
-  tr.parentNode.insertBefore(det, tr.nextSibling);
-}
-
-</script>
-</body>
-</html>
+      +'<td style="padding:4px 8px">'+soEsc(b.whs||'')+' '+soEsc(b.store_name
