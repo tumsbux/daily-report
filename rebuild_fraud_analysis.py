@@ -1,219 +1,531 @@
 #!/usr/bin/env python3
 """
-rebuild_fraud_analysis.py
-=========================
-Rebuilds fraud_analysis.html from:
-  - returnall.txt      (return transactions, all months)
-  - username.txt       (employee ID → full name)
-  - data-lake_dim_branch.sql  (store → DM/RM mapping)
-  - target.txt         (MTD sales per store, for return-rate calc)
+rebuild_fraud_analysis.py  ── MySQL-native edition
+====================================================
+Primary data source: MySQL data-lake
+  fact_returns JOIN dim_branch + dim_item_barcode + dim_product  (one query)
+  fact_sales  (MTD sales per store for risk scoring)
 
-Run manually or via update_dashboard.py (called automatically each morning).
+Fallback: local .txt / .sql dump files (offline mode)
 
 Usage:
-    python rebuild_fraud_analysis.py
-    python rebuild_fraud_analysis.py --no-push    # skip GitHub push
+    py rebuild_fraud_analysis.py             # rebuild + push to GitHub
+    py rebuild_fraud_analysis.py --no-push   # rebuild only (no push)
 """
 
-import os, re, json, sys, subprocess
+import os, json, sys
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
 
-# ── CONFIG ────────────────────────────────────────────────────────────────────
-FOLDER  = os.path.dirname(os.path.abspath(__file__))
-PUSH    = '--no-push' not in sys.argv
+# ── PATHS ─────────────────────────────────────────────────────────────────────
+FOLDER = os.path.dirname(os.path.abspath(__file__))
+PUSH   = '--no-push' not in sys.argv
 
-RETURNALL = os.path.join(FOLDER, 'returnall.txt')
-USERNAME  = os.path.join(FOLDER, 'username.txt')
-BRANCH_SQL= os.path.join(FOLDER, 'data-lake_dim_branch.sql')
-TARGET    = os.path.join(FOLDER, 'target.txt')
-OUT_JSON  = os.path.join(FOLDER, 'fraud_data.json')
-OUT_HTML  = os.path.join(FOLDER, 'fraud_analysis.html')
+# Fallback files (used only when MySQL is unavailable)
+RETURNALL    = os.path.join(FOLDER, 'returnall.txt')
+USERNAME     = os.path.join(FOLDER, 'username.txt')
+BRANCH_SQL   = os.path.join(FOLDER, 'data-lake_dim_branch.sql')
+TARGET       = os.path.join(FOLDER, 'target.txt')
+BARCODE_SQL  = os.path.join(FOLDER, 'data-lake_dim_item_barcode.sql')
+PRODUCT_SQL  = os.path.join(FOLDER, 'data-lake_dim_product.sql')
 
-# ── TEMPLATE (embedded, no external file needed) ──────────────────────────────
-# The HTML template is read from fraud_analysis_template.html if it exists,
-# otherwise a minimal fallback is used.  When Claude regenerates the dashboard
-# it always writes the template alongside this script.
-TEMPLATE_FILE  = os.path.join(FOLDER, 'fraud_analysis_template.html')
-BARCODE_SQL    = os.path.join(FOLDER, 'data-lake_dim_item_barcode.sql')
-PRODUCT_SQL    = os.path.join(FOLDER, 'data-lake_dim_product.sql')
+OUT_JSON       = os.path.join(FOLDER, 'fraud_data.json')
+DB_CONFIG_FILE = os.path.join(FOLDER, 'db_config.json')
 
-# ── LOAD USERNAME MAP ─────────────────────────────────────────────────────────
+# ── USERNAME MAP (no dim_user in MySQL — keep file-based) ─────────────────────
 def load_users():
+    if not os.path.exists(USERNAME):
+        return {}
     df = pd.read_csv(USERNAME, sep='\t', dtype=str, on_bad_lines='skip')
     return dict(zip(df['uname'].str.strip(), df['ufname'].str.strip()))
 
-# ── LOAD DIM_BRANCH ───────────────────────────────────────────────────────────
+# ── MYSQL HELPERS ─────────────────────────────────────────────────────────────
+def _load_db_config():
+    if not os.path.exists(DB_CONFIG_FILE):
+        return None
+    with open(DB_CONFIG_FILE, encoding='utf-8') as f:
+        return json.load(f)
+
+def _mysql_conn(cfg):
+    import mysql.connector
+    return mysql.connector.connect(
+        host=cfg['host'], port=cfg.get('port', 3306),
+        user=cfg['user'], password=cfg['password'],
+        database=cfg['database'], connection_timeout=30,
+        charset='utf8mb4'
+    )
+
+def _query_returns_full(cfg, months_back=3):
+    """
+    Single JOIN: fact_returns + dim_branch + dim_item_barcode + dim_product.
+    Returns enriched DataFrame — store_name, dm, rm, parcode, idesc pre-filled.
+    Primary amount column: line_amount_inc_vat (aliased to 'amount').
+    """
+    from dateutil.relativedelta import relativedelta
+    start = (date.today().replace(day=1)
+             - relativedelta(months=months_back - 1)).strftime('%Y-%m-01')
+    sql = f"""
+        SELECT
+            fr.rtno,
+            fr.rtsono,
+            fr.rtserlno,
+            fr.iprod,
+            COALESCE(dib.parcode, fr.iprod)  AS parcode,
+            COALESCE(dp.idesc,    '')         AS idesc,
+            fr.return_date,
+            fr.cstcode,
+            fr.rtstatus,
+            fr.warehouse_code,
+            LPAD(fr.warehouse_code, 3, '0')  AS whs,
+            fr.return_qty,
+            fr.unit_price,
+            fr.line_amount_inc_vat           AS amount,
+            fr.allocated_net_amount,
+            fr.rtuname,
+            fr.rttime,
+            fr.rtrcode,
+            fr.rtrdesc,
+            COALESCE(db.name,      '?')      AS store_name,
+            COALESCE(db.dm,        '?')      AS dm,
+            COALESCE(db.rm,        '?')      AS rm,
+            COALESCE(db.prvn_name, '')       AS prvn_name
+        FROM fact_returns fr
+        LEFT JOIN dim_branch db
+               ON LPAD(fr.warehouse_code, 3, '0') = db.code
+        LEFT JOIN dim_item_barcode dib
+               ON fr.iprod = dib.barcode AND dib.baractive = 'Y'
+        LEFT JOIN dim_product dp
+               ON COALESCE(dib.parcode, fr.iprod) = dp.iprod
+        WHERE fr.rtstatus = 'U'
+          AND fr.return_date >= '{start}'
+          AND fr.warehouse_code NOT IN ('901', '999')
+    """
+    conn = _mysql_conn(cfg)
+    df = pd.read_sql(sql, conn)
+    conn.close()
+    bills = df['rtsono'].nunique()
+    print(f'  MySQL returns: {len(df):,} rows | {bills:,} bills | from {start}')
+    return df
+
+def _query_sales_mtd(cfg):
+    """Current-month net sales + cost per store from fact_sales.
+    Returns (sales_map, cost_map) where each is {whs: float}."""
+    sql = """
+        SELECT LPAD(sotowhs, 3, '0') AS whs,
+               SUM(net_sales_amt)    AS sales_mtd,
+               SUM(total_cost)       AS cost_mtd
+        FROM fact_sales
+        WHERE sodate >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+          AND solinetype = 'N'
+          AND sotowhs NOT IN ('901','999','0901','0999')
+        GROUP BY sotowhs
+    """
+    conn = _mysql_conn(cfg)
+    df = pd.read_sql(sql, conn)
+    conn.close()
+    df['sales_mtd'] = pd.to_numeric(df['sales_mtd'], errors='coerce').fillna(0)
+    df['cost_mtd']  = pd.to_numeric(df['cost_mtd'],  errors='coerce').fillna(0)
+    total_s = df['sales_mtd'].sum()
+    total_c = df['cost_mtd'].sum()
+    avg_gp  = round((total_s - total_c) / total_s * 100, 2) if total_s else 0
+    print(f'  MySQL sales MTD: {len(df):,} stores | '
+          f'฿{total_s:,.0f} | avg GP%={avg_gp:.1f}%')
+    sales_map = df.set_index('whs')['sales_mtd'].to_dict()
+    cost_map  = df.set_index('whs')['cost_mtd'].to_dict()
+    return sales_map, cost_map
+
+# ── LEGACY FALLBACK PARSERS ────────────────────────────────────────────────────
+def _parse_branch_row(data, start):
+    i = start; n = len(data)
+    if i >= n or data[i] != '(':
+        return None
+    i += 1; cols = []
+    while i < n:
+        if data[i] == ')':
+            i += 1; break
+        if data[i] == "'":
+            i += 1; val = []
+            while i < n:
+                c = data[i]
+                if c == '\\' and i + 1 < n: val.append(data[i+1]); i += 2
+                elif c == "'": i += 1; break
+                else: val.append(c); i += 1
+            cols.append(''.join(val))
+        elif data[i] in (',', ' '): i += 1
+        elif data[i:i+4] == 'NULL': cols.append(''); i += 4
+        else:
+            j = i
+            while i < n and data[i] not in (',', ')'): i += 1
+            cols.append(data[j:i])
+        if len(cols) == 6:
+            while i < n and data[i] != ')': i += 1
+            i += 1; break
+    if len(cols) >= 6:
+        return cols[0], cols[1], cols[3], cols[5], i
+    return None
+
 def load_branches():
-    with open(BRANCH_SQL, encoding='utf-8') as f:
-        sql = f.read()
-    vm = re.search(r"INSERT INTO `dim_branch` VALUES\s*(.*?);", sql, re.DOTALL)
+    if not os.path.exists(BRANCH_SQL): return {}
+    with open(BRANCH_SQL, encoding='utf-8', errors='replace') as f: sql = f.read()
+    prefix = "INSERT INTO `dim_branch` VALUES "
     branches = {}
-    for r in re.findall(r"\(([^)]+)\)", vm.group(1)):
-        p = [x.strip().strip("'") for x in r.split(',')]
-        if len(p) >= 6:
-            branches[p[0].zfill(3)] = {
-                'store_name': p[1] or '?', 'dm': p[3] or '?', 'rm': p[5] or '?'
-            }
+    for line in sql.splitlines():
+        line = line.strip()
+        if not line.startswith(prefix): continue
+        data = line[len(prefix):]; i = 0
+        while i < len(data):
+            if data[i] != '(': i += 1; continue
+            result = _parse_branch_row(data, i)
+            if result is None: i += 1; continue
+            whs, store_name, dm, rm, i = result
+            branches[whs.zfill(3)] = {'store_name': store_name or '?', 'dm': dm or '?', 'rm': rm or '?'}
+            if i < len(data) and data[i] == ',': i += 1
     return branches
 
-
-# ── LOAD ITEM BARCODE (barcode → parcode) ─────────────────────────────────────
 def _parse_sql_two_cols(sql_text, table_name):
-    """Fast line-by-line parser: reads INSERT lines and extracts first two quoted string columns."""
-    result = {}
-    prefix = f"INSERT INTO `{table_name}` VALUES "
+    result = {}; prefix = f"INSERT INTO `{table_name}` VALUES "
     for line in sql_text.splitlines():
         line = line.strip()
-        if not line.startswith(prefix):
-            continue
-        # Each row: ('col1','col2',...)  split on ),( boundaries
-        data = line[len(prefix):]
-        # Walk char-by-char to extract first two quoted values per row
-        i = 0
-        n = len(data)
+        if not line.startswith(prefix): continue
+        data = line[len(prefix):]; i = 0; n = len(data)
         while i < n:
-            if data[i] != '(':
-                i += 1
-                continue
-            i += 1  # skip '('
-            cols = []
+            if data[i] != '(': i += 1; continue
+            i += 1; cols = []
             for _ in range(2):
-                if i >= n or data[i] != "'":
-                    break
-                i += 1  # skip opening quote
-                val = []
+                if i >= n or data[i] != "'": break
+                i += 1; val = []
                 while i < n:
                     c = data[i]
-                    if c == '\\' and i + 1 < n:
-                        val.append(data[i+1])
-                        i += 2
-                    elif c == "'":
-                        i += 1  # skip closing quote
-                        break
-                    else:
-                        val.append(c)
-                        i += 1
+                    if c == '\\' and i+1 < n: val.append(data[i+1]); i += 2
+                    elif c == "'": i += 1; break
+                    else: val.append(c); i += 1
                 cols.append(''.join(val))
-                if i < n and data[i] == ',':
-                    i += 1  # skip comma between cols
-            if len(cols) == 2:
-                result[cols[0]] = cols[1]
-            # skip to end of this row
-            while i < n and data[i] != ')':
-                i += 1
-            i += 1  # skip ')'
+                if i < n and data[i] == ',': i += 1
+            if len(cols) == 2: result[cols[0]] = cols[1]
+            while i < n and data[i] != ')': i += 1
+            i += 1
     return result
 
 def load_barcode_map():
-    if not os.path.exists(BARCODE_SQL):
-        return {}
-    with open(BARCODE_SQL, encoding='utf-8') as f:
-        sql = f.read()
-    # col1=parcode, col2=barcode  →  bmap[barcode]=parcode
-    raw = _parse_sql_two_cols(sql, 'dim_item_barcode')
-    return {v: k for k, v in raw.items()}  # flip: barcode->parcode
+    if not os.path.exists(BARCODE_SQL): return {}
+    with open(BARCODE_SQL, encoding='utf-8', errors='replace') as f: sql = f.read()
+    barmap = {}; prefix = "INSERT INTO `dim_item_barcode` VALUES "
+    for line in sql.splitlines():
+        line = line.strip()
+        if not line.startswith(prefix): continue
+        data = line[len(prefix):]; i = 0; n = len(data)
+        while i < n:
+            if data[i] != '(': i += 1; continue
+            i += 1; cols = []
+            for _ in range(2):
+                if i >= n or data[i] != "'": break
+                i += 1; val = []
+                while i < n:
+                    c = data[i]
+                    if c == '\\' and i+1 < n: val.append(data[i+1]); i += 2
+                    elif c == "'": i += 1; break
+                    else: val.append(c); i += 1
+                cols.append(''.join(val))
+                if i < n and data[i] == ',': i += 1
+            if len(cols) == 2: barmap[cols[1]] = cols[0]   # barcode → parcode
+            while i < n and data[i] != ')': i += 1
+            i += 1
+    return barmap
 
-# ── LOAD DIM_PRODUCT (parcode → idesc) ────────────────────────────────────────
 def load_product_map():
-    if not os.path.exists(PRODUCT_SQL):
-        return {}
-    with open(PRODUCT_SQL, encoding='utf-8') as f:
-        sql = f.read()
-    # col1=iprod, col2=idesc  →  pmap[iprod]=idesc
+    if not os.path.exists(PRODUCT_SQL): return {}
+    with open(PRODUCT_SQL, encoding='utf-8', errors='replace') as f: sql = f.read()
     return _parse_sql_two_cols(sql, 'dim_product')
 
-# ── LOAD RETURNS ──────────────────────────────────────────────────────────────
-def load_returns(umap, branches):
-    df = pd.read_csv(RETURNALL, sep='\t', dtype=str)
-    for c in ['line_amount_inc_vat', 'return_qty', 'unit_price', 'allocated_net_amount']:
-        df[c] = pd.to_numeric(df[c], errors='coerce')
+# ── MAIN DATA LOADER ───────────────────────────────────────────────────────────
+def load_returns(umap, branches=None):
+    """
+    Load & enrich returns DataFrame.
+    MySQL path: single JOIN query (fact_returns + dim tables).
+    Fallback:   returnall.txt + local SQL dump files.
+    'branches' param accepted for backward compat but ignored on MySQL path.
+    """
+    cfg = _load_db_config()
+    df = None
+
+    # ── MySQL path ────────────────────────────────────────────────────────────
+    if cfg:
+        try:
+            df = _query_returns_full(cfg)
+        except Exception as e:
+            print(f'  MySQL error: {e}')
+            df = None
+
+    # ── Fallback: local files ─────────────────────────────────────────────────
+    if df is None:
+        print(f'  Falling back to local files ...')
+        if branches is None:
+            branches = load_branches()
+        barmap  = load_barcode_map()
+        prodmap = load_product_map()
+        df = pd.read_csv(RETURNALL, sep='\t', dtype=str, on_bad_lines='skip')
+        df = df[df['rtstatus'].str.strip() == 'U'].copy()
+        df['whs']        = df['warehouse_code'].str.zfill(3)
+        df['store_name'] = df['whs'].map(lambda x: branches.get(x, {}).get('store_name', '?'))
+        df['dm']         = df['whs'].map(lambda x: branches.get(x, {}).get('dm', '?'))
+        df['rm']         = df['whs'].map(lambda x: branches.get(x, {}).get('rm', '?'))
+        df['prvn_name']  = ''
+        df['parcode']    = df['iprod'].astype(str).map(lambda b: barmap.get(b, b))
+        df['idesc']      = df['parcode'].map(lambda p: prodmap.get(p, ''))
+        # Choose best amount column
+        for col in ['line_amount_inc_vat', 'allocated_net_amount']:
+            if col in df.columns:
+                df['amount'] = pd.to_numeric(df[col], errors='coerce')
+                break
+
+    # ── Common post-processing ────────────────────────────────────────────────
+    for c in ['amount', 'return_qty', 'unit_price', 'allocated_net_amount']:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors='coerce')
+    if 'amount' not in df.columns:
+        df['amount'] = 0.0
+
     df['return_date'] = pd.to_datetime(df['return_date'], errors='coerce')
-    df['month']   = df['return_date'].dt.strftime('%Y-%m')
-    df['day']     = df['return_date'].dt.day
-    df['whs']     = df['warehouse_code'].str.zfill(3)
-    df['rtuname'] = df['rtuname'].fillna('').str.strip()
-    for col in ['store_name', 'dm', 'rm']:
-        df[col] = df['whs'].map(lambda x, c=col: branches.get(x, {}).get(c, '?')).fillna('?')
-    # Filter only active returns (U = Used/Active); exclude cancelled (C)
-    df = df[df['rtstatus'].str.strip() == 'U'].copy()
-    df['is_zero']  = df['cstcode'].str.strip() == '0000'
-    df['hour']     = pd.to_numeric(df['rttime'].str[:2], errors='coerce')
+    df['month'] = df['return_date'].dt.strftime('%Y-%m')
+    df['day']   = df['return_date'].dt.day
+
+    if 'whs' not in df.columns:
+        df['whs'] = df['warehouse_code'].astype(str).str.zfill(3)
+
+    df['rtuname'] = df['rtuname'].fillna('').astype(str).str.strip()
+    df['cstcode'] = df['cstcode'].fillna('').astype(str).str.strip()
+    df['is_zero'] = df['cstcode'] == '0000'
+
+    # rttime: timedelta64 (MySQL TIME) or string → convert to "HH:MM" string
+    if 'rttime' in df.columns:
+        if pd.api.types.is_timedelta64_dtype(df['rttime']):
+            df['hour'] = df['rttime'].dt.components['hours']
+            # Convert timedelta to "HH:MM" so JSON serialises as readable string
+            def _td_to_hhmm(td):
+                try:
+                    if pd.isna(td): return ''
+                    c = td.components
+                    return f"{int(c.hours):02d}:{int(c.minutes):02d}"
+                except Exception:
+                    return ''
+            df['rttime'] = df['rttime'].apply(_td_to_hhmm)
+        else:
+            df['hour'] = pd.to_numeric(df['rttime'].astype(str).str[:2], errors='coerce')
+            # Normalise string times to "HH:MM"
+            df['rttime'] = df['rttime'].astype(str).str[:5]
+    else:
+        df['hour'] = None
+
     df['fullname'] = df['rtuname'].map(umap).fillna('?')
+
+    for col in ['store_name', 'dm', 'rm', 'idesc', 'parcode', 'rtrdesc', 'rtrcode', 'prvn_name']:
+        if col in df.columns:
+            df[col] = df[col].fillna('').astype(str)
+
     return df
 
-# ── COMPUTE STORE RISK (simplified from target.txt + returnall) ────────────────
-def compute_store_risk(df, branches):
-    tgt = pd.read_csv(TARGET, sep='\t', dtype=str, on_bad_lines='skip')
-    tgt['whsddpnetamt'] = pd.to_numeric(tgt.get('whsddpnetamt'), errors='coerce')
-    # Use latest full month available in target
-    max_mo = df['month'].max()
-    yr, mo = max_mo.split('-')
-    tgt_mo = tgt[(tgt['whsddyyyy'] == yr) & (tgt['whsddmm'] == str(int(mo)).zfill(2))]
-    tgt_mo = tgt_mo.copy(); tgt_mo['whs'] = tgt_mo['whsddno'].str.zfill(3)
-    sales = tgt_mo.groupby('whs')['whsddpnetamt'].sum()
+# ── STORE RISK ─────────────────────────────────────────────────────────────────
+def compute_store_risk(df, branches_or_cfg=None):
+    """
+    Compute risk score per store.
+    Tries MySQL fact_sales for MTD sales; falls back to target.txt.
+    'branches_or_cfg' can be a cfg dict (MySQL) or legacy branches dict.
+    """
+    cfg = None
+    if isinstance(branches_or_cfg, dict) and 'host' in branches_or_cfg:
+        cfg = branches_or_cfg
+    else:
+        cfg = _load_db_config()
 
-    ret_mo = df[df['month'] == max_mo]
-    ret_by  = ret_mo.groupby('whs')['allocated_net_amount'].sum()
+    # ── Get MTD sales + cost ──────────────────────────────────────────────────
+    sales_map = {}
+    cost_map  = {}
+    if cfg:
+        try:
+            sales_map, cost_map = _query_sales_mtd(cfg)
+        except Exception as e:
+            print(f'  MySQL sales error: {e}')
+
+    if not sales_map and os.path.exists(TARGET):
+        try:
+            tgt = pd.read_csv(TARGET, sep='\t', dtype=str, on_bad_lines='skip')
+            tgt['whsddpnetamt']  = pd.to_numeric(tgt.get('whsddpnetamt'),  errors='coerce')
+            tgt['whsddpnetcost'] = pd.to_numeric(tgt.get('whsddpnetcost'), errors='coerce')
+            max_mo = df['month'].max()
+            yr, mo = max_mo.split('-')
+            tgt_mo = tgt[(tgt['whsddyyyy'] == yr) & (tgt['whsddmm'] == str(int(mo)).zfill(2))].copy()
+            tgt_mo['whs'] = tgt_mo['whsddno'].str.zfill(3)
+            sales_map = tgt_mo.groupby('whs')['whsddpnetamt'].sum().to_dict()
+            cost_map  = tgt_mo.groupby('whs')['whsddpnetcost'].sum().to_dict()
+            print(f'  Store risk: fallback target.txt ({len(sales_map)} stores)')
+        except Exception as e:
+            print(f'  target.txt error: {e}')
+
+    # ── Aggregations for latest month ─────────────────────────────────────────
+    max_mo  = df['month'].max()
+    ret_mo  = df[df['month'] == max_mo]
+
+    store_meta = df.groupby('whs').agg(
+        store_name=('store_name', 'first'),
+        dm=('dm', 'first'),
+        rm=('rm', 'first'),
+    ).reset_index().set_index('whs').to_dict(orient='index')
+
+    ret_by  = ret_mo.groupby('whs')['amount'].sum()
     zero_by = ret_mo.groupby('whs')['is_zero'].mean() * 100
     cnt_by  = ret_mo.groupby('whs').size()
 
+    all_whs = set(store_meta.keys()) | set(sales_map.keys())
+
+    # Chain-average GP% (used to compute per-store deviation)
+    total_s_all = sum(float(sales_map.get(w, 0)) for w in all_whs)
+    total_c_all = sum(float(cost_map.get(w, 0)) for w in all_whs)
+    avg_gp_pct  = round((total_s_all - total_c_all) / total_s_all * 100, 2) if total_s_all else 0
+
     rows = []
-    for whs, br in branches.items():
-        s = sales.get(whs, 0); r = ret_by.get(whs, 0)
-        zp = float(zero_by.get(whs, 0)); cnt = int(cnt_by.get(whs, 0))
-        if s == 0: continue
-        rr = r / s * 100
-        score = int(min(rr * 20, 50) + min(zp * 0.5, 30) + min(cnt * 0.5, 20))
-        level = 'HIGH' if score >= 50 else 'MEDIUM' if score >= 25 else 'LOW'
-        rows.append({'code': whs, 'name': br['store_name'],
-                     'dm_name': br['dm'], 'rm_name': br['rm'],
-                     'sales_mtd': round(float(s), 0), 'ret_mtd': round(float(r), 0),
-                     'ret_rate': round(rr, 3), 'zero_pct': round(zp, 1),
-                     'ret_cnt': cnt, 'score': score, 'level': level})
+    for whs in all_whs:
+        meta = store_meta.get(whs, {'store_name': '?', 'dm': '?', 'rm': '?'})
+        s    = float(sales_map.get(whs, 0))
+        c    = float(cost_map.get(whs, 0))
+        r    = float(ret_by.get(whs, 0))
+        zp   = float(zero_by.get(whs, 0))
+        cnt  = int(cnt_by.get(whs, 0))
+        # Per-store GP% and deviation from chain average
+        gp_pct = round((s - c) / s * 100, 2) if s > 0 else 0
+        gp_dev = round(gp_pct - avg_gp_pct, 2) if s > 0 else 0
+        if s == 0:
+            score = 0; level = 'LOW'; rr = 0.0
+        else:
+            rr    = r / s * 100
+            score = int(min(rr * 20, 50) + min(zp * 0.5, 30) + min(cnt * 0.5, 20))
+            level = 'HIGH' if score >= 50 else 'MEDIUM' if score >= 25 else 'LOW'
+            rr    = round(rr, 3)
+        rows.append({
+            'code': whs, 'name': meta['store_name'],
+            'dm_name': meta['dm'], 'rm_name': meta['rm'],
+            'sales_mtd': round(s, 0), 'ret_mtd': round(r, 0),
+            'ret_rate': rr, 'zero_pct': round(zp, 1),
+            'ret_cnt': cnt, 'score': score, 'level': level,
+            'gp_pct': gp_pct, 'gp_dev': gp_dev,
+        })
     rows.sort(key=lambda x: -x['score'])
     return rows
 
-# ── BUILD MONTHLY ANALYSIS ────────────────────────────────────────────────────
-def rec(d):
+# ── AGGREGATION HELPERS ────────────────────────────────────────────────────────
+def _rec(d):
     return json.loads(d.fillna('?').to_json(orient='records', force_ascii=False))
 
-def build_month(sub, barmap=None, prodmap=None):
+def _build_product_agg(sub, barmap=None, prodmap=None):
+    """Aggregate by product. Uses pre-joined parcode/idesc (barmap/prodmap ignored)."""
+    agg = sub.groupby('iprod').agg(
+        return_qty=('return_qty', 'sum'),
+        bills=('rtsono', 'nunique'),
+        amount=('amount', 'sum'),
+        parcode=('parcode', 'first'),
+        idesc=('idesc', 'first'),
+    ).reset_index()
+    agg['barcode']    = agg['iprod'].astype(str)
+    agg['return_qty'] = agg['return_qty'].fillna(0).round(0).astype(int)
+    agg = agg[['barcode', 'parcode', 'idesc', 'return_qty', 'bills', 'amount']]
+    agg = agg.sort_values('amount', ascending=False).head(500)
+    records = json.loads(agg.fillna('').to_json(orient='records', force_ascii=False))
+
+    for rec in records:
+        bc = rec['barcode']
+        sub_bc = sub[sub['iprod'] == bc].copy()
+        grp = sub_bc.groupby('rtsono').agg(
+            cashier=('rtuname', 'first'), fullname=('fullname', 'first'),
+            whs=('whs', 'first'), store_name=('store_name', 'first'),
+            return_date=('return_date', 'first'), rttime=('rttime', 'first'),
+            return_qty=('return_qty', 'sum'), amt=('amount', 'sum'),
+        ).reset_index()
+        grp['return_qty'] = grp['return_qty'].fillna(0).round(0).astype(int)
+        grp['amt']        = grp['amt'].fillna(0).round(0)
+        grp = grp.sort_values('amt', ascending=False).head(50)
+        if 'return_date' in grp.columns and pd.api.types.is_datetime64_any_dtype(grp['return_date']):
+            grp = grp.copy()
+            grp['return_date'] = grp['return_date'].dt.strftime('%Y-%m-%d').where(grp['return_date'].notna(), '')
+        rec['bills_list'] = json.loads(grp.fillna('').to_json(orient='records', force_ascii=False))
+    return records
+
+def _build_reason_agg(sub):
+    """Dominant-reason aggregation — no double-counting per bill."""
+    if 'rtrdesc' not in sub.columns:
+        return []
     sub = sub.copy()
-    barmap  = barmap  or {}
-    prodmap = prodmap or {}
-    # Repeat SO
+    sub['rtrdesc'] = sub['rtrdesc'].fillna('').str.strip()
+    sub.loc[sub['rtrdesc'] == '', 'rtrdesc'] = 'ไม่ระบุเหตุผล'
+
+    dominant = (sub.sort_values('amount', ascending=False)
+                   .groupby('rtsono')['rtrdesc'].first()
+                   .reset_index()
+                   .rename(columns={'rtrdesc': 'dominant_reason'}))
+    sub = sub.merge(dominant, on='rtsono', how='left')
+
+    returns_agg = sub.groupby('rtrdesc').agg(
+        returns=('rtno', 'count'), amount=('amount', 'sum'),
+        stores=('whs', 'nunique'), cashiers=('rtuname', 'nunique'),
+    ).reset_index()
+    bills_agg = sub.groupby('dominant_reason')['rtsono'].nunique().reset_index()
+    bills_agg.columns = ['rtrdesc', 'bills']
+    agg = returns_agg.merge(bills_agg, on='rtrdesc', how='left')
+    agg['bills'] = agg['bills'].fillna(0).astype(int)
+    agg = agg.sort_values('amount', ascending=False)
+    records = json.loads(agg.fillna('').to_json(orient='records', force_ascii=False))
+
+    dom_map = dominant.set_index('rtsono')['dominant_reason'].to_dict()
+    for rec in records:
+        reason = rec['rtrdesc']
+        sonos  = [s for s, dr in dom_map.items() if dr == reason]
+        sub_r  = sub[sub['rtsono'].isin(sonos)].copy()
+        grp = sub_r.groupby('rtsono').agg(
+            cashier=('rtuname', 'first'), fullname=('fullname', 'first'),
+            whs=('whs', 'first'), store_name=('store_name', 'first'),
+            return_date=('return_date', 'first'), rttime=('rttime', 'first'),
+            amt=('amount', 'sum'),
+        ).reset_index()
+        grp['amt'] = grp['amt'].fillna(0).round(0)
+        grp = grp.sort_values('amt', ascending=False).head(100)
+        if 'return_date' in grp.columns and pd.api.types.is_datetime64_any_dtype(grp['return_date']):
+            grp = grp.copy()
+            grp['return_date'] = grp['return_date'].dt.strftime('%Y-%m-%d').where(grp['return_date'].notna(), '')
+        rec['bills_list'] = json.loads(grp.fillna('').to_json(orient='records', force_ascii=False))
+    return records
+
+def build_month(sub, barmap=None, prodmap=None):
+    """Build all aggregations for one month (or ALL). barmap/prodmap ignored."""
+    sub = sub.copy()
+
+    # Repeat SO (bills with >1 line)
     so = sub.groupby('rtsono').agg(
-        lines=('rtno','count'), amount=('allocated_net_amount','sum'),
-        cashier=('rtuname','first'), fname=('fullname','first'),
-        store=('whs','first'), store_name=('store_name','first'),
-        dm=('dm','first'), rm=('rm','first'),
-        zero=('is_zero','sum'), date=('return_date','first')
+        lines=('rtno', 'count'), amount=('amount', 'sum'),
+        cashier=('rtuname', 'first'), fname=('fullname', 'first'),
+        store=('whs', 'first'), store_name=('store_name', 'first'),
+        dm=('dm', 'first'), rm=('rm', 'first'),
+        zero=('is_zero', 'sum'), date=('return_date', 'first'),
+        time=('rttime', 'first'),
     ).reset_index()
     so = so[so['lines'] > 1].sort_values('amount', ascending=False)
 
-    # Product detail per rtsono (barcode -> parcode -> idesc)
+    # Product detail per rtsono
     detail_map = (
         sub[sub['rtsono'].isin(so['rtsono'])]
-        .groupby(['rtsono','iprod'])
-        .agg(allocated_net_amount=('allocated_net_amount','sum'),
-             return_qty=('return_qty','sum'))
+        .groupby(['rtsono', 'iprod'])
+        .agg(amount=('amount', 'sum'), return_qty=('return_qty', 'sum'),
+             parcode=('parcode', 'first'), idesc=('idesc', 'first'))
         .reset_index()
-        .sort_values(['rtsono','allocated_net_amount'], ascending=[True, False])
+        .sort_values(['rtsono', 'amount'], ascending=[True, False])
     )
     detail_dict = {}
     for sono, grp in detail_map.groupby('rtsono'):
         items = []
         for _, row in grp.iterrows():
-            barcode = str(row['iprod'])
-            parcode = barmap.get(barcode, barcode)   # fallback to barcode itself
-            idesc   = prodmap.get(parcode, '')
             items.append({
-                'barcode': barcode,
-                'parcode': parcode,
-                'idesc':   idesc,
+                'barcode': str(row['iprod']),
+                'parcode': str(row['parcode']),
+                'idesc':   str(row['idesc']),
                 'qty':     int(row['return_qty']) if not pd.isna(row['return_qty']) else 0,
-                'amt':     round(float(row['allocated_net_amount']), 2)
+                'amt':     round(float(row['amount']), 2),
             })
         detail_dict[sono] = items
     so_list = json.loads(so.fillna('?').to_json(orient='records', force_ascii=False))
@@ -221,9 +533,9 @@ def build_month(sub, barmap=None, prodmap=None):
         r['detail'] = detail_dict.get(r.get('rtsono'), [])
 
     # rtuname
-    rtu = sub.groupby(['rtuname','fullname','whs','store_name','dm','rm']).agg(
-        returns=('rtno','count'), amount=('allocated_net_amount','sum'),
-        zero=('is_zero','sum'), uso=('rtsono','nunique'),
+    rtu = sub.groupby(['rtuname', 'fullname', 'whs', 'store_name', 'dm', 'rm']).agg(
+        returns=('rtno', 'count'), amount=('amount', 'sum'),
+        zero=('is_zero', 'sum'), uso=('rtsono', 'nunique'),
     ).reset_index()
     rtu['rep']   = rtu['returns'] - rtu['uso']
     rtu['zp']    = (rtu['zero'] / rtu['returns'] * 100).round(1)
@@ -232,132 +544,91 @@ def build_month(sub, barmap=None, prodmap=None):
     rtu = rtu.sort_values('amount', ascending=False)
 
     # Store
-    st = sub.groupby(['whs','store_name','dm','rm']).agg(
-        returns=('rtno','count'), amount=('allocated_net_amount','sum'),
-        cashiers=('rtuname','nunique'), zero=('is_zero','sum'),
+    st = sub.groupby(['whs', 'store_name', 'dm', 'rm']).agg(
+        returns=('rtno', 'count'), amount=('amount', 'sum'),
+        cashiers=('rtuname', 'nunique'), zero=('is_zero', 'sum'),
     ).reset_index()
     st['zp'] = (st['zero'] / st['returns'] * 100).round(1)
     st = st.sort_values('amount', ascending=False)
 
-    # DM  (returns = distinct rtsono bills; zp based on row count)
-    dm = sub.groupby(['dm','rm']).agg(
-        returns=('rtsono','nunique'), amount=('allocated_net_amount','sum'),
-        stores=('whs','nunique'), cashiers=('rtuname','nunique'),
-        zero=('is_zero','sum'), row_cnt=('rtno','count'),
+    # DM
+    dm = sub.groupby(['dm', 'rm']).agg(
+        returns=('rtsono', 'nunique'), amount=('amount', 'sum'),
+        stores=('whs', 'nunique'), cashiers=('rtuname', 'nunique'),
+        zero=('is_zero', 'sum'), row_cnt=('rtno', 'count'),
     ).reset_index()
     dm['zp'] = (dm['zero'] / dm['row_cnt'] * 100).round(1)
     dm = dm.drop(columns=['row_cnt']).sort_values('amount', ascending=False)
 
-    # RM  (returns = distinct rtsono bills; zp based on row count)
+    # RM
     rm = sub.groupby('rm').agg(
-        returns=('rtsono','nunique'), amount=('allocated_net_amount','sum'),
-        stores=('whs','nunique'), cashiers=('rtuname','nunique'),
-        zero=('is_zero','sum'), dms=('dm','nunique'), row_cnt=('rtno','count'),
+        returns=('rtsono', 'nunique'), amount=('amount', 'sum'),
+        stores=('whs', 'nunique'), cashiers=('rtuname', 'nunique'),
+        zero=('is_zero', 'sum'), dms=('dm', 'nunique'),
+        row_cnt=('rtno', 'count'),
     ).reset_index()
     rm['zp'] = (rm['zero'] / rm['row_cnt'] * 100).round(1)
     rm = rm.drop(columns=['row_cnt']).sort_values('amount', ascending=False)
 
     # Hour / Day
-    hr = sub.groupby('hour').agg(returns=('rtno','count'), amount=('allocated_net_amount','sum')).reset_index()
+    hr = sub.groupby('hour').agg(returns=('rtno', 'count'), amount=('amount', 'sum')).reset_index()
     hr = hr[hr['hour'].notna()].copy(); hr['hour'] = hr['hour'].astype(int); hr = hr.sort_values('hour')
-    dy = sub.groupby('day').agg(returns=('rtno','count'), amount=('allocated_net_amount','sum')).reset_index()
+    dy = sub.groupby('day').agg(returns=('rtno', 'count'), amount=('amount', 'sum')).reset_index()
     dy['day'] = dy['day'].astype(int); dy = dy.sort_values('day')
 
-    za = float(sub[sub['is_zero']]['allocated_net_amount'].sum())
-    na = float(hr[hr['hour'].isin([22,23])]['amount'].sum()) if len(hr) else 0.0
+    za = float(sub[sub['is_zero']]['amount'].sum())
+    na = float(hr[hr['hour'].isin([22, 23])]['amount'].sum()) if len(hr) else 0.0
+
     return {
-        'stats': {'n': int(sub['rtsono'].nunique()), 'total': float(sub['allocated_net_amount'].sum()),
-                  'n_rtu': int(sub['rtuname'].nunique()), 'n_store': int(sub['whs'].nunique()),
-                  'n_zero': int(sub['is_zero'].sum()), 'zero_amt': za,
-                  'n_so_dup': int(len(so)), 'so_dup_amt': float(so['amount'].sum()),
-                  'night_amt': na},
-        'rtu':   rec(rtu.head(100)),
-        'store': rec(st.head(100)),
-        'dm':    rec(dm),
-        'rm':    rec(rm),
-        'hour':  rec(hr),
-        'day':   rec(dy),
-        'so':    so_list[:60],
+        'stats': {
+            'n':          int(sub['rtsono'].nunique()),
+            'total':      float(sub['amount'].sum()),
+            'n_rtu':      int(sub['rtuname'].nunique()),
+            'n_store':    int(sub['whs'].nunique()),
+            'n_zero':     int(sub['is_zero'].sum()),
+            'zero_amt':   za,
+            'n_so_dup':   int(len(so)),
+            'so_dup_amt': float(so['amount'].sum()),
+            'night_amt':  na,
+        },
+        'rtu':     _rec(rtu.head(600)),
+        'store':   _rec(st.head(250)),
+        'dm':      _rec(dm),
+        'rm':      _rec(rm),
+        'hour':    _rec(hr),
+        'day':     _rec(dy),
+        'so':      so_list[:500],
+        'product': _build_product_agg(sub),
+        'reason':  _build_reason_agg(sub),
     }
 
-# ── PUSH TO GITHUB ────────────────────────────────────────────────────────────
+# ── PUSH TO GITHUB ─────────────────────────────────────────────────────────────
 def push_github():
+    import subprocess
     try:
         res = subprocess.run(
-            ['git', '-C', FOLDER, 'status', '--porcelain', 'fraud_analysis.html', 'fraud_data.json'],
+            ['git', '-C', FOLDER, 'status', '--porcelain', 'fraud_data.json'],
             capture_output=True, text=True)
         if not res.stdout.strip():
-            print('  GitHub: no changes — skipped push')
-            return
-        subprocess.run(['git', '-C', FOLDER, 'add', 'fraud_analysis.html', 'fraud_data.json'], check=True)
-        today = datetime.now().strftime('%Y-%m-%d')
-        subprocess.run(['git', '-C', FOLDER, 'commit', '-m', f'fraud analysis update {today}'], check=True)
+            print('  GitHub: no changes — skipped push'); return
+        subprocess.run(['git', '-C', FOLDER, 'add', 'fraud_data.json'], check=True)
+        today = datetime.now().strftime('%Y-%m-%d %H:%M')
+        subprocess.run(['git', '-C', FOLDER, 'commit', '-m', f'fraud data update {today}'], check=True)
         subprocess.run(['git', '-C', FOLDER, 'push'], check=True)
-        print('  GitHub: pushed fraud_analysis.html + fraud_data.json')
+        print('  GitHub: pushed OK')
     except Exception as e:
         print(f'  GitHub push failed: {e}')
 
-
-# ── MAIN ──────────────────────────────────────────────────────────────────────
+# ── MAIN ───────────────────────────────────────────────────────────────────────
 def main():
     print('=' * 60)
-    print('  Fraud Analysis Rebuilder')
+    print('  Fraud Analysis Rebuilder  (MySQL-native)')
     print('=' * 60)
 
-    print('[1/5] Loading users & branch mapping ...')
-    umap     = load_users()
-    branches = load_branches()
-    barmap   = load_barcode_map()
-    prodmap  = load_product_map()
-    print(f'      {len(umap)} users · {len(branches)} branches · {len(barmap)} barcodes · {len(prodmap)} products')
+    cfg = _load_db_config()
 
-    print('[2/5] Loading returnall.txt ...')
-    df = load_returns(umap, branches)
-    months = sorted(df["month"].unique())
-    print(f'      {len(df):,} rows · months: {", ".join(months)}')
+    print('[1/4] Loading user map ...')
+    umap = load_users()
+    print(f'      {len(umap):,} users')
 
-    print('[3/5] Computing store risk ...')
-    sr = compute_store_risk(df, branches)
-    h = sum(1 for s in sr if s["level"]=="HIGH")
-    m = sum(1 for s in sr if s["level"]=="MEDIUM")
-    l = sum(1 for s in sr if s["level"]=="LOW")
-    print(f'      {len(sr)} stores  HIGH={h}  MEDIUM={m}  LOW={l}')
-
-    print('[4/5] Building analysis data ...')
-    out = {"gen": datetime.now().strftime("%Y-%m-%d %H:%M"),
-           "months": months, "data": {},
-           "sr": sr, "sr_count": {"H": h, "M": m, "L": l}}
-    out["data"]["ALL"] = build_month(df, barmap, prodmap)
-    for mo in months:
-        out["data"][mo] = build_month(df[df["month"] == mo], barmap, prodmap)
-        print(f'      {mo}: {len(df[df["month"]==mo]):,} rows')
-
-    with open(OUT_JSON, "w", encoding="utf-8") as f:
-        json.dump(out, f, ensure_ascii=False)
-    print(f'      fraud_data.json saved ({os.path.getsize(OUT_JSON)//1024} KB)')
-
-    print("[5/5] Injecting into HTML template ...")
-    if not os.path.exists(TEMPLATE_FILE):
-        print(f"  ERROR: Template not found: {TEMPLATE_FILE}")
-        sys.exit(1)
-    with open(TEMPLATE_FILE, encoding="utf-8") as f:
-        tmpl = f.read()
-    html = tmpl.replace("PLACEHOLDER_DATA", json.dumps(out, ensure_ascii=False))
-    with open(OUT_HTML, "w", encoding="utf-8") as f:
-        f.write(html)
-    print(f'      fraud_analysis.html saved ({os.path.getsize(OUT_HTML)//1024} KB)')
-
-    if PUSH:
-        push_github()
-
-    print()
-    print("=" * 60)
-    print("  OK  Fraud Analysis updated!")
-
-    print(f'  Total return: {out["data"]["ALL"]["stats"]["total"]:,.0f} baht')
-    print(f'  RT count (distinct rtsono): {out["data"]["ALL"]["stats"]["n"]:,}')
-    print(f'  Stores (HIGH risk): {h}')
-    print("=" * 60)
-
-if __name__ == "__main__":
-    main()
+    print('[2/4] Loading returns (MySQ
