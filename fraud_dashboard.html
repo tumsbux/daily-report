@@ -670,7 +670,7 @@ function renderSo(){
       +'<td>'+(r.dm==='?'?'–':soEsc(r.dm))+'</td>'
       +'<td>'+(r.rm==='?'?'–':soEsc(r.rm))+'</td>'
       +'<td>'+(r.zero>0?'<span class="badge bM">'+r.zero+'</span>':'0')+'</td>'
-      +'<td>'+(r.date?(function(){var x=new Date(r.date);return ('0'+x.getDate()).slice(-2)+'-'+('0'+(x.getMonth()+1)).slice(-2)+'-'+x.getFullYear();})():'-')+'</td>'
+      +'<td>'+(soEsc(r.date||'-')+'</td>'
       +'<td>'+soEsc(r.time||'-')+'</td>'
       +'</tr>';
   }
@@ -740,7 +740,7 @@ function soUserRowClick(tr,g){
       +'<td style="padding:3px 8px"><b>'+soEsc(b.rtsono)+'</b></td>'
       +'<td><span class="badge '+lc+'">'+b.lines+'</span></td>'
       +'<td class="amt">฿'+fmt(b.amount)+'</td>'
-      +'<td>'+(b.date?(function(){var x=new Date(b.date);return ('0'+x.getDate()).slice(-2)+'-'+('0'+(x.getMonth()+1)).slice(-2)+'-'+x.getFullYear();})():'-')+'</td>'
+      +'<td>'+(soEsc(b.date||'-')+'</td>'
       +'<td>'+soEsc(b.time||'-')+'</td>'
       +'<td>'+(b.zero>0?'<span class="badge bM">'+b.zero+'</span>':'0')+'</td>'
       +'</tr>';
@@ -1131,6 +1131,73 @@ function prodRowClick(tr){
   det.innerHTML='<td colspan="7" style="padding:8px 16px;background:#f8fafc">'+inner+'</td>';
   tr.parentNode.insertBefore(det,tr.nextSibling);
 }
+
+// ══ SO BY REASON ═══════════════════════════════════════════════════════════
+var soReasonSort={col:'amount',dir:-1};
+function sortSoReason(col){
+  soReasonSort=soReasonSort.col===col?{col:col,dir:-soReasonSort.dir}:{col:col,dir:-1};
+  var m=document.getElementById('so-month').value;
+  renderSoByReason(D.data[m]||D.data['ALL']);
+}
+function renderSoByReason(data){
+  function arrow(c){return soReasonSort.col===c?(soReasonSort.dir<0?'▼':'▲'):'↕';}
+  var rows=(data.reason||[]).slice().sort(function(a,b){
+    var v=soReasonSort.dir*(b[soReasonSort.col]-a[soReasonSort.col]);return v;});
+  var ths='<th style=\"cursor:pointer\" onclick=\"sortSoReason(&amp;quot;rtrdesc&amp;quot;)\">เหตุผล</th>'
+    +'<th style=\"text-align:right;cursor:pointer\" onclick=\"sortSoReason(&amp;quot;returns&amp;quot;)\">รายการ '+arrow('returns')+'</th>'
+    +'<th style=\"text-align:right;cursor:pointer\" onclick=\"sortSoReason(&amp;quot;bills&amp;quot;)\">จำนวนบิล '+arrow('bills')+'</th>'
+    +'<th style=\"text-align:right;cursor:pointer\" onclick=\"sortSoReason(&amp;quot;stores&amp;quot;)\">ร้าน '+arrow('stores')+'</th>'
+    +'<th style=\"text-align:right;cursor:pointer\" onclick=\"sortSoReason(&amp;quot;cashiers&amp;quot;)\">พนักงาน '+arrow('cashiers')+'</th>'
+    +'<th style=\"text-align:right;cursor:pointer\" onclick=\"sortSoReason(&amp;quot;amount&amp;quot;)\">ยอดรวม (฿) '+arrow('amount')+'</th>';
+  document.getElementById('so-thead-row').innerHTML=ths;
+  soDetData={};
+  var html='';
+  for(var i=0;i<rows.length;i++){
+    var r=rows[i];
+    soDetData[i]=r.bills_list||[];
+    var pct=data.stats&&data.stats.total_rows?Math.round(r.bills/data.stats.total_rows*100):0;
+    html+='<tr class=\"so-row\" data-idx=\"'+i+'\" onclick=\"soReasonRowClick(this)\" style=\"cursor:pointer;user-select:none\">'
+      +'<td>▶ <b>'+soEsc(r.rtrdesc||'ไม่ระบุ')+'</b></td>'
+      +'<td style=\"text-align:right\">'+fmt(r.returns)+'</td>'
+      +'<td style=\"text-align:right\"><span class=\"badge bL\">'+r.bills+'</span></td>'
+      +'<td style=\"text-align:right\">'+r.stores+'</td>'
+      +'<td style=\"text-align:right\">'+r.cashiers+'</td>'
+      +'<td class=\"amt\" style=\"text-align:right\">฿'+fmt(r.amount)+'</td>'
+      +'</tr>';
+  }
+  document.getElementById('so-body').innerHTML=html;
+}
+function soReasonRowClick(tr){
+  var next=tr.nextElementSibling;
+  if(next&&next.classList.contains('reason-det-row')){next.remove();tr.cells[0].innerHTML='▶ <b>'+tr.cells[0].textContent.substring(2)+'</b>';return;}
+  tr.cells[0].innerHTML='▼ <b>'+tr.cells[0].textContent.substring(2)+'</b>';
+  var idx=parseInt(tr.getAttribute('data-idx'),10);
+  var bills=soDetData[idx]||[];
+  var inner='<table style=\"width:100%;font-size:12px;border-collapse:collapse\">'
+    +'<tr style=\"background:#f8fafc;color:#64748b\">'
+    +'<th style=\"padding:4px 8px;text-align:left\">RTSONO</th>'
+    +'<th style=\"padding:4px 8px;text-align:left\">พนักงาน</th>'
+    +'<th style=\"padding:4px 8px;text-align:left\">ร้าน</th>'
+    +'<th style=\"padding:4px 8px;text-align:right\">ยอด (฿)</th>'
+    +'<th style=\"padding:4px 8px;text-align:left\">วันที่</th>'
+    +'</tr>';
+  for(var j=0;j<bills.length;j++){
+    var b=bills[j];
+    inner+='<tr style=\"border-top:1px solid #f1f5f9\">'
+      +'<td style=\"padding:4px 8px;color:var(--blue)\">'+soEsc(b.rtsono||'')+'</td>'
+      +'<td style=\"padding:4px 8px\">'+soEsc(b.cashier||'')+(b.fullname?' · '+soEsc(b.fullname):'')+'</td>'
+      +'<td style=\"padding:4px 8px\">'+soEsc(b.whs||'')+' '+soEsc(b.store_name||'')+'</td>'
+      +'<td style=\"padding:4px 8px;text-align:right\">฿'+fmt(b.amt||b.amount||0)+'</td>'
+      +'<td style=\"padding:4px 8px\">'+soEsc(b.date||b.return_date||'')+'</td>'
+      +'</tr>';
+  }
+  inner+='</tbody></table>';
+  var det=document.createElement('tr');
+  det.className='reason-det-row';
+  det.innerHTML='<td colspan=\"6\" style=\"padding:8px 16px;background:#f8fafc\">'+inner+'</td>';
+  tr.parentNode.insertBefore(det,tr.nextSibling);
+}
+
 setMonthAll('ALL');
 </script>
 </body>
