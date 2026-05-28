@@ -162,6 +162,29 @@ print(f'      Found D block at [{d_start}:{d_end}]')
 html = html[:d_start] + new_D_json + html[d_end:]
 print(f'      New HTML size: {len(html):,} chars')
 
+# --- Update nav-date badge (e.g. "28 พ.ค. 2569 · วัน 1–27") ---
+import re as _re
+from datetime import date as _date
+_THAI_MONTHS = ['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.',
+                'ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
+_today      = _date.today()
+_year_be    = _today.year + 543
+_thai_mon   = _THAI_MONTHS[_today.month]
+_days_elapsed = max(1, _today.day - 1)
+# Get max day from latest month data
+_cur_mo = fd.get('months', [])
+_cur_mo = _cur_mo[-1] if _cur_mo else None
+if _cur_mo and _cur_mo in new_D.get('data', {}):
+    _ret_rows = new_D['data'][_cur_mo].get('rtu', [])
+    # use days_elapsed from data gen date if available
+    pass
+_fraud_badge = '%d %s %d · วัน 1–%d' % (
+    _today.day, _thai_mon, _year_be, _days_elapsed)
+html = _re.sub(
+    r'\d+\s+\S+\s+\d{4}\s+·\s+วัน\s+1–\d+',
+    _fraud_badge, html)
+print(f'      Date badge updated -> {_fraud_badge}')
+
 print('[3/4] Writing fraud_dashboard.html ...')
 with open(FRAUD_FILE, 'w', encoding='utf-8') as f:
     f.write(html)
