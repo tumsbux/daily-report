@@ -299,8 +299,8 @@ def load_returns(umap, branches=None):
         df['prvn_name']  = ''
         df['parcode']    = df['iprod'].astype(str).map(lambda b: barmap.get(b, b))
         df['idesc']      = df['parcode'].map(lambda p: prodmap.get(p, ''))
-        # Choose best amount column
-        for col in ['line_amount_inc_vat', 'allocated_net_amount']:
+        # Choose best amount column — prefer allocated_net_amount (net) per user spec
+        for col in ['allocated_net_amount', 'line_amount_inc_vat']:
             if col in df.columns:
                 df['amount'] = pd.to_numeric(df[col], errors='coerce')
                 break
@@ -582,7 +582,11 @@ def build_month(sub, barmap=None, prodmap=None):
                 'amt':     round(float(row['amount']), 2),
             })
         detail_dict[sono] = items
-    so_list = json.loads(so.fillna('?').to_json(orient='records', force_ascii=False))
+    # Convert date (datetime64 → 'dd-mm-yyyy') before JSON serialization
+    if 'date' in so.columns and pd.api.types.is_datetime64_any_dtype(so['date']):
+        so = so.copy()
+        so['date'] = so['date'].dt.strftime('%d-%m-%Y')
+    so_list = json.loads(so.fillna('?').to_json(orient='records', date_format='iso', force_ascii=False))
     for r in so_list:
         r['detail'] = detail_dict.get(r.get('rtsono'), [])
 
@@ -631,4 +635,95 @@ def build_month(sub, barmap=None, prodmap=None):
     dy['day'] = dy['day'].astype(int); dy = dy.sort_values('day')
 
     za = float(sub[sub['is_zero']]['amount'].sum())
-    na = float(hr[hr['hour'].isin([22, 23])]['amou
+    na = float(hr[hr['hour'].isin([22, 23])]['amount'].sum()) if len(hr) else 0.0
+
+    return {
+        'stats': {
+            'n':          int(sub['rtsono'].nunique()),
+            'total':      float(sub['allocated_net_amount'].sum() if 'allocated_net_amount' in sub.columns else sub['amount'].sum()),
+            'n_rtu':      int(sub['rtuname'].nunique()),
+            'n_store':    int(sub['whs'].nunique()),
+            'n_zero':     int(sub['is_zero'].sum()),
+            'zero_amt':   za,
+            'n_so_dup':   int(len(so)),
+            'so_dup_amt': float(so['amount'].sum()),
+            'night_amt':  na,
+        },
+        'rtu':     _rec(rtu.head(600)),
+        'store':   _rec(st.head(250)),
+        'dm':      _rec(dm),
+        'rm':      _rec(rm),
+        'hour':    _rec(hr),
+        'day':     _rec(dy),
+        'so':      so_list[:500],
+        'product': _build_product_agg(sub),
+        'reason':  _build_reason_agg(sub),
+    }
+
+# ── PUSH TO GITHUB ─────────────────────────────────────────────────────────────
+def push_github():
+    import subprocess
+    try:
+        res = subprocess.run(
+            ['git', '-C', FOLDER, 'status', '--porcelain', 'fraud_data.json'],
+            capture_output=True, text=True)
+        if not res.stdout.strip():
+            print('  GitHub: no changes — skipped push'); return
+        subprocess.run(['git', '-C', FOLDER, 'add', 'fraud_data.json'], check=True)
+        today = datetime.now().strftime('%Y-%m-%d %H:%M')
+        subprocess.run(['git', '-C', FOLDER, 'commit', '-m', f'fraud data update {today}'], check=True)
+        subprocess.run(['git', '-C', FOLDER, 'push'], check=True)
+        print('  GitHub: pushed OK')
+    except Exception as e:
+        print(f'  GitHub push failed: {e}')
+
+# ── MAIN ───────────────────────────────────────────────────────────────────────
+def main():
+    print('=' * 60)
+    print('  Fraud Analysis Rebuilder  (MySQL-native)')
+    print('=' * 60)
+
+    cfg = _load_db_config()
+
+    print('[1/4] Loading user map ...')
+    umap = load_users()
+    print(f'      {len(umap):,} users')
+
+    print('[2/4] Loading returns (MySQL JOIN) ...')
+    df = load_returns(umap)
+    months = sorted(df['month'].dropna().unique())
+    print(f'      {len(df):,} rows | {df["rtsono"].nunique():,} bills | '
+          f'months: {", ".join(months)}')
+
+    print('[3/4] Computing store risk ...')
+    sr  = compute_store_risk(df, cfg)
+    h   = sum(1 for s in sr if s['level'] == 'HIGH')
+    m   = sum(1 for s in sr if s['level'] == 'MEDIUM')
+    l   = sum(1 for s in sr if s['level'] == 'LOW')
+    print(f'      {len(sr)} stores  HIGH={h}  MEDIUM={m}  LOW={l}')
+
+    print('[4/4] Building analysis data ...')
+    out = {
+        'gen':      datetime.now().strftime('%Y-%m-%d %H:%M'),
+        'months':   months,
+        'data':     {},
+        'sr':       sr,
+        'sr_count': {'H': h, 'M': m, 'L': l},
+    }
+    out['data']['ALL'] = build_month(df)
+    for mo in months:
+        sub = df[df['month'] == mo]
+        out['data'][mo] = build_month(sub)
+        print(f'      {mo}: {sub["rtsono"].nunique():,} bills | '
+              f'{len(sub):,} rows | \u0e3f{sub["amount"].sum():,.0f}')
+
+    with open(OUT_JSON, 'w', encoding='utf-8') as f:
+        json.dump(out, f, ensure_ascii=False)
+    sz = os.path.getsize(OUT_JSON) // 1024
+    print(f'      fraud_data.json saved ({sz:,} KB)')
+
+    if PUSH:
+        push_github()
+
+if __name__ == '__main__':
+    main()
