@@ -4,7 +4,7 @@
 update_dashboard.py -- Daily Sales Dashboard Updater
 """
 
-import csv, json, re, os, glob, sys, argparse, subprocess, shutil, tempfile
+import csv, json, re, os, glob, sys, argparse, subprocess, shutil, tempfile, uuid
 from collections import defaultdict
 from datetime import date
 
@@ -22,7 +22,7 @@ DAYS_IN_MONTH  = 31
 MONTH_NAME     = 'May 2026'
 
 DB_CONFIG_FILE = os.path.join(FOLDER, 'db_config.json')
-REPO_DIR       = os.path.join(tempfile.gettempdir(), 'daily-report-push')
+REPO_DIR       = os.path.join(tempfile.gettempdir(), f'dlr-{uuid.uuid4().hex[:8]}')
 
 # Load GitHub token from db_config.json (never hardcode secrets in source)
 def _read_github_token():
@@ -65,6 +65,84 @@ def _load_db_config():
         return None
     with open(DB_CONFIG_FILE, encoding='utf-8') as f:
         return json.load(f)
+
+def _query_returns_mtd(cfg, year, month):
+    """Query fact_returns for MTD return amount per store.
+    Returns (store_ret_dict, total_amt, total_bills, max_day)."""
+    import mysql.connector
+    next_mo = (f'{int(year)+1}-01-01' if int(month) == 12
+               else f'{year}-{int(month)+1:02d}-01')
+    conn = mysql.connector.connect(
+        host=cfg['host'], port=cfg.get('port', 3306),
+        user=cfg['user'], password=cfg['password'],
+        database=cfg.get('database', 'data-lake'),
+        connection_timeout=30, charset='utf8mb4'
+    )
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT warehouse_code AS whs,
+               SUM(allocated_net_amount) AS ret_amount,
+               COUNT(DISTINCT rtsono)    AS ret_bills,
+               MAX(DAY(return_date))     AS max_day
+        FROM fact_returns
+        WHERE rtstatus = 'U'
+          AND return_date BETWEEN %s AND CURDATE()
+          AND warehouse_code NOT IN ('901', '999')
+        GROUP BY warehouse_code
+    """, (f'{year}-{month}-01',))
+    rows = cursor.fetchall()
+    cursor.close(); conn.close()
+    result = {}; total_amt = 0.0; total_bills = 0; max_day = 0
+    for r in rows:
+        raw = str(r['whs'] or '').strip()
+        if not raw: continue
+        amt   = float(r['ret_amount'] or 0)
+        bills = int(r['ret_bills']   or 0)
+        d     = int(r['max_day']     or 0)
+        total_amt += amt; total_bills += bills
+        if d > max_day: max_day = d
+        result[raw] = amt
+        try: result[str(int(raw))]  = amt
+        except: pass
+        try: result[raw.zfill(3)]   = amt
+        except: pass
+    return result, total_amt, total_bills, max_day
+
+def _query_txn_mtd(cfg, year, month):
+    """Query fact_sales for distinct SO count per store MTD (transaction count).
+    fact_sales columns: sotowhs (store), sodate (date), solinetype, sono (order no)."""
+    import mysql.connector
+    conn = mysql.connector.connect(
+        host=cfg['host'], port=cfg.get('port', 3306),
+        user=cfg['user'], password=cfg['password'],
+        database=cfg.get('database', 'data-lake'),
+        connection_timeout=30, charset='utf8mb4'
+    )
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT sotowhs AS whs,
+               COUNT(DISTINCT sono) AS txn_count
+        FROM fact_sales
+        WHERE sodate >= %s AND sodate < %s
+          AND solinetype = 'N'
+          AND sotowhs NOT IN ('901', '999', '0901', '0999')
+        GROUP BY sotowhs
+    """, (f'{year}-{month}-01',
+          f'{int(year)+1}-01-01' if int(month) == 12 else f'{year}-{int(month)+1:02d}-01'))
+    rows = cursor.fetchall()
+    cursor.close(); conn.close()
+    # Return both raw and padded keys so whichever format the dashboard uses will match
+    result = {}
+    for r in rows:
+        raw = str(r['whs'] or '').strip()
+        if not raw: continue
+        cnt = int(r['txn_count'] or 0)
+        result[raw] = cnt
+        try: result[str(int(raw))] = cnt   # unpadded e.g. '1'
+        except: pass
+        try: result[raw.zfill(3)] = cnt    # padded   e.g. '001'
+        except: pass
+    return result
 
 def _query_whsdd(cfg, year, month):
     """Query MYPOS2018_CENTER.whsdd for daily store targets + actuals.
@@ -165,6 +243,16 @@ for row in _whsdd_rows:
             store_target_days[no][day] = act
             store_txn_mtd[no]         += txn
 
+# Supplement store_txn_mtd from fact_sales (whsdd has no txn count column)
+if _db_cfg:
+    try:
+        _txn_map = _query_txn_mtd(_db_cfg, YEAR, MONTH)
+        for _whs, _cnt in _txn_map.items():
+            store_txn_mtd[_whs] = _cnt
+        print('    MySQL fact_sales txn: %d stores loaded' % len(_txn_map))
+    except Exception as _te:
+        print('    WARNING: txn query failed: %s' % _te)
+
 finalized_days   = sorted(d for d in range(1, DAYS_ELAPSED + 1) if day_totals[d] > 0)
 unfinalized_days = sorted(d for d in range(1, DAYS_ELAPSED + 1) if d not in finalized_days)
 max_fin_day      = max(finalized_days) if finalized_days else 0
@@ -255,54 +343,68 @@ if loaded_fact_days:
 else:
     print('    No unfinalized days -- nothing to load from fact files')
 
-# STEP 3: Returns
+# STEP 3: Returns — primary: MySQL fact_returns; fallback: static files
 print('\n[3/7] Reading returns ...')
 store_ret = defaultdict(float)
+_ret_from_mysql = False
 
-if os.path.exists(RETURNS_SQL):
-    with open(RETURNS_SQL, encoding='utf-8') as f:
-        content = f.read()
-    pat = re.compile(
-        r"\('([^']+)','([^']*?)','([^']+)','([^']+)','([^']+)',"
-        r"'([^']*?)','([^']+)','([^']+)',([^,]+),([^,]+),([^,]+),([^,]+),"
-        r"'([^']+)','([^']+)'\)")
-    sql_ret_total = 0.0
-    sql_max_day = 0
-    for m in pat.findall(content):
-        whs = m[7]; ret_mth = m[4][:7]; alloc = float(m[11])
-        if ret_mth == MONTH_KEY and valid_store(whs):
-            store_ret[whs] += alloc; sql_ret_total += alloc
-            day_d = int(m[4][8:10])
-            if day_d > sql_max_day: sql_max_day = day_d
-    print('    fact_returns.sql (May %s): %s baht (days 1-%d)' % (YEAR, format(int(sql_ret_total), ','), sql_max_day))
-else:
-    sql_max_day = 0
-    print('    WARNING: fact_returns.sql not found')
+if _db_cfg:
+    try:
+        _ret_map, _ret_total, _ret_bills, _ret_maxday = _query_returns_mtd(_db_cfg, YEAR, MONTH)
+        for _whs, _amt in _ret_map.items():
+            store_ret[_whs] = _amt
+        print('    MySQL fact_returns (May %s): %s baht | %d bills | days 1-%d' % (
+            YEAR, format(int(_ret_total), ','), _ret_bills, _ret_maxday))
+        _ret_from_mysql = True
+    except Exception as _re:
+        print('    MySQL returns error: %s -- falling back to static files' % _re)
 
-ret_files_loaded = []
-for rfpath in sorted(glob.glob(os.path.join(FOLDER, 'return*.txt'))):
-    bn = os.path.basename(rfpath)
-    m  = re.match(r'return(\d{1,2})\.txt$', bn, re.IGNORECASE)
-    if not m: continue
-    day_num = int(m.group(1))
-    if day_num > DAYS_ELAPSED: continue
-    if day_num <= sql_max_day: continue   # already covered by SQL file
-    with open(rfpath, encoding='utf-8') as f:
-        first_line = f.readline()
-        sep = ',' if ',' in first_line and '\t' not in first_line else '\t'
-        f.seek(0)
-        reader = csv.DictReader(f, delimiter=sep)
-        for row in reader:
-            ret_date = (row.get('return_date') or '')[:7]
-            if ret_date != MONTH_KEY: continue
-            whs = row.get('warehouse_code', '')
-            if not valid_store(whs): continue
-            store_ret[whs] += float(row.get('allocated_net_amount') or 0)
-    ret_files_loaded.append(bn)
+if not _ret_from_mysql:
+    if os.path.exists(RETURNS_SQL):
+        with open(RETURNS_SQL, encoding='utf-8') as f:
+            content = f.read()
+        pat = re.compile(
+            r"\('([^']+)','([^']*?)','([^']+)','([^']+)','([^']+)',"
+            r"'([^']*?)','([^']+)','([^']+)',([^,]+),([^,]+),([^,]+),([^,]+),"
+            r"'([^']+)','([^']+)'\)")
+        sql_ret_total = 0.0; sql_max_day = 0
+        for m in pat.findall(content):
+            whs = m[7]; ret_mth = m[4][:7]; alloc = float(m[11])
+            if ret_mth == MONTH_KEY and valid_store(whs):
+                store_ret[whs] += alloc; sql_ret_total += alloc
+                day_d = int(m[4][8:10])
+                if day_d > sql_max_day: sql_max_day = day_d
+        print('    fact_returns.sql (May %s): %s baht (days 1-%d)' % (
+            YEAR, format(int(sql_ret_total), ','), sql_max_day))
+    else:
+        sql_max_day = 0
+        print('    WARNING: fact_returns.sql not found')
 
-if ret_files_loaded:
-    print('    returnXX.txt loaded        : %s' % ', '.join(ret_files_loaded))
-print('    Combined returns (May)     : %s baht' % format(int(sum(store_ret.values())), ','))
+    ret_files_loaded = []
+    for rfpath in sorted(glob.glob(os.path.join(FOLDER, 'return*.txt'))):
+        bn = os.path.basename(rfpath)
+        m  = re.match(r'return(\d{1,2})\.txt$', bn, re.IGNORECASE)
+        if not m: continue
+        day_num = int(m.group(1))
+        if day_num > DAYS_ELAPSED: continue
+        if day_num <= sql_max_day: continue
+        with open(rfpath, encoding='utf-8') as f:
+            first_line = f.readline()
+            sep = ',' if ',' in first_line and '\t' not in first_line else '\t'
+            f.seek(0)
+            reader = csv.DictReader(f, delimiter=sep)
+            for row in reader:
+                ret_date = (row.get('return_date') or '')[:7]
+                if ret_date != MONTH_KEY: continue
+                whs = row.get('warehouse_code', '')
+                if not valid_store(whs): continue
+                store_ret[whs] += float(row.get('allocated_net_amount') or 0)
+        ret_files_loaded.append(bn)
+    if ret_files_loaded:
+        print('    returnXX.txt loaded        : %s' % ', '.join(ret_files_loaded))
+
+_ret_display = int(_ret_total if _ret_from_mysql else sum(store_ret.values()))
+print('    Combined returns (May)     : %s baht' % format(_ret_display, ','))
 
 # STEP 4: Load existing dashboard
 print('\n[4/7] Loading existing dashboard ...')
@@ -624,20 +726,10 @@ try:
 except Exception as _re:
     print('    WARNING: returnall.txt sync failed: %s' % _re)
 
-# Rebuild fraud_analysis.html (returnall.txt → cashier/store/DM/RM analysis)
-_fraud_rebuild = os.path.join(FOLDER, 'rebuild_fraud_analysis.py')
-if os.path.exists(_fraud_rebuild):
-    try:
-        import subprocess as _sp
-        _r = _sp.run([sys.executable, _fraud_rebuild, '--no-push'],
-                     capture_output=True, text=True, timeout=120)
-        if _r.returncode == 0:
-            print('  fraud_analysis.html rebuilt OK')
-        else:
-            print('  WARNING rebuild_fraud_analysis.py error:')
-            print(_r.stderr[-400:] if _r.stderr else '(no stderr)')
-    except Exception as _e:
-        print('  WARNING rebuild_fraud_analysis.py failed: ' + str(_e))
+# NOTE: rebuild_fraud_analysis.py is run separately BEFORE this script
+# (step 2 in run_daily_update.bat). Calling it again here causes a
+# 5-minute MySQL timeout. The inject step below uses fraud_data.json
+# that was already built by the batch job.
 
 # Update fraud_dashboard.html \u2014 inject fresh data + nav-date
 FRAUD_FILE = os.path.join(FOLDER, 'fraud_dashboard.html')
@@ -773,4 +865,65 @@ if os.path.exists(FRAUD_FILE) and os.path.exists(FRAUD_JSON):
         print('  WARNING fraud_dashboard.html data inject failed: %s' % _e)
         # Fallback: at least update the date badge
         try:
-      
+            with open(FRAUD_FILE, encoding='utf-8') as _ff: _fhtml = _ff.read()
+            _fraud_badge = '%d %s %d \u00b7 \u0e27\u0e31\u0e19 1\u2013%d' % (DAYS_ELAPSED, THAI_MON, YEAR_BE, DAYS_ELAPSED)
+            _fhtml = re.sub(r'\d+\s+\S+\s+\d{4}\s+\u00b7\s+\u0e27\u0e31\u0e19\s+1\u2013\d+', _fraud_badge, _fhtml)
+            with open(FRAUD_FILE, 'w', encoding='utf-8') as _ff: _ff.write(_fhtml)
+        except: pass
+
+# STEP 7: Push to GitHub Pages
+print('[7/7] Pushing to GitHub Pages ...')
+try:
+    if os.path.exists(os.path.join(REPO_DIR, '.git')):
+        subprocess.run(['git', '-C', REPO_DIR, 'pull', '--ff-only'],
+                       check=True, capture_output=True)
+    else:
+        subprocess.run(['git', 'clone', GITHUB_URL, REPO_DIR],
+                       check=True, capture_output=True)
+
+    # Stamp product_data.json with today's date so it always gets committed
+    prod_json = os.path.join(FOLDER, 'product_data.json')
+    if os.path.exists(prod_json):
+        import json as _pj
+        _pd = _pj.load(open(prod_json, encoding='utf-8'))
+        _pd['generated'] = str(date.today())
+        with open(prod_json, 'w', encoding='utf-8') as _pf:
+            _pj.dump(_pd, _pf, ensure_ascii=False, separators=(',', ':'))
+        print('    product_data.json generated -> %s' % date.today())
+
+    push_files = ['index.html', 'sales_dashboard_v8.html', 'fraud_dashboard.html',
+                  'fraud_analysis.html', 'fraud_data.json',
+                  'product_dashboard.html', 'product_data.json']
+    for fname in push_files:
+        src = os.path.join(FOLDER, fname)
+        dst = os.path.join(REPO_DIR, fname)
+        if os.path.exists(src):
+            shutil.copy2(src, dst)
+    _env = os.environ.copy()
+    _env['GIT_AUTHOR_NAME']     = 'Dashboard Bot'
+    _env['GIT_AUTHOR_EMAIL']    = 'bot@dashboard'
+    _env['GIT_COMMITTER_NAME']  = 'Dashboard Bot'
+    _env['GIT_COMMITTER_EMAIL'] = 'bot@dashboard'
+    subprocess.run(['git', '-C', REPO_DIR, 'add', '-A'],
+                   capture_output=True, env=_env)
+    _cr = subprocess.run(
+        ['git', '-C', REPO_DIR, 'commit', '-m',
+         'auto: Day %d/%d %s' % (DAYS_ELAPSED, DAYS_IN_MONTH, MONTH_NAME)],
+        capture_output=True, text=True, env=_env)
+    if 'nothing to commit' in (_cr.stdout + _cr.stderr):
+        print('  GitHub: nothing to commit (data unchanged)')
+    else:
+        _pr = subprocess.run(['git', '-C', REPO_DIR, 'push', 'origin', 'main'],
+                             capture_output=True, text=True, env=_env)
+        if _pr.returncode == 0:
+            print('  GitHub: pushed OK')
+        else:
+            print('  WARNING: push failed: ' + _pr.stderr[-200:])
+except Exception as _e:
+    print('  WARNING: GitHub push failed: ' + str(_e))
+finally:
+    if os.path.exists(REPO_DIR):
+        shutil.rmtree(REPO_DIR, ignore_errors=True)
+
+print()
+print('All done.')
