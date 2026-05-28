@@ -641,7 +641,7 @@ function renderSo(){
   var rmF=document.getElementById('so-rm').value;
   var data=D.data[m]||D.data['ALL'];
   var rows=(data.multi_so||[]).filter(function(r){return !rmF||r.rm===rmF;});
-  document.getElementById('so-count').textContent=(rmF?rows.length:(data.stats.total_rows||rows.length))+' bills';
+  document.getElementById('so-count').textContent=fmt(data.stats.total_rows||rows.length)+' bills';
   if(soViewMode==='user'){ renderSoByUser(rows, data); return; }
   if(soViewMode==='product'){ renderSoProduct(data); return; }
   if(soViewMode==='store'){ renderSoByStore(data, rmF); return; }
@@ -1201,4 +1201,4 @@ function soReasonRowClick(tr){
 setMonthAll('ALL');
 </script>
 </body>
-</html>                                                                                                                          
+</html>                                                                                                                                         
