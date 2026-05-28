@@ -670,7 +670,7 @@ function renderSo(){
       +'<td>'+(r.dm==='?'?'–':soEsc(r.dm))+'</td>'
       +'<td>'+(r.rm==='?'?'–':soEsc(r.rm))+'</td>'
       +'<td>'+(r.zero>0?'<span class="badge bM">'+r.zero+'</span>':'0')+'</td>'
-      +'<td>'+(soEsc(r.date||'-')+'</td>'
+      +'<td>'+soEsc(r.date||'-')+'</td>'
       +'<td>'+soEsc(r.time||'-')+'</td>'
       +'</tr>';
   }
@@ -740,7 +740,7 @@ function soUserRowClick(tr,g){
       +'<td style="padding:3px 8px"><b>'+soEsc(b.rtsono)+'</b></td>'
       +'<td><span class="badge '+lc+'">'+b.lines+'</span></td>'
       +'<td class="amt">฿'+fmt(b.amount)+'</td>'
-      +'<td>'+(soEsc(b.date||'-')+'</td>'
+      +'<td>'+soEsc(b.date||'-')+'</td>'
       +'<td>'+soEsc(b.time||'-')+'</td>'
       +'<td>'+(b.zero>0?'<span class="badge bM">'+b.zero+'</span>':'0')+'</td>'
       +'</tr>';
@@ -1143,12 +1143,12 @@ function renderSoByReason(data){
   function arrow(c){return soReasonSort.col===c?(soReasonSort.dir<0?'▼':'▲'):'↕';}
   var rows=(data.reason||[]).slice().sort(function(a,b){
     var v=soReasonSort.dir*(b[soReasonSort.col]-a[soReasonSort.col]);return v;});
-  var ths='<th style=\"cursor:pointer\" onclick=\"sortSoReason(&amp;quot;rtrdesc&amp;quot;)\">เหตุผล</th>'
-    +'<th style=\"text-align:right;cursor:pointer\" onclick=\"sortSoReason(&amp;quot;returns&amp;quot;)\">รายการ '+arrow('returns')+'</th>'
-    +'<th style=\"text-align:right;cursor:pointer\" onclick=\"sortSoReason(&amp;quot;bills&amp;quot;)\">จำนวนบิล '+arrow('bills')+'</th>'
-    +'<th style=\"text-align:right;cursor:pointer\" onclick=\"sortSoReason(&amp;quot;stores&amp;quot;)\">ร้าน '+arrow('stores')+'</th>'
-    +'<th style=\"text-align:right;cursor:pointer\" onclick=\"sortSoReason(&amp;quot;cashiers&amp;quot;)\">พนักงาน '+arrow('cashiers')+'</th>'
-    +'<th style=\"text-align:right;cursor:pointer\" onclick=\"sortSoReason(&amp;quot;amount&amp;quot;)\">ยอดรวม (฿) '+arrow('amount')+'</th>';
+  var ths='<th style="cursor:pointer" onclick="sortSoReason(\'rtrdesc\')">เหตุผล</th>'
+    +'<th style="text-align:right;cursor:pointer" onclick="sortSoReason(\'returns\')">รายการ '+arrow('returns')+'</th>'
+    +'<th style="text-align:right;cursor:pointer" onclick="sortSoReason(\'bills\')">จำนวนบิล '+arrow('bills')+'</th>'
+    +'<th style="text-align:right;cursor:pointer" onclick="sortSoReason(\'stores\')">ร้าน '+arrow('stores')+'</th>'
+    +'<th style="text-align:right;cursor:pointer" onclick="sortSoReason(\'cashiers\')">พนักงาน '+arrow('cashiers')+'</th>'
+    +'<th style="text-align:right;cursor:pointer" onclick="sortSoReason(\'amount\')">ยอดรวม (฿) '+arrow('amount')+'</th>';
   document.getElementById('so-thead-row').innerHTML=ths;
   soDetData={};
   var html='';
@@ -1201,4 +1201,4 @@ function soReasonRowClick(tr){
 setMonthAll('ALL');
 </script>
 </body>
-</html>
+</html>                                                                                                                          
