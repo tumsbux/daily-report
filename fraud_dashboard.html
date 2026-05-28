@@ -1118,3 +1118,20 @@ function prodRowClick(tr){
       +'<td style="padding:4px 8px;color:var(--blue)">'+soEsc(b.rtsono||'')+'</td>'
       +'<td style="padding:4px 8px">'+soEsc(b.cashier||'')+(b.fullname?' · '+soEsc(b.fullname):'')+'</td>'
       +'<td style="padding:4px 8px">'+soEsc(b.whs||'')+' '+soEsc(b.store_name
+||'')+'</td>'
+      +'<td style="padding:4px 8px;text-align:right">'+fmt(b.return_qty)+'</td>'
+      +'<td style="padding:4px 8px;text-align:right">฿'+fmt(b.amt)+'</td>'
+      +'<td style="padding:4px 8px">'+soEsc(b.return_date||'')+'</td>'
+      +'<td style="padding:4px 8px">'+soEsc(b.rttime||'')+'</td>'
+      +'</tr>';
+  }
+  inner+='</tbody></table>';
+  var det=document.createElement('tr');
+  det.className='prod-det-row';
+  det.innerHTML='<td colspan="7" style="padding:8px 16px;background:#f8fafc">'+inner+'</td>';
+  tr.parentNode.insertBefore(det,tr.nextSibling);
+}
+setMonthAll('ALL');
+</script>
+</body>
+</html>
