@@ -203,6 +203,7 @@ tr.click:hover .arrow{color:var(--accent);}
   <div class="breadcrumb" id="bc"></div>
   <div class="topdate" id="topdate">พฤษภาคม 2026<br>MTD: 1–<span id="td-days">27</span> พ.ค.</div>
   <button class="rpt-nav-btn" onclick="goExec()">📊 Executive</button> <button class="rpt-nav-btn" onclick="goReport()">📋 รายงาน</button>
+  <a href="index.html" class="rpt-nav-btn" style="text-decoration:none">← Hub</a>
 </div>
 <div class="main" id="app"></div>
 
@@ -1069,13 +1070,3 @@ function render(){
               legend:{position:'bottom',labels:{font:{size:9},boxWidth:8}},
               tooltip:{callbacks:{label:ctx=>`฿${(ctx.raw/1e6).toFixed(2)}M (${((ctx.raw/S.total_mtd)*100).toFixed(1)}%)`}}
             }
-          }
-        });
-      }
-    }
-  },0);
-}
-render();
-</script>
-</body>
-</html>
