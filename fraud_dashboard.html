@@ -637,47 +637,77 @@ function soToggleReason(){
   document.getElementById('so-view-btn').textContent = '👤 ดูตามพนักงาน';
   renderSo();
 }
-function _soGetFilteredRows(){
+function _soGetCtx(){
   var m=document.getElementById('so-month').value;
   var rmF=document.getElementById('so-rm').value;
   var data=D.data[m]||D.data['ALL'];
-  return {rows:(data.multi_so||[]).filter(function(r){return !rmF||r.rm===rmF;}), m:m, rmF:rmF};
+  var rows=(data.multi_so||[]).filter(function(r){return !rmF||r.rm===rmF;});
+  var rtuMap={};
+  (D.data['ALL'].rtu||[]).forEach(function(x){rtuMap[x.rtuname]=x.fullname||'–';});
+  return {m:m, rmF:rmF, data:data, rows:rows, rtuMap:rtuMap};
+}
+function _soExportData(ctx){
+  var mode=soViewMode, m=ctx.m, rmF=ctx.rmF, data=ctx.data, rows=ctx.rows, rtuMap=ctx.rtuMap;
+  var suffix=(m==='ALL'?'All':m)+(rmF?'_'+rmF:'');
+  if(mode==='product'){
+    var pr=data.product||[];
+    return {name:'Product_'+suffix, sheet:'Products', count:pr.length,
+      headers:['#','ชื่อสินค้า','Parent Code','Barcode','Return QTY','จำนวนบิล','ยอดรวม (฿)'],
+      cols:[{wch:5},{wch:50},{wch:16},{wch:16},{wch:12},{wch:10},{wch:14}],
+      data:pr.map(function(p,i){return [i+1, p.idesc||('['+p.parcode+']'), p.parcode||'', p.barcode||'', p.return_qty||0, p.bills||0, p.amount||0];})
+    };
+  }
+  if(mode==='store'){
+    var sr=( data.store||[]).filter(function(r){return !rmF||r.rm===rmF;});
+    return {name:'ByStore_'+suffix, sheet:'By Store', count:sr.length,
+      headers:['WHS','ร้าน','DM','RM','ครั้ง','พนักงาน','Amount (฿)','CUST=0000%','ZERO_CUST'],
+      cols:[{wch:6},{wch:28},{wch:22},{wch:22},{wch:7},{wch:9},{wch:14},{wch:12},{wch:10}],
+      data:sr.map(function(r){return [r.whs, r.store_name, r.dm==='?'?'–':r.dm||'–', r.rm==='?'?'–':r.rm||'–', r.returns||0, r.cashiers||0, r.amount||0, (r.zero_pct||0).toFixed(1)+'%', r.zero_cust||0];})
+    };
+  }
+  if(mode==='user'){
+    var groups={};
+    rows.forEach(function(r){var k=r.cashier||'–';if(!groups[k])groups[k]={cashier:r.cashier,store:r.store,store_name:r.store_name,dm:r.dm,rm:r.rm,bills:0,amount:0,zero:0};groups[k].bills++;groups[k].amount+=r.amount||0;groups[k].zero+=r.zero||0;});
+    var ga=Object.values(groups).sort(function(a,b){return b.amount-a.amount;});
+    return {name:'ByEmployee_'+suffix, sheet:'By Employee', count:ga.length,
+      headers:['RTU Code','ชื่อ-สกุล','WHS','ร้าน','DM','RM','จำนวนบิล','ยอดรวม (฿)','Cust=0000'],
+      cols:[{wch:10},{wch:28},{wch:6},{wch:22},{wch:22},{wch:22},{wch:10},{wch:14},{wch:10}],
+      data:ga.map(function(g){return [g.cashier, rtuMap[g.cashier]||'–', g.store, g.store_name, g.dm==='?'?'–':g.dm||'–', g.rm==='?'?'–':g.rm||'–', g.bills, g.amount, g.zero];})
+    };
+  }
+  if(mode==='reason'){
+    var rr=data.reason||[];
+    var totAmt=rr.reduce(function(s,r){return s+(r.amount||0);},0);
+    return {name:'ByReason_'+suffix, sheet:'By Reason', count:rr.length,
+      headers:['เหตุผล','รายการ','จำนวนบิล','ร้าน','พนักงาน','ยอดรวม (฿)','% ยอดรวม'],
+      cols:[{wch:40},{wch:10},{wch:12},{wch:8},{wch:10},{wch:14},{wch:10}],
+      data:rr.map(function(r){return [r.rtrdesc||'ไม่ระบุ', r.returns||0, r.bills||0, r.stores||0, r.cashiers||0, r.amount||0, totAmt>0?((r.amount||0)/totAmt*100).toFixed(1)+'%':'0.0%'];})
+    };
+  }
+  // default: bill view
+  return {name:'ReturnBill_'+suffix, sheet:'Return Bills', count:rows.length,
+    headers:['RTSONO','Lines','Amount (฿)','RTU Code','ชื่อ-สกุล','WHS','ร้าน','DM','RM','Cust=0000','วันที่','เวลา'],
+    cols:[{wch:24},{wch:7},{wch:12},{wch:9},{wch:26},{wch:6},{wch:20},{wch:22},{wch:22},{wch:10},{wch:12},{wch:7}],
+    data:rows.map(function(r){return [r.rtsono, r.lines, r.amount, r.cashier, rtuMap[r.cashier]||'–', r.store, r.store_name, r.dm==='?'?'–':r.dm||'–', r.rm==='?'?'–':r.rm||'–', r.zero||0, r.date||'–', r.time||'–'];})
+  };
 }
 function exportSoXLSX(){
   if(typeof XLSX==='undefined'){alert('กรุณารอ SheetJS โหลดเสร็จก่อน');return;}
-  var f=_soGetFilteredRows(); var rows=f.rows;
-  var rtuMap={};
-  (D.data['ALL'].rtu||[]).forEach(function(x){rtuMap[x.rtuname]=x.fullname||'–';});
-  var ws_data=[['RTSONO','Lines','Amount (฿)','RTU Code','ชื่อ-สกุล','WHS','ร้าน','DM','RM','Cust=0000','วันที่','เวลา']];
-  rows.forEach(function(r){
-    ws_data.push([
-      r.rtsono, r.lines, r.amount, r.cashier,
-      rtuMap[r.cashier]||'–', r.store, r.store_name,
-      r.dm==='?'?'–':(r.dm||'–'), r.rm==='?'?'–':(r.rm||'–'),
-      r.zero||0, r.date||'–', r.time||'–'
-    ]);
-  });
+  var ctx=_soGetCtx(); var exp=_soExportData(ctx);
   var wb=XLSX.utils.book_new();
-  var ws=XLSX.utils.aoa_to_sheet(ws_data);
-  ws['!cols']=[{wch:24},{wch:7},{wch:12},{wch:9},{wch:26},{wch:6},{wch:20},{wch:22},{wch:22},{wch:10},{wch:12},{wch:7}];
-  XLSX.utils.book_append_sheet(wb,ws,'Return Bills');
-  var fname='ReturnBill_'+(f.m==='ALL'?'All':f.m)+(f.rmF?'_'+f.rmF:'')+'.xlsx';
-  XLSX.writeFile(wb,fname);
+  var ws=XLSX.utils.aoa_to_sheet([exp.headers].concat(exp.data));
+  ws['!cols']=exp.cols;
+  XLSX.utils.book_append_sheet(wb,ws,exp.sheet);
+  XLSX.writeFile(wb, exp.name+'.xlsx');
 }
 function exportSoPDF(){
-  var f=_soGetFilteredRows(); var rows=f.rows;
-  var rtuMap={};
-  (D.data['ALL'].rtu||[]).forEach(function(x){rtuMap[x.rtuname]=x.fullname||'–';});
-  var title='Return Bill — '+(f.m==='ALL'?'ทั้งหมด':f.m)+(f.rmF?' | RM: '+f.rmF:'');
-  var trs=rows.map(function(r){
-    return '<tr><td>'+r.rtsono+'</td><td style="text-align:right">'+r.lines+'</td>'
-      +'<td style="text-align:right">฿'+r.amount.toLocaleString('th-TH')+'</td>'
-      +'<td>'+r.cashier+'</td><td>'+(rtuMap[r.cashier]||'–')+'</td>'
-      +'<td>'+r.store+'</td><td>'+r.store_name+'</td>'
-      +'<td>'+(r.dm==='?'?'–':r.dm||'–')+'</td><td>'+(r.rm==='?'?'–':r.rm||'–')+'</td>'
-      +'<td style="text-align:right">'+(r.zero||0)+'</td>'
-      +'<td>'+r.date+'</td><td>'+r.time+'</td></tr>';
+  var ctx=_soGetCtx(); var exp=_soExportData(ctx);
+  var viewLabel={bill:'Return Bill',user:'ดูตามพนักงาน',product:'ดูตามสินค้า',store:'ดูตามร้าน',reason:'จัดกลุ่มตามเหตุผล'};
+  var title=(viewLabel[soViewMode]||'Return Bill')+' — '+(ctx.m==='ALL'?'ทั้งหมด':ctx.m)+(ctx.rmF?' | RM: '+ctx.rmF:'');
+  var trs=exp.data.map(function(row){
+    return '<tr>'+row.map(function(v){return '<td>'+(v===null||v===undefined?'':v)+'</td>';}).join('')+'</tr>';
   }).join('');
+  var ths=exp.headers.map(function(h){return '<th>'+h+'</th>';}).join('');
   var html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>'+title+'</title>'
     +'<style>body{font-family:Arial,Helvetica,sans-serif;font-size:10px;}'
     +'h2{font-size:13px;margin:0 0 6px}p{margin:0 0 8px;color:#555}'
@@ -687,11 +717,8 @@ function exportSoPDF(){
     +'tr:nth-child(even){background:#f8fafc}'
     +'@media print{body{margin:10px}}</style></head><body>'
     +'<h2>🔍 '+title+'</h2>'
-    +'<p>'+rows.length.toLocaleString()+' bills · พิมพ์วันที่: '+new Date().toLocaleString('th-TH')+'</p>'
-    +'<table><thead><tr>'
-    +'<th>RTSONO</th><th>Lines</th><th>Amount</th><th>RTU</th><th>ชื่อ-สกุล</th>'
-    +'<th>WHS</th><th>ร้าน</th><th>DM</th><th>RM</th><th>Cust=0</th><th>วันที่</th><th>เวลา</th>'
-    +'</tr></thead><tbody>'+trs+'</tbody></table>'
+    +'<p>'+exp.count.toLocaleString()+' รายการ · พิมพ์: '+new Date().toLocaleString('th-TH')+'</p>'
+    +'<table><thead><tr>'+ths+'</tr></thead><tbody>'+trs+'</tbody></table>'
     +'<script>window.onload=function(){window.print();};<\/script>'
     +'</body></html>';
   var w=window.open('','_blank','width=1200,height=800');
