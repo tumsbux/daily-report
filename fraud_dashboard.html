@@ -652,9 +652,9 @@ function _soExportData(ctx){
   if(mode==='product'){
     var pr=data.product||[];
     return {name:'Product_'+suffix, sheet:'Products', count:pr.length,
-      headers:['#','ชื่อสินค้า','Parent Code','Barcode','Return QTY','จำนวนบิล','ยอดรวม (฿)'],
-      cols:[{wch:5},{wch:50},{wch:16},{wch:16},{wch:12},{wch:10},{wch:14}],
-      data:pr.map(function(p,i){return [i+1, p.idesc||('['+p.parcode+']'), p.parcode||'', p.barcode||'', p.return_qty||0, p.bills||0, p.amount||0];})
+      headers:['#','Parent Code','Barcode','ชื่อสินค้า','Return QTY','จำนวนบิล','ยอดรวม (฿)'],
+      cols:[{wch:5},{wch:16},{wch:16},{wch:50},{wch:12},{wch:10},{wch:14}],
+      data:pr.map(function(p,i){return [i+1, p.parcode||'', p.barcode||'', p.idesc||('['+p.parcode+']'), p.return_qty||0, p.bills||0, p.amount||0];})
     };
   }
   if(mode==='store'){
@@ -1156,9 +1156,9 @@ function renderSoProduct(data){
   document.getElementById('so-count').textContent=rows.length+' รายการ';
   var arrow=function(c){ return col===c?(dir===-1?'↓':'↑'):''; };
   var ths='<th>#</th>'
-    +'<th style="cursor:pointer" onclick="sortSoProd(&quot;idesc&quot;)">ชื่อสินค้า '+arrow('idesc')+'</th>'
-    +'<th>PARENT CODE</th>'
+    +'<th style="cursor:pointer" onclick="sortSoProd(&quot;parcode&quot;)">PARENT CODE '+arrow('parcode')+'</th>'
     +'<th>BARCODE</th>'
+    +'<th style="cursor:pointer" onclick="sortSoProd(&quot;idesc&quot;)">ชื่อสินค้า '+arrow('idesc')+'</th>'
     +'<th style="text-align:right;cursor:pointer" onclick="sortSoProd(&quot;return_qty&quot;)">Return QTY '+arrow('return_qty')+'</th>'
     +'<th style="text-align:right;cursor:pointer" onclick="sortSoProd(&quot;bills&quot;)">จำนวนบิล '+arrow('bills')+'</th>'
     +'<th style="text-align:right;cursor:pointer" onclick="sortSoProd(&quot;amount&quot;)">ยอดรวม (฿) '+arrow('amount')+'</th>';
@@ -1172,9 +1172,9 @@ function renderSoProduct(data){
     var icolor=p.idesc?'inherit':'#94a3b8';
     html+='<tr class="so-row" data-pidx="'+i+'" onclick="prodRowClick(this)" style="cursor:pointer;user-select:none">'
       +'<td style="color:#94a3b8;font-size:12px">'+(i+1)+'</td>'
-      +'<td style="color:'+icolor+'">▶ '+soEsc(iname)+'</td>'
       +'<td style="font-size:12px;color:#64748b">'+soEsc(p.parcode||'')+'</td>'
       +'<td style="font-size:12px;color:#94a3b8">'+soEsc(p.barcode||'')+'</td>'
+      +'<td style="color:'+icolor+'">▶ '+soEsc(iname)+'</td>'
       +'<td class="amt" style="text-align:right">'+fmt(p.return_qty)+'</td>'
       +'<td style="text-align:right"><span class="badge bL">'+p.bills+'</span></td>'
       +'<td class="amt" style="text-align:right">฿'+fmt(p.amount)+'</td>'
