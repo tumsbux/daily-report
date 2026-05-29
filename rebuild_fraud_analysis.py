@@ -34,6 +34,29 @@ DB_CONFIG_FILE = os.path.join(FOLDER, 'db_config.json')
 
 # ── USERNAME MAP (no dim_user in MySQL — keep file-based) ─────────────────────
 def load_users():
+    """Load username → fullname map from MYPOS2018_CENTER.xun (MySQL).
+    Falls back to local username.txt if MySQL is unavailable."""
+    cfg = _load_db_config()
+    if cfg:
+        try:
+            import mysql.connector
+            conn = mysql.connector.connect(
+                host=cfg['host'], port=cfg.get('port', 3306),
+                user=cfg['user'], password=cfg['password'],
+                database='MYPOS2018_CENTER', connection_timeout=30,
+                charset='utf8mb4'
+            )
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT uname, ufname FROM xun WHERE uname IS NOT NULL")
+            rows = cursor.fetchall()
+            cursor.close(); conn.close()
+            umap = {str(r['uname']).strip(): str(r['ufname'] or '').strip() for r in rows if r['uname']}
+            print(f'      Loaded {len(umap):,} users from MYPOS2018_CENTER.xun')
+            return umap
+        except Exception as e:
+            print(f'      WARNING: could not load from xun table: {e}')
+            print(f'      Falling back to username.txt ...')
+    # Fallback: local file
     if not os.path.exists(USERNAME):
         return {}
     df = pd.read_csv(USERNAME, sep='\t', dtype=str, on_bad_lines='skip')
