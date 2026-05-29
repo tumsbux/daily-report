@@ -4,6 +4,7 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Fraud Detection — Combined Dashboard</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js'"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root{--bg:#f0f2f7;--card:#fff;--card2:#f8fafc;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--mut2:#94a3b8;
   --red:#dc2626;--orange:#d97706;--green:#16a34a;--blue:#4f46e5;--cyan:#0ea5e9;--purple:#7c3aed;
@@ -241,7 +242,7 @@ tr:last-child td{border-bottom:none}
   <div class="fbar">
     <label>📅 เดือน:</label><select id="so-month" onchange="renderSo()"><option value="ALL">ทั้งหมด</option></select>
     <label>RM:</label><select id="so-rm" onchange="renderSo()"><option value="">ทั้งหมด</option></select>
-    <button id="so-view-btn" onclick="soToggleView()" style="margin-left:12px;padding:4px 12px;border:1px solid var(--border);border-radius:6px;background:var(--card);cursor:pointer;font-size:13px">👤 ดูตามพนักงาน</button><button id="so-prod-btn" onclick="soToggleProd()" style="margin-left:6px;padding:4px 12px;border:1px solid var(--border);border-radius:6px;background:var(--card);cursor:pointer;font-size:13px">🏷 ดูตามสินค้า</button><button id="so-store-btn" onclick="soToggleStore()" style="margin-left:6px;padding:4px 12px;border:1px solid var(--border);border-radius:6px;background:var(--card);cursor:pointer;font-size:13px">🏪 ดูตามร้าน</button><button id="so-reason-btn" onclick="soToggleReason()" style="margin-left:6px;padding:4px 12px;border:1px solid var(--border);border-radius:6px;background:var(--card);cursor:pointer;font-size:13px">📋 จัดกลุ่มตามเหตุผล</button>
+    <button id="so-view-btn" onclick="soToggleView()" style="margin-left:12px;padding:4px 12px;border:1px solid var(--border);border-radius:6px;background:var(--card);cursor:pointer;font-size:13px">👤 ดูตามพนักงาน</button><button id="so-prod-btn" onclick="soToggleProd()" style="margin-left:6px;padding:4px 12px;border:1px solid var(--border);border-radius:6px;background:var(--card);cursor:pointer;font-size:13px">🏷 ดูตามสินค้า</button><button id="so-store-btn" onclick="soToggleStore()" style="margin-left:6px;padding:4px 12px;border:1px solid var(--border);border-radius:6px;background:var(--card);cursor:pointer;font-size:13px">🏪 ดูตามร้าน</button><button id="so-reason-btn" onclick="soToggleReason()" style="margin-left:6px;padding:4px 12px;border:1px solid var(--border);border-radius:6px;background:var(--card);cursor:pointer;font-size:13px">📋 จัดกลุ่มตามเหตุผล</button><button onclick="exportSoXLSX()" style="margin-left:16px;padding:4px 12px;border:1px solid #16a34a;border-radius:6px;background:#dcfce7;color:#15803d;cursor:pointer;font-size:13px;font-weight:600">⬇ XLSX</button><button onclick="exportSoPDF()" style="margin-left:6px;padding:4px 12px;border:1px solid #dc2626;border-radius:6px;background:#fee2e2;color:#dc2626;cursor:pointer;font-size:13px;font-weight:600">⬇ PDF</button>
     <span class="rcount" id="so-count"></span>
   </div>
   <div class="twrap">
@@ -635,6 +636,66 @@ function soToggleReason(){
   document.getElementById('so-store-btn').style.fontWeight = 'normal';
   document.getElementById('so-view-btn').textContent = '👤 ดูตามพนักงาน';
   renderSo();
+}
+function _soGetFilteredRows(){
+  var m=document.getElementById('so-month').value;
+  var rmF=document.getElementById('so-rm').value;
+  var data=D.data[m]||D.data['ALL'];
+  return {rows:(data.multi_so||[]).filter(function(r){return !rmF||r.rm===rmF;}), m:m, rmF:rmF};
+}
+function exportSoXLSX(){
+  if(typeof XLSX==='undefined'){alert('กรุณารอ SheetJS โหลดเสร็จก่อน');return;}
+  var f=_soGetFilteredRows(); var rows=f.rows;
+  var rtuMap={};
+  (D.data['ALL'].rtu||[]).forEach(function(x){rtuMap[x.rtuname]=x.fullname||'–';});
+  var ws_data=[['RTSONO','Lines','Amount (฿)','RTU Code','ชื่อ-สกุล','WHS','ร้าน','DM','RM','Cust=0000','วันที่','เวลา']];
+  rows.forEach(function(r){
+    ws_data.push([
+      r.rtsono, r.lines, r.amount, r.cashier,
+      rtuMap[r.cashier]||'–', r.store, r.store_name,
+      r.dm==='?'?'–':(r.dm||'–'), r.rm==='?'?'–':(r.rm||'–'),
+      r.zero||0, r.date||'–', r.time||'–'
+    ]);
+  });
+  var wb=XLSX.utils.book_new();
+  var ws=XLSX.utils.aoa_to_sheet(ws_data);
+  ws['!cols']=[{wch:24},{wch:7},{wch:12},{wch:9},{wch:26},{wch:6},{wch:20},{wch:22},{wch:22},{wch:10},{wch:12},{wch:7}];
+  XLSX.utils.book_append_sheet(wb,ws,'Return Bills');
+  var fname='ReturnBill_'+(f.m==='ALL'?'All':f.m)+(f.rmF?'_'+f.rmF:'')+'.xlsx';
+  XLSX.writeFile(wb,fname);
+}
+function exportSoPDF(){
+  var f=_soGetFilteredRows(); var rows=f.rows;
+  var rtuMap={};
+  (D.data['ALL'].rtu||[]).forEach(function(x){rtuMap[x.rtuname]=x.fullname||'–';});
+  var title='Return Bill — '+(f.m==='ALL'?'ทั้งหมด':f.m)+(f.rmF?' | RM: '+f.rmF:'');
+  var trs=rows.map(function(r){
+    return '<tr><td>'+r.rtsono+'</td><td style="text-align:right">'+r.lines+'</td>'
+      +'<td style="text-align:right">฿'+r.amount.toLocaleString('th-TH')+'</td>'
+      +'<td>'+r.cashier+'</td><td>'+(rtuMap[r.cashier]||'–')+'</td>'
+      +'<td>'+r.store+'</td><td>'+r.store_name+'</td>'
+      +'<td>'+(r.dm==='?'?'–':r.dm||'–')+'</td><td>'+(r.rm==='?'?'–':r.rm||'–')+'</td>'
+      +'<td style="text-align:right">'+(r.zero||0)+'</td>'
+      +'<td>'+r.date+'</td><td>'+r.time+'</td></tr>';
+  }).join('');
+  var html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>'+title+'</title>'
+    +'<style>body{font-family:Arial,Helvetica,sans-serif;font-size:10px;}'
+    +'h2{font-size:13px;margin:0 0 6px}p{margin:0 0 8px;color:#555}'
+    +'table{border-collapse:collapse;width:100%}'
+    +'th,td{border:1px solid #ccc;padding:3px 5px;white-space:nowrap}'
+    +'th{background:#1e293b;color:#fff;font-size:10px}'
+    +'tr:nth-child(even){background:#f8fafc}'
+    +'@media print{body{margin:10px}}</style></head><body>'
+    +'<h2>🔍 '+title+'</h2>'
+    +'<p>'+rows.length.toLocaleString()+' bills · พิมพ์วันที่: '+new Date().toLocaleString('th-TH')+'</p>'
+    +'<table><thead><tr>'
+    +'<th>RTSONO</th><th>Lines</th><th>Amount</th><th>RTU</th><th>ชื่อ-สกุล</th>'
+    +'<th>WHS</th><th>ร้าน</th><th>DM</th><th>RM</th><th>Cust=0</th><th>วันที่</th><th>เวลา</th>'
+    +'</tr></thead><tbody>'+trs+'</tbody></table>'
+    +'<script>window.onload=function(){window.print();};<\/script>'
+    +'</body></html>';
+  var w=window.open('','_blank','width=1200,height=800');
+  w.document.write(html); w.document.close();
 }
 function renderSo(){
   var m=document.getElementById('so-month').value;
