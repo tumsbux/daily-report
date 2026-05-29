@@ -481,7 +481,7 @@ def _build_product_agg(sub, barmap=None, prodmap=None):
     agg['barcode']    = agg['iprod'].astype(str)
     agg['return_qty'] = agg['return_qty'].fillna(0).round(0).astype(int)
     agg = agg[['barcode', 'parcode', 'idesc', 'return_qty', 'bills', 'amount']]
-    agg = agg.sort_values('amount', ascending=False).head(500)
+    agg = agg.sort_values('amount', ascending=False)  # no cap — export all products
     records = json.loads(agg.fillna('').to_json(orient='records', force_ascii=False))
 
     for rec in records:
