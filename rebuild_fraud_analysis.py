@@ -21,9 +21,11 @@ from datetime import datetime, date
 FOLDER = os.path.dirname(os.path.abspath(__file__))
 PUSH   = '--no-push' not in sys.argv
 
-# Fallback files (used only when MySQL is unavailable)
+# Primary source: MySQL (MYPOS2018_CENTER + data-lake)
+# fact_returns, dim_branch, dim_item_barcode, dim_product, fact_sales, xun → all from MySQL
+# Local fallback files (offline mode only — not required)
 RETURNALL    = os.path.join(FOLDER, 'returnall.txt')
-USERNAME     = os.path.join(FOLDER, 'username.txt')
+USERNAME     = os.path.join(FOLDER, 'username.txt')   # fallback if xun query fails
 BRANCH_SQL   = os.path.join(FOLDER, 'data-lake_dim_branch.sql')
 TARGET       = os.path.join(FOLDER, 'target.txt')
 BARCODE_SQL  = os.path.join(FOLDER, 'data-lake_dim_item_barcode.sql')
