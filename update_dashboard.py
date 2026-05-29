@@ -217,8 +217,9 @@ if _db_cfg:
 
 if not _whsdd_rows:
     if not os.path.exists(TARGET_FILE):
-        print('    WARNING: target.txt not found and MySQL unavailable -- targets = 0')
-        _whsdd_rows = []
+        print('    ERROR: MySQL unavailable AND target.txt not found.')
+        print('    ABORT: cannot update dashboard without data. Existing file preserved.')
+        raise SystemExit(0)   # exit cleanly — do NOT overwrite the existing file
     else:
         with open(TARGET_FILE, encoding='utf-8') as _tf:
             _whsdd_rows = list(csv.DictReader(_tf, delimiter='\t'))
