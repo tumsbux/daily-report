@@ -49,9 +49,7 @@ jobs:
           print("db_config.json created (secrets masked in log)")
           EOF
 
-      - name: Run dashboard update
-        run: python update_dashboard.py
+      - name: Rebuild fraud analysis (runs first — required by update_dashboard.py)
+        run: python rebuild_fraud_analysis.py --no-push
 
-      - name: Clean up credentials
-        if: always()
-        run: rm -f db_config.json
+      - name: Run dashb
