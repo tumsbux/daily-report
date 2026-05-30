@@ -12,7 +12,7 @@ env:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repo
@@ -24,7 +24,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install mysql-connector-python pandas
+        run: pip install mysql-connector-python pandas openpyxl
 
       - name: Create db_config.json from secrets
         env:
@@ -49,7 +49,9 @@ jobs:
           print("db_config.json created (secrets masked in log)")
           EOF
 
-      - name: Rebuild fraud analysis (runs first — required by update_dashboard.py)
+      - name: Rebuild fraud analysis
+        continue-on-error: true
+        timeout-minutes: 15
         run: python rebuild_fraud_analysis.py --no-push
 
-      - name: Run dashb
+   
