@@ -92,7 +92,6 @@ def query_product_sales(conn):
         GROUP BY fs.iprod, dp.idesc, dp.brndesc, dp.igrdesc, dp.itydesc, dp.igrcode
         HAVING s26 > 0
         ORDER BY s26 DESC
-        LIMIT 500
     """
     df = pd.read_sql(sql, conn)
     for col in ['s26','s25','cost26','q26','q25']:

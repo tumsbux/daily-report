@@ -137,11 +137,11 @@ td{padding:9px 12px;vertical-align:middle}
 <div class="chart-row">
   <div class="ccard">
     <h3>Top 10 สินค้า — ยอดขาย (฿) พ.ค. 2026 vs 2025</h3>
-    <canvas id="cTopSales"></canvas>
+    <div style="height:300px;position:relative"><canvas id="cTopSales"></canvas></div>
   </div>
   <div class="ccard">
     <h3>Top 10 สินค้า — จำนวนขาย (ชิ้น)</h3>
-    <canvas id="cTopQty"></canvas>
+    <div style="height:300px;position:relative"><canvas id="cTopQty"></canvas></div>
   </div>
 </div>
 
@@ -275,7 +275,7 @@ function drawCharts(){
       {label:'พ.ค. 2026',data:top10s.map(p=>p.s26),backgroundColor:'rgba(99,102,241,.8)',borderRadius:4},
       {label:'พ.ค. 2025',data:top10s.map(p=>p.s25),backgroundColor:'rgba(148,163,184,.5)',borderRadius:4},
     ]},
-    options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',
+    options:{responsive:true,maintainAspectRatio:false,
       plugins:{legend:{labels:{color:'#475569',font:{size:10}},position:'top'},
                tooltip:{callbacks:{label:c=>' ฿'+Math.round(c.raw||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')}}},
       scales:{x:{ticks:{color:'#94a3b8',font:{size:9},callback:v=>v.toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')},
@@ -289,7 +289,7 @@ function drawCharts(){
       {label:'พ.ค. 2026',data:top10q.map(p=>p.q26),backgroundColor:'rgba(16,185,129,.75)',borderRadius:4},
       {label:'พ.ค. 2025',data:top10q.map(p=>p.q25),backgroundColor:'rgba(148,163,184,.5)',borderRadius:4},
     ]},
-    options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',
+    options:{responsive:true,maintainAspectRatio:false,
       plugins:{legend:{labels:{color:'#475569',font:{size:10}},position:'top'},
                tooltip:{callbacks:{label:c=>' '+Math.round(c.raw||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')+' ชิ้น'}}},
       scales:{x:{ticks:{color:'#94a3b8',font:{size:9}},grid:{color:'#f1f5f9'}},
