@@ -32,8 +32,16 @@ def _read_github_token():
     except Exception:
         return ''
 
+def _read_github_repo():
+    try:
+        with open(DB_CONFIG_FILE, encoding='utf-8') as _f:
+            return json.load(_f).get('github_repo', 'tumsbux/daily-report')
+    except Exception:
+        return 'tumsbux/daily-report'
+
 GITHUB_TOKEN = _read_github_token()
-GITHUB_URL   = 'https://' + GITHUB_TOKEN + '@github.com/tumsbux/daily-report.git'
+GITHUB_REPO  = _read_github_repo()
+GITHUB_URL   = 'https://' + GITHUB_TOKEN + '@github.com/' + GITHUB_REPO + '.git'
 
 # HELPERS
 def valid_store(code):
