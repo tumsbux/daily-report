@@ -43,7 +43,8 @@ jobs:
               "user":         os.environ["DB_USER"],
               "password":     os.environ["DB_PASSWORD"],
               "database":     os.environ["DB_DATABASE"],
-              "github_token": os.environ["GH_PAT"]
+              "github_token": os.environ["GH_PAT"],
+              "github_repo":  os.environ.get("GH_REPO", "tumsbux/daily-report")
           }
           json.dump(cfg, open("db_config.json", "w"))
           print("db_config.json created (secrets masked in log)")
@@ -54,4 +55,14 @@ jobs:
         timeout-minutes: 15
         run: python rebuild_fraud_analysis.py --no-push
 
-   
+      - name: Build product data
+        continue-on-error: true
+        timeout-minutes: 10
+        run: python build_product_data_mysql.py --no-push
+
+      - name: Run dashboard update
+        run: python update_dashboard.py
+
+      - name: Clean up credentials
+        if: always()
+        run: rm -f db_config.json

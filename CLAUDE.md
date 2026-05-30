@@ -171,6 +171,12 @@ Each HTML file contains a `const D = {...}` JavaScript blob. Scripts use brace-m
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js"></script>
 ```
 
+### Problem: index.html Hub charts blank (monthly trend + RM chart)
+**Root cause:** `index.html` was truncated — cut off mid-JavaScript at `font:{size:` inside the Chart.js options block.  
+**Symptom:** KPI cards render fine but chart areas are blank.  
+**Fix applied:** Appended missing 90 chars of JS tail + `</script></body></html>`.  
+**Prevention:** Complete `index.html` ≈ 18,968 bytes. If smaller, it's truncated. Restore from git: `git show ff2f7b5:index.html > index.html`
+
 ### Problem: fraud_dashboard.html showing blank charts
 **Root cause:** `fraud_dashboard.html` was also truncated (local file corrupted, overwritten to GitHub).  
 **Fix applied:** Restored complete template from git history (`ff2f7b5`) and re-injected current `fraud_data.json`.  
@@ -264,7 +270,4 @@ When running manually (or when auto-scheduler missed a day):
 - **Both files must match:** `sales_dashboard_v8.html` and `index.html` must always contain the same underlying data.
 - **Store code padding:** MySQL may return `'1'`, `'001'`, or `1` (int). Scripts store both raw and padded keys.
 - **rebuild_fraud_analysis.py must run BEFORE update_dashboard.py** — master runner reads `fraud_data.json` that rebuild produces.
-- **`whsddpact` may lag 1–2 days** — use `--day N` with N = last finalized day, not today.
-- **File truncation:** If a script crashes mid-write, HTML files can be truncated (missing JS tail). Dashboard goes blank. Restore from git: `git show <commit>:<file> > <file>` then re-inject data.
-- **Chart.js SRI hash:** Never add `integrity=` attribute to Chart.js CDN tag — it breaks silently if hash mismatches.
-- **GitHub Actions fraud step:** Has `continue-on-error: true` — a yellow warning on fraud step is normal and safe.
+- **`whsddpact` may lag 1–2 days** — use 
