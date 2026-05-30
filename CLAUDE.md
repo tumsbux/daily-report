@@ -23,13 +23,17 @@
 
 A fully automated daily reporting system. Python scripts query a cloud MySQL data lake, embed results as JSON blobs inside static HTML files, then push those files to GitHub Pages. No server required at runtime.
 
-**Daily pipeline (GitHub Actions — 08:30 Bangkok / 01:30 UTC):**
-1. `rebuild_fraud_analysis.py --no-push` → builds fraud_data.json from MySQL
-2. `update_dashboard.py` → updates all dashboards → pushes to GitHub Pages
+**Daily pipeline (GitHub Actions — 08:30 Bangkok / 01:30 UTC) — ไม่ต้องเปิด laptop:**
+1. `rebuild_fraud_analysis.py --no-push` → builds fraud_data.json from MySQL  *(continue-on-error)*
+2. `build_product_data_mysql.py --no-push` → builds product_data.json from MySQL  *(continue-on-error)*
+3. `update_dashboard.py` → updates sales + injects fraud/product data → pushes all to GitHub Pages
+
+**Cowork Scheduled Task:** ⛔ Disabled — replaced by GitHub Actions above
 
 **Manual run (if needed):**
 ```
 py "F:\co work dashboard\rebuild_fraud_analysis.py" --no-push
+py "F:\co work dashboard\build_product_data_mysql.py" --no-push
 py "F:\co work dashboard\update_dashboard.py" --day 29
 ```
 (replace 29 with actual finalized day — MySQL whsddpact lags 1–2 days)
@@ -259,15 +263,7 @@ When running manually (or when auto-scheduler missed a day):
 1. Install Python 3 + `pip install mysql-connector-python pandas openpyxl`
 2. Create `F:\co work dashboard\db_config.json` with MySQL credentials + GitHub PAT (repo write scope)
 3. Test MySQL: `py test_mysql_connection.py`
-4. Full run: `py rebuild_fraud_analysis.py --no-push && py update_dashboard.py`
-5. **Never commit `db_config.json`**
-
----
-
-## Common Pitfalls
-
-- **`<span id="td-days">N</span>`** must be updated every run. If skipped, dashboard shows stale day number.
-- **Both files must match:** `sales_dashboard_v8.html` and `index.html` must always contain the same underlying data.
-- **Store code padding:** MySQL may return `'1'`, `'001'`, or `1` (int). Scripts store both raw and padded keys.
-- **rebuild_fraud_analysis.py must run BEFORE update_dashboard.py** — master runner reads `fraud_data.json` that rebuild produces.
-- **`whsddpact` may lag 1–2 days** — use 
+4. Full run: `py rebuild_fraud_analysis.py --no-push && py build_product_data_mysql.py --no-push && py update_dashboard.py`
+5. Add the 6 secrets to GitHub repo → Settings → Secrets → Actions (DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_DATABASE, GH_PAT)
+6. **Never commit `db_config.json`**
+7. Cowork Scheduled Task:
