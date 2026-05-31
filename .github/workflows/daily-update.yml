@@ -57,10 +57,10 @@ jobs:
       - name: Build product data
         continue-on-error: true
         timeout-minutes: 10
-        run: python build_product_data_mysql.py --no-push --day 30
+        run: python build_product_data_mysql.py --no-push
 
       - name: Run dashboard update
-        run: python update_dashboard.py --day 30
+        run: python update_dashboard.py
 
       - name: Clean up credentials
         if: always()
