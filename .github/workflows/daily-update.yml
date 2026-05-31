@@ -2,9 +2,8 @@ name: Daily Dashboard Update
 
 on:
   schedule:
-    # 08:30 Bangkok (UTC+7) = 01:30 UTC
     - cron: '30 1 * * *'
-  workflow_dispatch:   # allows manual trigger from GitHub UI
+  workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -35,20 +34,20 @@ jobs:
           DB_DATABASE: ${{ secrets.DB_DATABASE }}
           GH_PAT:      ${{ secrets.GH_PAT }}
         run: |
-          python3 - <<'EOF'
+          python3 -c "
           import json, os
           cfg = {
-              "host":         os.environ["DB_HOST"],
-              "port":         int(os.environ.get("DB_PORT", "3306")),
-              "user":         os.environ["DB_USER"],
-              "password":     os.environ["DB_PASSWORD"],
-              "database":     os.environ["DB_DATABASE"],
-              "github_token": os.environ["GH_PAT"],
-              "github_repo":  os.environ.get("GH_REPO", "tumsbux/daily-report")
+              'host':         os.environ['DB_HOST'],
+              'port':         int(os.environ.get('DB_PORT', '3306')),
+              'user':         os.environ['DB_USER'],
+              'password':     os.environ['DB_PASSWORD'],
+              'database':     os.environ['DB_DATABASE'],
+              'github_token': os.environ['GH_PAT'],
+              'github_repo':  os.environ.get('GH_REPO', 'tumsbux/daily-report')
           }
-          json.dump(cfg, open("db_config.json", "w"))
-          print("db_config.json created (secrets masked in log)")
-          EOF
+          json.dump(cfg, open('db_config.json', 'w'))
+          print('db_config.json created')
+          "
 
       - name: Rebuild fraud analysis
         continue-on-error: true
@@ -58,8 +57,11 @@ jobs:
       - name: Build product data
         continue-on-error: true
         timeout-minutes: 10
-        run: python build_product_data_mysql.py --no-push
+        run: python build_product_data_mysql.py --no-push --day 30
 
       - name: Run dashboard update
-        # whsddpact lags 1-2 days. On May 31, use --day 30 (last finalized day).
-        # From June onward: remove --day flag to a
+        run: python update_dashboard.py --day 30
+
+      - name: Clean up credentials
+        if: always()
+        run: rm -f db_config.json
