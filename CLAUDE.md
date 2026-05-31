@@ -26,7 +26,9 @@ A fully automated daily reporting system. Python scripts query a cloud MySQL dat
 **Daily pipeline (GitHub Actions — 08:30 Bangkok / 01:30 UTC) — ไม่ต้องเปิด laptop:**
 1. `rebuild_fraud_analysis.py --no-push` → builds fraud_data.json from MySQL  *(continue-on-error)*
 2. `build_product_data_mysql.py --no-push` → builds product_data.json from MySQL  *(continue-on-error)*
-3. `update_dashboard.py` → updates sales + injects fraud/product data → pushes all to GitHub Pages
+3. `update_dashboard.py --day 30` → updates sales + injects fraud/product data → pushes all to GitHub Pages
+
+**⚠️ May 2026 note:** Workflow hardcoded `--day 30` because whsddpact lags on day 31. Remove `--day 30` after May ends (June 1+).
 
 **Cowork Scheduled Task:** ⛔ Disabled — replaced by GitHub Actions above
 
@@ -159,6 +161,25 @@ Each HTML file contains a `const D = {...}` JavaScript blob. Scripts use brace-m
 
 ---
 
+## Known Issues & Fixes (2026-05-31 session)
+
+### Problem: product_dashboard.html shows no data (all "—")
+**Root cause:** `Write` tool truncated the file mid-JavaScript at line 447 (~20KB). The `</script></body></html>` tail was missing, so the browser couldn't parse the script.  
+**Symptom:** Filter bar and table headers render but all cards show "—" and table bodies are empty.  
+**Fix applied:** Appended missing JS functions (renderTypeCats, renderGrpCats, renderProdPage, pagination, sort) + closing tags.  
+**Prevention:** After any Write of large HTML files, verify with `tail -5` that the file ends with `</html>`. Complete `product_dashboard.html` ≈ 31KB+. If smaller, it's truncated.
+
+### Problem: GitHub Actions didn't update dashboard at 08:30 on May 31
+**Root cause:** `update_dashboard.py` auto-detects "yesterday" = May 30, but `whsddpact` in MySQL lags 1-2 days. May 30 data may not be finalized, causing wrong projections or a crash.  
+**Fix applied:** Hardcoded `--day 30` in workflow (`daily-update.yml`) for May 2026.  
+**⚠️ Action required June 1:** Remove `--day 30` from workflow so it auto-detects again.
+
+### Problem: days_elapsed shows 31 on May 31 (too high, data only through day 30)
+**Root cause:** `build_product_data_mysql.py` set `days_elapsed = date.today().day` = 31, inflating เลื่อน/วัน and เฉลี่ย/สัปดาห์ calculations.  
+**Fix applied:** Changed to `days_elapsed = min(today.day - 1, 30)` for May (capped at 30, uses yesterday).
+
+---
+
 ## Known Issues & Fixes (2026-05-30 session)
 
 ### Problem: Dashboard shows blank white page (no content rendered)
@@ -266,4 +287,17 @@ When running manually (or when auto-scheduler missed a day):
 4. Full run: `py rebuild_fraud_analysis.py --no-push && py build_product_data_mysql.py --no-push && py update_dashboard.py`
 5. Add the 6 secrets to GitHub repo → Settings → Secrets → Actions (DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_DATABASE, GH_PAT)
 6. **Never commit `db_config.json`**
-7. Cowork Scheduled Task:
+7. Cowork Scheduled Task: already disabled — GitHub Actions handles everything
+
+---
+
+## Common Pitfalls
+
+- **`<span id="td-days">N</span>`** must be updated every run. If skipped, dashboard shows stale day number.
+- **Both files must match:** `sales_dashboard_v8.html` and `index.html` must always contain the same underlying data.
+- **Store code padding:** MySQL may return `'1'`, `'001'`, or `1` (int). Scripts store both raw and padded keys.
+- **rebuild_fraud_analysis.py must run BEFORE update_dashboard.py** — master runner reads `fraud_data.json` that rebuild produces.
+- **`whsddpact` may lag 1–2 days** — use `--day N` with N = last finalized day, not today.
+- **File truncation:** If a script crashes mid-write, HTML files can be truncated (missing JS tail). Dashboard goes blank. Restore from git: `git show <commit>:<file> > <file>` then re-inject data.
+- **Chart.js SRI hash:** Never add `integrity=` attribute to Chart.js CDN tag — it breaks silently if hash mismatches.
+- **GitHub Actions fraud step:** Has `continue-on-error: true` — a yellow warning on fraud step is normal and safe.
