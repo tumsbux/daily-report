@@ -638,3 +638,18 @@ function sortStatic(tblId,col,th){
 </script>
 </body>
 </html>
+orAll('th .sa').forEach(s=>s.className='sa');
+  th.querySelector('.sa').className='sa '+(dir===1?'asc':'desc');
+  const tbody=document.getElementById(tblId).querySelector('tbody');
+  const rows=[...tbody.querySelectorAll('tr')];
+  rows.sort((a,b)=>{
+    const ta=a.cells[col].textContent.trim().replace(/[,%+]/g,'');
+    const tb=b.cells[col].textContent.trim().replace(/[,%+]/g,'');
+    const na=parseFloat(ta),nb=parseFloat(tb);
+    return isNaN(na)?dir*ta.localeCompare(tb,'th'):dir*(na-nb);
+  });
+  rows.forEach(r=>tbody.appendChild(r));
+}
+</script>
+</body>
+</html>
