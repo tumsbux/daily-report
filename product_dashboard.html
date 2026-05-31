@@ -347,8 +347,7 @@ function applyAll(){
       if(yr==='26'){s26+=val.sales||0;q26+=val.qty||0;cost26+=val.cost||0;}
       else         {s25+=val.sales||0;q25+=val.qty||0;}
     }
-    if(s26===0&&!Object.keys(bd).length) return p; // not in top500 breakdown — show global
-    if(s26===0) return null;
+    if(s26===0) return null; // not sold at filtered stores (or not in top-500 breakdown)
     const gp26=s26-cost26;
     return {...p,
       s26:Math.round(s26),s25:Math.round(s25),q26:Math.round(q26),q25:Math.round(q25),
