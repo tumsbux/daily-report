@@ -21,7 +21,7 @@ from collections import defaultdict
 FOLDER         = os.path.dirname(os.path.abspath(__file__))
 OUT_JSON       = os.path.join(FOLDER, 'product_data.json')
 DB_CONFIG_FILE = os.path.join(FOLDER, 'db_config.json')
-PUSH           = '--no-push' not in sys.argv
+PUSH           = True  # overridden by argparse in main()
 
 YEAR26, MONTH = 2026, 5
 YEAR25        = 2025
@@ -56,12 +56,14 @@ def _load_branch_info():
     return {}
 
 # ── STEP 1: Product sales aggregation ────────────────────────────────────────
-def query_product_sales(conn):
+def query_product_sales(conn, days_elapsed):
     """
-    Aggregate fact_sales by product for May 2026 vs May 2025.
+    Aggregate fact_sales by product for May 2026 (days 1-N) vs May 2025 (full month).
+    Uses explicit date range so product totals match the sales dashboard exactly.
     JOIN dim_product for name/brand/group/type.
     Returns DataFrame with one row per iprod.
     """
+    end_date26 = f'{YEAR26}-{MONTH:02d}-{days_elapsed:02d}'
     sql = f"""
         SELECT
             fs.iprod,
@@ -70,13 +72,13 @@ def query_product_sales(conn):
             COALESCE(dp.igrdesc, 'ไม่ระบุ')  AS grp,
             COALESCE(dp.itydesc, '')          AS type_desc,
             COALESCE(dp.igrcode, '')          AS grp_code,
-            SUM(CASE WHEN YEAR(fs.sodate)={YEAR26} AND MONTH(fs.sodate)={MONTH}
+            SUM(CASE WHEN fs.sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
                      THEN fs.net_sales_amt ELSE 0 END)          AS s26,
             SUM(CASE WHEN YEAR(fs.sodate)={YEAR25} AND MONTH(fs.sodate)={MONTH}
                      THEN fs.net_sales_amt ELSE 0 END)          AS s25,
-            SUM(CASE WHEN YEAR(fs.sodate)={YEAR26} AND MONTH(fs.sodate)={MONTH}
+            SUM(CASE WHEN fs.sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
                      THEN COALESCE(fs.total_cost, 0) ELSE 0 END) AS cost26,
-            SUM(CASE WHEN YEAR(fs.sodate)={YEAR26} AND MONTH(fs.sodate)={MONTH}
+            SUM(CASE WHEN fs.sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
                      THEN fs.net_qty ELSE 0 END)                 AS q26,
             SUM(CASE WHEN YEAR(fs.sodate)={YEAR25} AND MONTH(fs.sodate)={MONTH}
                      THEN fs.net_qty ELSE 0 END)                 AS q25
@@ -85,7 +87,7 @@ def query_product_sales(conn):
         WHERE fs.solinetype = 'N'
           AND {STORE_FILTER}
           AND (
-              (YEAR(fs.sodate)={YEAR26} AND MONTH(fs.sodate)={MONTH})
+              (fs.sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}')
               OR
               (YEAR(fs.sodate)={YEAR25} AND MONTH(fs.sodate)={MONTH})
           )
@@ -181,12 +183,7 @@ def query_store_breakdown(conn, iprod_list):
 
 
 # ── STEP 4: Build JSON ────────────────────────────────────────────────────────
-def build_json(df, barcode_map, item_map, store_breakdown, branch_info):
-    today      = date.today()
-    # whsddpact lags 1-2 days. Use yesterday's day unless overridden.
-    # For May 2026: data finalized through day 30 (whsddpact lags on day 31).
-    days_elapsed = min(today.day - 1, 30) if MONTH == 5 and today.day > 30 else today.day - 1
-    days_elapsed = max(days_elapsed, 1)
+def build_json(df, barcode_map, item_map, store_breakdown, branch_info, days_elapsed):
 
     products = []
     for rank, (_, row) in enumerate(df.iterrows(), 1):
@@ -327,8 +324,25 @@ def push_github(cfg):
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--day', type=int, default=None,
+                        help='Last finalized day (1-31). Default: yesterday.')
+    parser.add_argument('--no-push', action='store_true')
+    args = parser.parse_args()
+    global PUSH
+    PUSH = not args.no_push
+
+    today = date.today()
+    if args.day:
+        days_elapsed = args.day
+    else:
+        # For May 2026: whsddpact lags, use yesterday capped at 30
+        days_elapsed = min(today.day - 1, 30) if MONTH == 5 and today.day > 30 else today.day - 1
+        days_elapsed = max(days_elapsed, 1)
+
     print('=' * 60)
-    print(f'  Product Data Builder  (MySQL-native)  May {YEAR26} vs {YEAR25}')
+    print(f'  Product Data Builder  (MySQL-native)  May {YEAR26} vs {YEAR25}  days 1-{days_elapsed}')
     print('=' * 60)
 
     cfg = _load_cfg()
@@ -338,8 +352,8 @@ def main():
     conn = _conn(cfg)
     print(f'Connected to MySQL: {cfg["host"]}')
 
-    print(f'\n[1/4] Querying product sales (May {YEAR26} vs May {YEAR25}) ...')
-    df = query_product_sales(conn)
+    print(f'\n[1/4] Querying product sales (May {YEAR26} days 1-{days_elapsed} vs May {YEAR25}) ...')
+    df = query_product_sales(conn, days_elapsed)
     total26 = df['s26'].sum()
     total25 = df['s25'].sum()
     yoy     = round((total26/total25-1)*100, 1) if total25 else 0
@@ -358,4 +372,27 @@ def main():
 
     conn.close()
 
-    print('\n[4/4] Building prod
+    print('\n[4/4] Building product_data.json ...')
+    branch_info = _load_branch_info()
+    output = build_json(df, bc_map, item_map, store_bd, branch_info, days_elapsed)
+
+    with open(OUT_JSON, 'w', encoding='utf-8') as f:
+        json.dump(output, f, ensure_ascii=False, separators=(',', ':'))
+
+    sz = os.path.getsize(OUT_JSON) // 1024
+    print(f'      Saved: {sz:,} KB | '
+          f'{len(output["products"])} products | '
+          f'{len(output["type_cats"])} types | '
+          f'{len(output["categories"])} groups')
+
+    print('\n' + '='*60)
+    print(f'  ✅ Done! May {YEAR26} days 1-{days_elapsed}: ฿{total26/1e6:.1f}M  |  YoY: {yoy:+.1f}%  |  {len(output["products"])} SKU')
+    print('='*60)
+
+    if PUSH:
+        print('\nPushing to GitHub ...')
+        push_github(cfg)
+
+
+if __name__ == '__main__':
+    main()
