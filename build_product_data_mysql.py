@@ -241,7 +241,7 @@ def query_store_breakdown(conn, days_elapsed):
 
 # ── STEP 4: Build JSON ────────────────────────────────────────────────────────
 def build_json(df, barcode_map, item_map, store_breakdown, branch_info, days_elapsed):
-
+    today = date.today()
     products = []
     for rank, (_, row) in enumerate(df.iterrows(), 1):
         s26   = float(row['s26'])
@@ -402,4 +402,51 @@ def main():
     print(f'  Product Data Builder  (MySQL-native)  May {YEAR26} vs {YEAR25}  days 1-{days_elapsed}')
     print('=' * 60)
 
-    cfg = _lo
+    cfg = _load_cfg()
+    if not cfg:
+        print('ERROR: db_config.json not found'); return
+
+    conn = _conn(cfg)
+    print(f'Connected to MySQL: {cfg["host"]}')
+
+    print(f'\n[1/4] Querying product sales (May {YEAR26} days 1-{days_elapsed} vs May {YEAR25}) ...')
+    df = query_product_sales(conn, days_elapsed)
+    total26 = df['s26'].sum()
+    total25 = df['s25'].sum()
+    yoy     = round((total26/total25-1)*100, 1) if total25 else 0
+    print(f'      {len(df):,} products | '
+          f'฿{total26:,.0f} ({yoy:+.1f}% YoY) | '
+          f'{int(df["q26"].sum()):,} units')
+
+    print('\n[2/4] Loading barcodes + onhand + ipunit3 ...')
+    bc_map, item_map = query_barcodes(conn, df['iprod'].tolist())
+    print(f'      {len(bc_map):,} barcodes')
+
+    print('\n[3/4] Store breakdown (ALL products, store-indexed) ...')
+    store_bd = query_store_breakdown(conn, days_elapsed)
+
+    conn.close()
+
+    print('\n[4/4] Building product_data.json ...')
+    branch_info = _load_branch_info()
+    output = build_json(df, bc_map, item_map, store_bd, branch_info, days_elapsed)
+
+    with open(OUT_JSON, 'w', encoding='utf-8') as f:
+        json.dump(output, f, ensure_ascii=False, separators=(',', ':'))
+
+    sz = os.path.getsize(OUT_JSON) // 1024
+    print('      Saved: %d KB | %d products | %d types | %d groups' % (
+        sz, len(output['products']), len(output['type_cats']), len(output['categories'])))
+
+    print('\n' + '='*60)
+    print('  Done! May %d days 1-%d: %.1fM | YoY: %+.1f%% | %d SKU' % (
+        YEAR26, days_elapsed, total26/1e6, yoy, len(output['products'])))
+    print('='*60)
+
+    if PUSH:
+        print('\nPushing to GitHub ...')
+        push_github(cfg)
+
+
+if __name__ == '__main__':
+    main()
