@@ -152,6 +152,49 @@ def _query_txn_mtd(cfg, year, month):
         except: pass
     return result
 
+def _query_fact_sales_mtd(cfg, year, month, days_elapsed):
+    """Query fact_sales directly for MTD net_sales_amt + total_cost per store.
+    This is the authoritative sales source — matches the mobile app exactly."""
+    import mysql.connector
+    conn = mysql.connector.connect(
+        host=cfg['host'], port=cfg.get('port', 3306),
+        user=cfg['user'], password=cfg['password'],
+        database=cfg.get('database', 'data-lake'),
+        connection_timeout=60, charset='utf8mb4'
+    )
+    cursor = conn.cursor(dictionary=True)
+    end_date = f'{year}-{month}-{int(days_elapsed):02d}'
+    cursor.execute("""
+        SELECT sotowhs AS whs,
+               SUM(net_sales_amt)          AS sales_amt,
+               SUM(COALESCE(total_cost,0)) AS cost_amt,
+               COUNT(DISTINCT sono)        AS txn_count
+        FROM fact_sales
+        WHERE sodate BETWEEN %s AND %s
+          AND solinetype = 'N'
+          AND sotowhs REGEXP '^[0-9]+$'
+          AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
+        GROUP BY sotowhs
+    """, (f'{year}-{month}-01', end_date))
+    rows = cursor.fetchall()
+    cursor.close(); conn.close()
+    result = {}
+    for r in rows:
+        raw = str(r['whs'] or '').strip()
+        if not raw: continue
+        entry = {
+            'sales': float(r['sales_amt'] or 0),
+            'cost':  float(r['cost_amt']  or 0),
+            'txn':   int(r['txn_count']   or 0),
+        }
+        result[raw] = entry
+        try: result[str(int(raw))] = entry
+        except: pass
+        try: result[raw.zfill(3)] = entry
+        except: pass
+    return result
+
+
 def _query_whsdd(cfg, year, month):
     """Query MYPOS2018_CENTER.whsdd for daily store targets + actuals.
     Returns list of dicts with normalised string values (same shape as target.txt rows)."""
@@ -276,6 +319,20 @@ else:
     print('    Data fully current -- no factXX.txt needed')
 
 store_target_sales = {no: sum(store_target_days[no].values()) for no in store_target_days}
+
+# STEP 1b: Query fact_sales directly (authoritative source — matches mobile app)
+print('\n[1b] Querying fact_sales MTD (days 1-%d) for exact sales amounts ...' % DAYS_ELAPSED)
+_fact_sales_mtd = {}   # {store_code: {sales, cost, txn}}  — primary source
+if _db_cfg:
+    try:
+        _fact_sales_mtd = _query_fact_sales_mtd(_db_cfg, YEAR, MONTH, DAYS_ELAPSED)
+        _fs_total = sum(v['sales'] for v in _fact_sales_mtd.values())
+        print('    fact_sales: %d stores | ฿%s MTD gross' % (
+            len(_fact_sales_mtd), format(int(_fs_total), ',')))
+    except Exception as _fse:
+        print('    WARNING: fact_sales query failed: %s -- will use whsddpact fallback' % _fse)
+else:
+    print('    No DB config -- skipping fact_sales query')
 
 # STEP 2: factXX.txt
 print('\n[2/7] Reading factXX.txt for unfinalized days ...')
@@ -424,33 +481,55 @@ print('    %d stores / %d DMs / %d RMs loaded' % (len(D['stores']), len(D['dm'])
 
 # STEP 5: Update stores
 print('\n[5/7] Updating stores ...')
+_used_fact_sales = 0; _used_whsdd_fallback = 0
 for s in D['stores']:
     code = s['code']
-    sales_target = store_target_sales.get(code, 0.0)
-    sales_fact   = store_fact_sales.get(code, 0.0)
-    ret          = store_ret.get(code, 0.0)
-    net_sales    = sales_target + sales_fact - ret
+    ret  = store_ret.get(code, 0.0)
     tar_mo  = store_tar_monthly.get(code, s.get('target', 0))
     tar_mtd = store_tar_mtd.get(code, s.get('mtd_target', 0))
-    txn_target = store_txn_mtd.get(code, 0)
-    txn_fact   = len(store_fact_txn.get(code, set()))
-    txn_mtd    = txn_target + txn_fact
-    gp_pct   = s.get('gp_pct', 33.0)
-    daily    = round(net_sales / DAYS_ELAPSED) if DAYS_ELAPSED else 0
-    proj     = daily * DAYS_IN_MONTH
+
+    # ── Sales source: fact_sales (primary) or whsddpact+factXX (fallback) ──
+    fs = _fact_sales_mtd.get(code)
+    if fs:
+        # PRIMARY: fact_sales — authoritative, matches mobile app
+        gross_sales = fs['sales']
+        net_sales   = gross_sales - ret
+        cost_mtd    = fs['cost']
+        gp_mtd_amt  = gross_sales - cost_mtd - ret   # GP on net sales
+        gp_pct      = round(gp_mtd_amt / net_sales * 100, 2) if net_sales else s.get('gp_pct', 33.0)
+        txn_mtd     = fs['txn']
+        _used_fact_sales += 1
+    else:
+        # FALLBACK: whsddpact + factXX.txt (for stores not in fact_sales)
+        sales_target = store_target_sales.get(code, 0.0)
+        sales_fact_f = store_fact_sales.get(code, 0.0)
+        net_sales    = sales_target + sales_fact_f - ret
+        gp_pct       = s.get('gp_pct', 33.0)
+        gp_mtd_amt   = round(net_sales * gp_pct / 100)
+        cost_mtd     = net_sales - gp_mtd_amt
+        txn_target   = store_txn_mtd.get(code, 0)
+        txn_fact_f   = len(store_fact_txn.get(code, set()))
+        txn_mtd      = txn_target + txn_fact_f
+        _used_whsdd_fallback += 1
+
+    daily     = round(net_sales / DAYS_ELAPSED) if DAYS_ELAPSED else 0
+    proj      = daily * DAYS_IN_MONTH
     daily_txn = round(txn_mtd / DAYS_ELAPSED) if DAYS_ELAPSED else 0
-    ticket   = round(net_sales / txn_mtd) if txn_mtd else 0
+    ticket    = round(net_sales / txn_mtd) if txn_mtd else 0
     s25  = s.get('s25_may', 0); t25 = s.get('ticket_avg_25', 0); dtxn25 = s.get('daily_txn_25', 0)
     s.update({
         'sales_mtd': round(net_sales), 'target': round(tar_mo), 'mtd_target': round(tar_mtd),
         'daily': daily, 'proj': proj, 'txn_mtd': txn_mtd, 'daily_txn': daily_txn,
-        'ticket_avg': ticket, 'gp_mtd': round(net_sales * gp_pct / 100),
+        'ticket_avg': ticket,
+        'gp_mtd': round(gp_mtd_amt), 'gp_pct': round(gp_pct, 2),
         'gp_proj': round(proj * gp_pct / 100), 'ret_mtd': round(ret),
         'ret_daily': round(ret / DAYS_ELAPSED) if DAYS_ELAPSED else 0,
         'pct_target': safe_pct(net_sales, tar_mtd), 'proj_vs_tgt': safe_pct(proj, tar_mo),
         'proj_yoy': safe_yoy(proj, s25), 'ticket_avg_yoy': safe_yoy(ticket, t25),
         'txn_yoy': safe_yoy(daily_txn, dtxn25),
     })
+print('    fact_sales primary: %d stores | whsddpact fallback: %d stores' % (
+    _used_fact_sales, _used_whsdd_fallback))
     s['m26'][MONTH_KEY] = round(net_sales)
 
 def aggregate(entity, stores):
@@ -864,75 +943,4 @@ if os.path.exists(FRAUD_FILE) and os.path.exists(FRAUD_JSON):
         # Update nav-date badge
         _fraud_badge = '%d %s %d \u00b7 \u0e27\u0e31\u0e19 1\u2013%d' % (DAYS_ELAPSED, THAI_MON, YEAR_BE, DAYS_ELAPSED)
         _fhtml = re.sub(
-            r'\d+\s+\S+\s+\d{4}\s+\u00b7\s+\u0e27\u0e31\u0e19\s+1\u2013\d+',
-            _fraud_badge, _fhtml)
-
-        with open(FRAUD_FILE, 'w', encoding='utf-8') as _ff:
-            _ff.write(_fhtml)
-        print('  fraud_dashboard.html data injected + nav-date -> day 1-%d' % DAYS_ELAPSED)
-    except Exception as _e:
-        print('  WARNING fraud_dashboard.html data inject failed: %s' % _e)
-        # Fallback: at least update the date badge
-        try:
-            with open(FRAUD_FILE, encoding='utf-8') as _ff: _fhtml = _ff.read()
-            _fraud_badge = '%d %s %d \u00b7 \u0e27\u0e31\u0e19 1\u2013%d' % (DAYS_ELAPSED, THAI_MON, YEAR_BE, DAYS_ELAPSED)
-            _fhtml = re.sub(r'\d+\s+\S+\s+\d{4}\s+\u00b7\s+\u0e27\u0e31\u0e19\s+1\u2013\d+', _fraud_badge, _fhtml)
-            with open(FRAUD_FILE, 'w', encoding='utf-8') as _ff: _ff.write(_fhtml)
-        except: pass
-
-# STEP 7: Push to GitHub Pages
-print('[7/7] Pushing to GitHub Pages ...')
-try:
-    if os.path.exists(os.path.join(REPO_DIR, '.git')):
-        subprocess.run(['git', '-C', REPO_DIR, 'pull', '--ff-only'],
-                       check=True, capture_output=True)
-    else:
-        subprocess.run(['git', 'clone', GITHUB_URL, REPO_DIR],
-                       check=True, capture_output=True)
-
-    # Stamp product_data.json with today's date so it always gets committed
-    prod_json = os.path.join(FOLDER, 'product_data.json')
-    if os.path.exists(prod_json):
-        import json as _pj
-        _pd = _pj.load(open(prod_json, encoding='utf-8'))
-        _pd['generated'] = str(date.today())
-        with open(prod_json, 'w', encoding='utf-8') as _pf:
-            _pj.dump(_pd, _pf, ensure_ascii=False, separators=(',', ':'))
-        print('    product_data.json generated -> %s' % date.today())
-
-    push_files = ['index.html', 'sales_dashboard_v8.html', 'fraud_dashboard.html',
-                  'fraud_analysis.html', 'fraud_data.json',
-                  'product_dashboard.html', 'product_data.json']
-    for fname in push_files:
-        src = os.path.join(FOLDER, fname)
-        dst = os.path.join(REPO_DIR, fname)
-        if os.path.exists(src):
-            shutil.copy2(src, dst)
-    _env = os.environ.copy()
-    _env['GIT_AUTHOR_NAME']     = 'Dashboard Bot'
-    _env['GIT_AUTHOR_EMAIL']    = 'bot@dashboard'
-    _env['GIT_COMMITTER_NAME']  = 'Dashboard Bot'
-    _env['GIT_COMMITTER_EMAIL'] = 'bot@dashboard'
-    subprocess.run(['git', '-C', REPO_DIR, 'add', '-A'],
-                   capture_output=True, env=_env)
-    _cr = subprocess.run(
-        ['git', '-C', REPO_DIR, 'commit', '-m',
-         'auto: Day %d/%d %s' % (DAYS_ELAPSED, DAYS_IN_MONTH, MONTH_NAME)],
-        capture_output=True, text=True, env=_env)
-    if 'nothing to commit' in (_cr.stdout + _cr.stderr):
-        print('  GitHub: nothing to commit (data unchanged)')
-    else:
-        _pr = subprocess.run(['git', '-C', REPO_DIR, 'push', 'origin', 'main'],
-                             capture_output=True, text=True, env=_env)
-        if _pr.returncode == 0:
-            print('  GitHub: pushed OK')
-        else:
-            print('  WARNING: push failed: ' + _pr.stderr[-200:])
-except Exception as _e:
-    print('  WARNING: GitHub push failed: ' + str(_e))
-finally:
-    if os.path.exists(REPO_DIR):
-        shutil.rmtree(REPO_DIR, ignore_errors=True)
-
-print()
-print('All done.')
+  
