@@ -64,14 +64,16 @@ def query_product_sales(conn, days_elapsed):
     Returns DataFrame with one row per iprod.
     """
     end_date26 = f'{YEAR26}-{MONTH:02d}-{days_elapsed:02d}'
+    # Some rows in fact_sales store the barcode as iprod instead of the product code.
+    # Fix: join dim_item_barcode (dib) to resolve parcode, then join dim_product twice.
     sql = f"""
         SELECT
             fs.iprod,
-            COALESCE(dp.idesc,  fs.iprod)    AS name,
-            COALESCE(dp.brndesc, '')          AS brand,
-            COALESCE(dp.igrdesc, 'ไม่ระบุ')  AS grp,
-            COALESCE(dp.itydesc, '')          AS type_desc,
-            COALESCE(dp.igrcode, '')          AS grp_code,
+            COALESCE(dp.idesc,  dp2.idesc,  fs.iprod)    AS name,
+            COALESCE(dp.brndesc,dp2.brndesc,'')           AS brand,
+            COALESCE(dp.igrdesc,dp2.igrdesc,'ไม่ระบุ')   AS grp,
+            COALESCE(dp.itydesc,dp2.itydesc,'')           AS type_desc,
+            COALESCE(dp.igrcode,dp2.igrcode,'')           AS grp_code,
             SUM(CASE WHEN fs.sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
                      THEN fs.net_sales_amt ELSE 0 END)          AS s26,
             SUM(CASE WHEN YEAR(fs.sodate)={YEAR25} AND MONTH(fs.sodate)={MONTH}
@@ -83,7 +85,9 @@ def query_product_sales(conn, days_elapsed):
             SUM(CASE WHEN YEAR(fs.sodate)={YEAR25} AND MONTH(fs.sodate)={MONTH}
                      THEN fs.net_qty ELSE 0 END)                 AS q25
         FROM fact_sales fs
-        LEFT JOIN dim_product dp ON dp.iprod = fs.iprod
+        LEFT JOIN dim_product dp  ON dp.iprod  = fs.iprod
+        LEFT JOIN dim_item_barcode dib ON dib.barcode = fs.iprod AND dib.baractive = 'Y'
+        LEFT JOIN dim_product dp2 ON dp2.iprod = dib.parcode
         WHERE fs.solinetype = 'N'
           AND {STORE_FILTER}
           AND (
@@ -91,7 +95,10 @@ def query_product_sales(conn, days_elapsed):
               OR
               (YEAR(fs.sodate)={YEAR25} AND MONTH(fs.sodate)={MONTH})
           )
-        GROUP BY fs.iprod, dp.idesc, dp.brndesc, dp.igrdesc, dp.itydesc, dp.igrcode
+        GROUP BY fs.iprod,
+                 COALESCE(dp.idesc, dp2.idesc), COALESCE(dp.brndesc, dp2.brndesc),
+                 COALESCE(dp.igrdesc, dp2.igrdesc), COALESCE(dp.itydesc, dp2.itydesc),
+                 COALESCE(dp.igrcode, dp2.igrcode)
         HAVING s26 > 0
         ORDER BY s26 DESC
     """
@@ -143,43 +150,42 @@ def query_barcodes(conn, iprod_list):
     return bc_map, item_map
 
 
-# ── STEP 3: Store-level breakdown for top 500 ─────────────────────────────────
-def query_store_breakdown(conn, iprod_list):
-    if not iprod_list:
-        return {}
-    placeholders = ','.join(['%s'] * len(iprod_list))
+# ── STEP 3: Store-indexed breakdown — ALL products ────────────────────────────
+def query_store_breakdown(conn, days_elapsed):
+    """
+    Returns {store_code: {iprod: [s26, q26]}} for ALL products sold in May 2026.
+    Store-indexed (not product-indexed) so JS can filter by any store/DM/RM
+    and see all products at that scope.
+    Threshold: s26 >= 500 baht to keep JSON lean.
+    """
+    end_date26 = f'{YEAR26}-{MONTH:02d}-{days_elapsed:02d}'
     sql = f"""
         SELECT
+            LPAD(fs.sotowhs, 3, '0')  AS whs,
             fs.iprod,
-            LPAD(fs.sotowhs, 3, '0')       AS whs,
-            YEAR(fs.sodate)                AS yr,
-            SUM(fs.net_sales_amt)          AS sales,
-            SUM(fs.net_qty)                AS qty,
-            SUM(COALESCE(fs.total_cost,0)) AS cost
+            ROUND(SUM(fs.net_sales_amt)) AS s26,
+            ROUND(SUM(fs.net_qty))       AS q26
         FROM fact_sales fs
         WHERE fs.solinetype = 'N'
           AND {STORE_FILTER}
-          AND fs.iprod IN ({placeholders})
-          AND (
-              (YEAR(fs.sodate)={YEAR26} AND MONTH(fs.sodate)={MONTH})
-              OR
-              (YEAR(fs.sodate)={YEAR25} AND MONTH(fs.sodate)={MONTH})
-          )
-        GROUP BY fs.iprod, whs, YEAR(fs.sodate)
+          AND fs.sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
+        GROUP BY whs, fs.iprod
+        HAVING s26 >= 500
+        ORDER BY whs, s26 DESC
     """
     cur = conn.cursor(dictionary=True)
-    cur.execute(sql, iprod_list)
+    cur.execute(sql)
     rows = cur.fetchall()
     cur.close()
-    breakdown = defaultdict(dict)
+    # {whs: {iprod: [s26, q26]}}
+    result = defaultdict(dict)
     for r in rows:
-        sfx = '26' if int(r['yr']) == YEAR26 else '25'
-        breakdown[r['iprod']][f"{r['whs']}:{sfx}"] = {
-            'sales': round(float(r['sales'] or 0)),
-            'qty':   round(float(r['qty']   or 0)),
-            'cost':  round(float(r['cost']  or 0)),
-        }
-    return dict(breakdown)
+        result[r['whs']][r['iprod']] = [
+            int(r['s26'] or 0),
+            int(r['q26'] or 0),
+        ]
+    print(f'      {len(result)} stores, {sum(len(v) for v in result.values()):,} product-store entries')
+    return dict(result)
 
 
 # ── STEP 4: Build JSON ────────────────────────────────────────────────────────
@@ -365,10 +371,8 @@ def main():
     bc_map, item_map = query_barcodes(conn, df['iprod'].tolist())
     print(f'      {len(bc_map):,} barcodes')
 
-    print('\n[3/4] Store breakdown (top 500 products) ...')
-    top500 = df.head(500)['iprod'].tolist()
-    store_bd = query_store_breakdown(conn, top500)
-    print(f'      {sum(len(v) for v in store_bd.values()):,} store-product entries')
+    print('\n[3/4] Store breakdown (ALL products, store-indexed) ...')
+    store_bd = query_store_breakdown(conn, days_elapsed)
 
     conn.close()
 
@@ -380,13 +384,12 @@ def main():
         json.dump(output, f, ensure_ascii=False, separators=(',', ':'))
 
     sz = os.path.getsize(OUT_JSON) // 1024
-    print(f'      Saved: {sz:,} KB | '
-          f'{len(output["products"])} products | '
-          f'{len(output["type_cats"])} types | '
-          f'{len(output["categories"])} groups')
+    print('      Saved: %d KB | %d products | %d types | %d groups' % (
+        sz, len(output['products']), len(output['type_cats']), len(output['categories'])))
 
     print('\n' + '='*60)
-    print(f'  ✅ Done! May {YEAR26} days 1-{days_elapsed}: ฿{total26/1e6:.1f}M  |  YoY: {yoy:+.1f}%  |  {len(output["products"])} SKU')
+    print('  Done! May %d days 1-%d: %.1fM | YoY: %+.1f%% | %d SKU' % (
+        YEAR26, days_elapsed, total26/1e6, yoy, len(output['products'])))
     print('='*60)
 
     if PUSH:

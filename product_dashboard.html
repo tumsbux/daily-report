@@ -322,14 +322,14 @@ function resetFilter(){
 function applyAll(){
   const prods=D.products||[];
   const si=D.store_info||{};
+  // store_breakdown is now store-indexed: {whs: {iprod: [s26, q26]}}
   const sb=D.store_breakdown||{};
   const days=D.days_elapsed||30;
 
   // Which store codes are in scope?
   let scopeStores=null;
   if(fStore){
-    const padded=fStore.padStart(3,'0');
-    scopeStores=new Set([padded]);
+    scopeStores=new Set([fStore.padStart(3,'0')]);
   } else if(fDM){
     scopeStores=new Set(Object.entries(si).filter(([,v])=>v.dm===fDM).map(([k])=>k.padStart(3,'0')));
   } else if(fRM){
@@ -337,25 +337,41 @@ function applyAll(){
   }
 
   // Build working product list
-  let wProds=prods.map(p=>{
-    if(!scopeStores) return p;
-    const bd=sb[p.iprod]||sb[p.barcode]||{};
-    let s26=0,s25=0,q26=0,q25=0,cost26=0;
-    for(const [key,val] of Object.entries(bd)){
-      const [whs,yr]=key.split(':');
-      if(!scopeStores.has(whs)) continue;
-      if(yr==='26'){s26+=val.sales||0;q26+=val.qty||0;cost26+=val.cost||0;}
-      else         {s25+=val.sales||0;q25+=val.qty||0;}
+  let wProds;
+  if(!scopeStores){
+    wProds=prods; // global — use product totals directly
+  } else {
+    // Aggregate across all in-scope stores from store_breakdown
+    // store_breakdown: {whs: {iprod: [s26, q26]}}
+    const aggMap={}; // {iprod: {s26, q26}}
+    for(const whs of scopeStores){
+      const storeProds=sb[whs]||{};
+      for(const [iprod,[s26,q26]] of Object.entries(storeProds)){
+        if(!aggMap[iprod]) aggMap[iprod]={s26:0,q26:0};
+        aggMap[iprod].s26+=s26;
+        aggMap[iprod].q26+=q26;
+      }
     }
-    if(s26===0) return null; // not sold at filtered stores (or not in top-500 breakdown)
-    const gp26=s26-cost26;
-    return {...p,
-      s26:Math.round(s26),s25:Math.round(s25),q26:Math.round(q26),q25:Math.round(q25),
-      cost26:Math.round(cost26),gp26:Math.round(gp26),
-      gp_pct:s26?Math.round(gp26/s26*1000)/10:0,
-      s_yoy:s25?Math.round((s26/s25-1)*1000)/10:null,
-      q_yoy:q25?Math.round((q26/q25-1)*1000)/10:null};
-  }).filter(Boolean);
+    // Build product list from global products, overriding s26/q26 from store agg
+    // Use a Map for O(1) lookup of global product data
+    const prodMap={};
+    for(const p of prods) prodMap[p.iprod]=p;
+
+    wProds=Object.entries(aggMap).map(([iprod,agg])=>{
+      if(agg.s26<=0) return null;
+      const base=prodMap[iprod];
+      if(!base) return null; // not in global products (filtered by solinetype etc.)
+      const cost26=base.cost26!=null?Math.round(base.cost26*(agg.s26/base.s26)):0;
+      const gp26=agg.s26-cost26;
+      return {...base,
+        s26:agg.s26, q26:agg.q26,
+        cost26:cost26, gp26:gp26,
+        gp_pct:agg.s26?Math.round(gp26/agg.s26*1000)/10:0,
+        s_yoy:base.s25?Math.round((agg.s26/base.s25-1)*1000)/10:null,
+        q_yoy:base.q25?Math.round((agg.q26/base.q25-1)*1000)/10:null,
+      };
+    }).filter(Boolean);
+  }
 
   // Type filter
   if(fType) wProds=wProds.filter(p=>(p.type||'ไม่ระบุประเภท')===fType);
