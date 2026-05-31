@@ -61,8 +61,5 @@ jobs:
         run: python build_product_data_mysql.py --no-push
 
       - name: Run dashboard update
-        run: python update_dashboard.py
-
-      - name: Clean up credentials
-        if: always()
-        run: rm -f db_config.json
+        # whsddpact lags 1-2 days. On May 31, use --day 30 (last finalized day).
+        # From June onward: remove --day flag to a

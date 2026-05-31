@@ -445,4 +445,181 @@ function renderSummary(prods){
   document.getElementById('s-sales-yoy').innerHTML=s25?`พ.ค.25: ${fmtM(s25)} ${yoyBadge(sYoy)}`:'';
   document.getElementById('s-gp').textContent=fmtM(gp26);
   document.getElementById('s-gp-pct').textContent='GP% = '+gpPct.toFixed(1)+'%';
-  document.g
+  document.getElementById('s-cost').textContent=fmtM(c26);
+  document.getElementById('s-cost-pct').textContent='Cost% = '+cPct.toFixed(1)+'%';
+  document.getElementById('s-qty').textContent=fmt(q26);
+  document.getElementById('s-qty-yoy').innerHTML=q25?`พ.ค.25: ${fmt(q25)} ${yoyBadge(qYoy)}`:'';
+  document.getElementById('s-sku').textContent=prods.length.toLocaleString();
+  document.getElementById('s-sku-sub').textContent=`จาก ${(D.products||[]).length.toLocaleString()} SKU ทั้งหมด`;
+}
+
+// ── RENDER TYPE CATS ──────────────────────────────────────────────────────────
+function renderTypeCats(cats){
+  document.getElementById('type-cnt').textContent=cats.length+' ประเภท';
+  const totS26 =cats.reduce((s,c)=>s+c.s26,0);
+  const totS25 =cats.reduce((s,c)=>s+c.s25,0);
+  const totC26 =cats.reduce((s,c)=>s+c.cost26,0);
+  const totGP  =cats.reduce((s,c)=>s+c.gp26,0);
+  const totQ26 =cats.reduce((s,c)=>s+c.q26,0);
+  const totBC  =cats.reduce((s,c)=>s+c.bc_cnt,0);
+  const totGrp =cats.reduce((s,c)=>s+c.grp_cnt,0);
+  const totGPct=totS26?totGP/totS26*100:0;
+  const totYoy =totS25?(totS26/totS25-1)*100:null;
+  document.getElementById('type-tbody').innerHTML=cats.map(c=>`<tr>
+    <td class="b">${c.type}</td>
+    <td class="r">${fmt(c.q26)}</td>
+    <td class="r">${fmt(c.s26)}</td>
+    <td class="r">${fmt(c.cost26)}</td>
+    <td class="r"><div class="pct-bar"><div class="bar" style="width:${Math.min(c.pct*2.5,90)}px"></div>${c.pct.toFixed(2)}%</div></td>
+    <td class="r">${fmt(c.gp26)}</td>
+    <td class="r">${c.gp_pct.toFixed(1)}%</td>
+    <td class="r">${yoyBadge(c.s_yoy)}</td>
+    <td class="r">${fmt(c.bc_cnt)}</td>
+    <td class="r">${fmt(c.grp_cnt)}</td>
+  </tr>`).join('');
+  document.getElementById('type-foot').innerHTML=`
+    <td>ผลรวม</td><td class="r">${fmt(totQ26)}</td><td class="r">${fmt(totS26)}</td>
+    <td class="r">${fmt(totC26)}</td><td class="r">100.00%</td><td class="r">${fmt(totGP)}</td>
+    <td class="r">${totGPct.toFixed(1)}%</td><td class="r">${yoyBadge(totYoy)}</td>
+    <td class="r">${fmt(totBC)}</td><td class="r">${fmt(totGrp)}</td>`;
+}
+
+// ── RENDER GROUP CATS ─────────────────────────────────────────────────────────
+function renderGrpCats(cats){
+  document.getElementById('grp-cnt').textContent=cats.length+' กลุ่ม';
+  const totS26=cats.reduce((s,c)=>s+c.s26,0);
+  const totS25=cats.reduce((s,c)=>s+c.s25,0);
+  const totC26=cats.reduce((s,c)=>s+c.cost26,0);
+  const totGP =cats.reduce((s,c)=>s+c.gp26,0);
+  const totQ26=cats.reduce((s,c)=>s+c.q26,0);
+  const totGPct=totS26?totGP/totS26*100:0;
+  const totYoy =totS25?(totS26/totS25-1)*100:null;
+  document.getElementById('grp-tbody').innerHTML=cats.map(c=>`<tr>
+    <td class="b">${c.grp}</td>
+    <td class="r">${fmt(c.q26)}</td>
+    <td class="r">${fmt(c.s26)}</td>
+    <td class="r">${fmt(c.cost26)}</td>
+    <td class="r"><div class="pct-bar"><div class="bar" style="width:${Math.min(c.pct*2.5,90)}px"></div>${c.pct.toFixed(2)}%</div></td>
+    <td class="r">${fmt(c.gp26)}</td>
+    <td class="r">${c.gp_pct.toFixed(1)}%</td>
+    <td class="r">${yoyBadge(c.s_yoy)}</td>
+    <td class="r">${c.cnt}</td>
+  </tr>`).join('');
+  document.getElementById('grp-foot').innerHTML=`
+    <td>ผลรวม</td><td class="r">${fmt(totQ26)}</td><td class="r">${fmt(totS26)}</td>
+    <td class="r">${fmt(totC26)}</td><td class="r">100.00%</td><td class="r">${fmt(totGP)}</td>
+    <td class="r">${totGPct.toFixed(1)}%</td><td class="r">${yoyBadge(totYoy)}</td>
+    <td class="r">${cats.reduce((s,c)=>s+c.cnt,0)}</td>`;
+}
+
+// ── RENDER PRODUCT TABLE ──────────────────────────────────────────────────────
+function pSortVal(p,col,days){
+  const d=days||30;
+  switch(col){
+    case 0:  return p.rank||9999;
+    case 1:  return p.barcode||'';
+    case 2:  return p.name||'';
+    case 3:  return p.group||'';
+    case 4:  return p.q26||0;
+    case 5:  return p.s26||0;
+    case 6:  return p.cost26!=null?p.cost26:Math.round(p.s26-p.gp26);
+    case 7:  return p.gp26||0;
+    case 8:  return p.gp_pct||0;
+    case 9:  return (p.q26||0)/d;
+    case 10: return (p.q26||0)/(d/7);
+    case 11: return p.onhand||0;
+    case 12: return p.ipunit3||0;
+    case 13: return (p.q26||0)-(p.q25||0);
+    case 14: return p.s_yoy!=null?p.s_yoy:-9999;
+    default: return 0;
+  }
+}
+
+function renderProdPage(days){
+  const d=days||30;
+  const start=prodPage*PAGE_SIZE;
+  const page=filteredProds.slice(start,start+PAGE_SIZE);
+  document.getElementById('prod-cnt').textContent=filteredProds.length.toLocaleString()+' รายการ';
+  document.getElementById('prod-tbody').innerHTML=page.map((p,i)=>{
+    const cost26=p.cost26!=null?p.cost26:Math.round(p.s26-p.gp26);
+    const gp26  =p.gp26!=null?p.gp26:Math.round(p.s26-cost26);
+    const difQty=(p.q26||0)-(p.q25||0);
+    const perDay=d?(p.q26/d).toFixed(1):'—';
+    const perWk =d?(p.q26/(d/7)).toFixed(1):'—';
+    return`<tr>
+      <td><span class="rank-num">${start+i+1}</span></td>
+      <td style="font-family:monospace;font-size:11px">${p.barcode||p.iprod}</td>
+      <td class="prod-name b" title="${p.name||''}">${p.name||''}</td>
+      <td><span class="badge-grp">${p.group||''}</span></td>
+      <td class="r">${fmt(p.q26)}</td>
+      <td class="r">${fmt(p.s26)}</td>
+      <td class="r">${fmt(cost26)}</td>
+      <td class="r">${fmt(gp26)}</td>
+      <td class="r">${p.gp_pct!=null?p.gp_pct.toFixed(1)+'%':'—'}</td>
+      <td class="r">${perDay}</td>
+      <td class="r">${perWk}</td>
+      <td class="r">${p.onhand?fmt(p.onhand):'—'}</td>
+      <td class="r">${p.ipunit3?fmt(p.ipunit3):'—'}</td>
+      <td class="r ${difQty>=0?'yoy-p':'yoy-n'}">${difQty>=0?'+':''}${fmt(difQty)}</td>
+      <td class="r">${yoyBadge(p.s_yoy)}</td>
+    </tr>`;
+  }).join('');
+  renderPagination();
+}
+
+function renderPagination(){
+  const total=filteredProds.length;
+  const pages=Math.ceil(total/PAGE_SIZE);
+  const start=prodPage*PAGE_SIZE+1;
+  const end=Math.min((prodPage+1)*PAGE_SIZE,total);
+  document.getElementById('p-info').textContent=`แสดง ${start.toLocaleString()}–${end.toLocaleString()} จาก ${total.toLocaleString()} รายการ`;
+  document.getElementById('p-prev').disabled=prodPage===0;
+  document.getElementById('p-next').disabled=prodPage>=pages-1;
+  const show=[];
+  for(let i=0;i<pages;i++){if(i===0||i===pages-1||Math.abs(i-prodPage)<=2)show.push(i);}
+  let btns='',prev=-1;
+  for(const i of show){
+    if(prev>=0&&i-prev>1)btns+='<button disabled style="border:none;background:none;cursor:default">…</button>';
+    btns+=`<button class="${i===prodPage?'active':''}" onclick="goPage(${i})">${i+1}</button>`;
+    prev=i;
+  }
+  document.getElementById('p-nums').innerHTML=btns;
+}
+
+function changePage(d){goPage(prodPage+d);}
+function goPage(p){
+  const pages=Math.ceil(filteredProds.length/PAGE_SIZE);
+  prodPage=Math.max(0,Math.min(p,pages-1));
+  renderProdPage(D.days_elapsed||30);
+  document.getElementById('prod-tbl-wrap').scrollTop=0;
+}
+
+// ── SORT PRODUCT TABLE ────────────────────────────────────────────────────────
+function sortProd(col,th){
+  if(prodSortCol===col)prodSortDir*=-1;
+  else{prodSortCol=col;prodSortDir=-1;}
+  document.querySelectorAll('#prod-tbl th .sa').forEach(s=>s.className='sa');
+  th.querySelector('.sa').className='sa '+(prodSortDir===-1?'desc':'asc');
+  applyAll();
+}
+
+// ── SORT STATIC TABLES ────────────────────────────────────────────────────────
+function sortStatic(tblId,col,th){
+  const key=tblId+':'+col;
+  tblSortState[key]=(tblSortState[key]||1)*-1;
+  const dir=tblSortState[key];
+  th.closest('table').querySelectorAll('th .sa').forEach(s=>s.className='sa');
+  th.querySelector('.sa').className='sa '+(dir===1?'asc':'desc');
+  const tbody=document.getElementById(tblId).querySelector('tbody');
+  const rows=[...tbody.querySelectorAll('tr')];
+  rows.sort((a,b)=>{
+    const ta=a.cells[col].textContent.trim().replace(/[,%+]/g,'');
+    const tb=b.cells[col].textContent.trim().replace(/[,%+]/g,'');
+    const na=parseFloat(ta),nb=parseFloat(tb);
+    return isNaN(na)?dir*ta.localeCompare(tb,'th'):dir*(na-nb);
+  });
+  rows.forEach(r=>tbody.appendChild(r));
+}
+</script>
+</body>
+</html>

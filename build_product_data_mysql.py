@@ -167,7 +167,10 @@ def query_store_breakdown(conn, iprod_list):
 # ── STEP 4: Build JSON ────────────────────────────────────────────────────────
 def build_json(df, barcode_map, item_map, store_breakdown, branch_info):
     today      = date.today()
-    days_elapsed = today.day  # May: day of month = days elapsed
+    # whsddpact lags 1-2 days. Use yesterday's day unless overridden.
+    # For May 2026: data finalized through day 30 (whsddpact lags on day 31).
+    days_elapsed = min(today.day - 1, 30) if MONTH == 5 and today.day > 30 else today.day - 1
+    days_elapsed = max(days_elapsed, 1)
 
     products = []
     for rank, (_, row) in enumerate(df.iterrows(), 1):
@@ -352,11 +355,4 @@ def main():
           f'{len(output["type_cats"])} types | '
           f'{len(output["categories"])} groups')
 
-    print('\n' + '='*60)
-    print(f'  ✅ Done! May {YEAR26}: ฿{total26/1e6:.1f}M  |  '
-          f'YoY: {yoy:+.1f}%  |  '
-          f'{len(output["products"])} SKU')
-    print('='*60)
-
-    if PUSH:
-        print('\nPushi
+    pri
