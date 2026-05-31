@@ -528,9 +528,9 @@ for s in D['stores']:
         'proj_yoy': safe_yoy(proj, s25), 'ticket_avg_yoy': safe_yoy(ticket, t25),
         'txn_yoy': safe_yoy(daily_txn, dtxn25),
     })
+    s['m26'][MONTH_KEY] = round(net_sales)
 print('    fact_sales primary: %d stores | whsddpact fallback: %d stores' % (
     _used_fact_sales, _used_whsdd_fallback))
-    s['m26'][MONTH_KEY] = round(net_sales)
 
 def aggregate(entity, stores):
     sm = sum(s['sales_mtd'] for s in stores); tar_mo = sum(s['target'] for s in stores)
@@ -943,4 +943,76 @@ if os.path.exists(FRAUD_FILE) and os.path.exists(FRAUD_JSON):
         # Update nav-date badge
         _fraud_badge = '%d %s %d \u00b7 \u0e27\u0e31\u0e19 1\u2013%d' % (DAYS_ELAPSED, THAI_MON, YEAR_BE, DAYS_ELAPSED)
         _fhtml = re.sub(
+            r'\d+\s+\S+\s+\d{4}\s+\u00b7\s+\u0e27\u0e31\u0e19\s+1\u2013\d+',
+            _fraud_badge, _fhtml)
+
+        with open(FRAUD_FILE, 'w', encoding='utf-8') as _ff:
+            _ff.write(_fhtml)
+        print('  fraud_dashboard.html data injected + nav-date -> day 1-%d' % DAYS_ELAPSED)
+    except Exception as _e:
+        print('  WARNING fraud_dashboard.html data inject failed: %s' % _e)
+        # Fallback: at least update the date badge
+        try:
+            with open(FRAUD_FILE, encoding='utf-8') as _ff: _fhtml = _ff.read()
+            _fraud_badge = '%d %s %d \u00b7 \u0e27\u0e31\u0e19 1\u2013%d' % (DAYS_ELAPSED, THAI_MON, YEAR_BE, DAYS_ELAPSED)
+            _fhtml = re.sub(r'\d+\s+\S+\s+\d{4}\s+\u00b7\s+\u0e27\u0e31\u0e19\s+1\u2013\d+', _fraud_badge, _fhtml)
+            with open(FRAUD_FILE, 'w', encoding='utf-8') as _ff: _ff.write(_fhtml)
+        except: pass
+
+# STEP 7: Push to GitHub Pages
+print('[7/7] Pushing to GitHub Pages ...')
+try:
+    if os.path.exists(os.path.join(REPO_DIR, '.git')):
+        subprocess.run(['git', '-C', REPO_DIR, 'pull', '--ff-only'],
+                       check=True, capture_output=True)
+    else:
+        subprocess.run(['git', 'clone', GITHUB_URL, REPO_DIR],
+                       check=True, capture_output=True)
+
+    # Stamp product_data.json with today's date so it always gets committed
+    prod_json = os.path.join(FOLDER, 'product_data.json')
+    if os.path.exists(prod_json):
+        import json as _pj
+        _pd = _pj.load(open(prod_json, encoding='utf-8'))
+        _pd['generated'] = str(date.today())
+        with open(prod_json, 'w', encoding='utf-8') as _pf:
+            _pj.dump(_pd, _pf, ensure_ascii=False, separators=(',', ':'))
+        print('    product_data.json generated -> %s' % date.today())
+
+    push_files = ['index.html', 'sales_dashboard_v8.html', 'fraud_dashboard.html',
+                  'fraud_analysis.html', 'fraud_data.json',
+                  'product_dashboard.html', 'product_data.json']
+    for fname in push_files:
+        src = os.path.join(FOLDER, fname)
+        dst = os.path.join(REPO_DIR, fname)
+        if os.path.exists(src):
+            shutil.copy2(src, dst)
+    _env = os.environ.copy()
+    _env['GIT_AUTHOR_NAME']     = 'Dashboard Bot'
+    _env['GIT_AUTHOR_EMAIL']    = 'bot@dashboard'
+    _env['GIT_COMMITTER_NAME']  = 'Dashboard Bot'
+    _env['GIT_COMMITTER_EMAIL'] = 'bot@dashboard'
+    subprocess.run(['git', '-C', REPO_DIR, 'add', '-A'],
+                   capture_output=True, env=_env)
+    _cr = subprocess.run(
+        ['git', '-C', REPO_DIR, 'commit', '-m',
+         'auto: Day %d/%d %s' % (DAYS_ELAPSED, DAYS_IN_MONTH, MONTH_NAME)],
+        capture_output=True, text=True, env=_env)
+    if 'nothing to commit' in (_cr.stdout + _cr.stderr):
+        print('  GitHub: nothing to commit (data unchanged)')
+    else:
+        _pr = subprocess.run(['git', '-C', REPO_DIR, 'push', 'origin', 'main'],
+                             capture_output=True, text=True, env=_env)
+        if _pr.returncode == 0:
+            print('  GitHub: pushed OK')
+        else:
+            print('  WARNING: push failed: ' + _pr.stderr[-200:])
+except Exception as _e:
+    print('  WARNING: GitHub push failed: ' + str(_e))
+finally:
+    if os.path.exists(REPO_DIR):
+        shutil.rmtree(REPO_DIR, ignore_errors=True)
+
+print()
+print('All done.')
   
