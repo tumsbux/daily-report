@@ -119,7 +119,7 @@ canvas{max-height:160px!important}
   <a class="nav-link" href="fraud_dashboard.html">🛡️ Fraud</a>
   <a class="nav-link" href="product_dashboard.html">📦 Product</a>
   <div class="nav-right">
-    <span class="date-badge">📅 29 พ.ค. 2569 · วัน 29/31</span>
+    <span class="date-badge">📅 30 พ.ค. 2569 · วัน 30/31</span>
     <span class="alert-dot">⚠ 4 HIGH</span>
   </div>
 </nav>
@@ -132,17 +132,17 @@ canvas{max-height:160px!important}
       <h1>ภาพรวมธุรกิจ — พฤษภาคม 2569</h1>
       <p>ข้อมูลอัพเดทอัตโนมัติทุกเช้า · 203 สาขา · 4 RM · 15 DM</p>
       <div class="hero-kpis">
-        <div class="hero-kpi"><div class="hk-val">126.0M</div><div class="hk-lab">ยอดขาย MTD (฿)</div></div>
+        <div class="hero-kpi"><div class="hk-val">130.5M</div><div class="hk-lab">ยอดขาย MTD (฿)</div></div>
         <div class="hero-kpi"><div class="hk-val">103%</div><div class="hk-lab">vs เป้า MTD</div></div>
-        <div class="hero-kpi"><div class="hk-val">134.7M</div><div class="hk-lab">Projected (฿)</div></div>
-        <div class="hero-kpi"><div class="hk-val">+10.4%</div><div class="hk-lab">YoY Projected</div></div>
+        <div class="hero-kpi"><div class="hk-val">134.9M</div><div class="hk-lab">Projected (฿)</div></div>
+        <div class="hero-kpi"><div class="hk-val">+10.6%</div><div class="hk-lab">YoY Projected</div></div>
         <div class="hero-kpi"><div class="hk-val">33.25%</div><div class="hk-lab">GP%</div></div>
       </div>
     </div>
     <div class="hero-right">
-      <div class="day-num">29</div>
+      <div class="day-num">30</div>
       <div class="day-sub">วันที่ผ่านไป / 31</div>
-      <div class="day-bar"><div class="day-bar-fill" style="width:94%"></div></div>
+      <div class="day-bar"><div class="day-bar-fill" style="width:97%"></div></div>
     </div>
   </div>
 
@@ -168,7 +168,7 @@ canvas{max-height:160px!important}
       <div class="kc" style="border-color:#ef4444">
         <div class="kc-lbl">ยอดคืน/ร้าน</div>
         <div class="kc-val">฿<span id="k-ret">1,541</span></div>
-        <div class="kc-sub" id="k-ret-sub">รวม ฿524K | ฿18,054/วัน</div>
+        <div class="kc-sub" id="k-ret-sub">รวม ฿541K | ฿18,025/วัน</div>
       </div>
     </div>
   </div>
@@ -186,17 +186,17 @@ canvas{max-height:160px!important}
         <div class="skpi-grid">
           <div class="skpi">
             <div class="skpi-label">ยอดขาย MTD</div>
-            <div class="skpi-val">126.0M</div>
+            <div class="skpi-val">130.5M</div>
             <div class="skpi-sub pos">▲ 109% vs เป้า</div>
           </div>
           <div class="skpi">
             <div class="skpi-label">Projected เต็มเดือน</div>
-            <div class="skpi-val">134.7M</div>
+            <div class="skpi-val">134.9M</div>
             <div class="skpi-sub pos">▲ +15.8% YoY</div>
           </div>
           <div class="skpi">
             <div class="skpi-label">บิล/วัน</div>
-            <div class="skpi-val">28801</div>
+            <div class="skpi-val">28843</div>
             <div class="skpi-sub pos">▲ +8.4% YoY</div>
           </div>
         </div>
@@ -324,10 +324,10 @@ canvas{max-height:160px!important}
 <script>
 // RM data from sales dashboard
 const RM_DATA = [
-  {name:'จริยา รัตนติน', stores:50, sales:34009045, proj:36354506, yoy:9.2, pct:101.6},
-  {name:'จินตนา อินทะเสโน', stores:58, sales:41448508, proj:44307029, yoy:13.5, pct:106.4},
-  {name:'ฐานพัฒน์ แสงจง', stores:36, sales:14897264, proj:15924669, yoy:15.9, pct:106.6},
-  {name:'สุพรรษา นามตาปี', stores:59, sales:35669158, proj:38129101, yoy:6.1, pct:98.7}
+  {name:'จริยา รัตนติน', stores:50, sales:35254734, proj:36429898, yoy:9.4, pct:101.8},
+  {name:'จินตนา อินทะเสโน', stores:58, sales:42985599, proj:44418443, yoy:13.8, pct:106.7},
+  {name:'ฐานพัฒน์ แสงจง', stores:36, sales:15407254, proj:15920825, yoy:15.9, pct:106.6},
+  {name:'สุพรรษา นามตาปี', stores:59, sales:36886986, proj:38116546, yoy:6.0, pct:98.7}
 ];
 
 // Populate RM table
@@ -352,7 +352,7 @@ RM_DATA.forEach(r=>{
 
 // Trend chart — 2026 vs 2025
 const months  = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.'];
-const m26vals = [133.8,119.0,122.1,129.6,126.0];   // May = MTD
+const m26vals = [133.8,119.0,122.1,129.6,130.5];   // May = MTD
 const m25vals = [132.3,110.1,122.3,127.2,129.6];   // May 2025 full month
 
 new Chart(document.getElementById('cTrend'),{
