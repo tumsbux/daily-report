@@ -58,51 +58,105 @@ def _load_branch_info():
 # ── STEP 1: Product sales aggregation ────────────────────────────────────────
 def query_product_sales(conn, days_elapsed):
     """
-    Aggregate fact_sales by product for May 2026 (days 1-N) vs May 2025 (full month).
-    Uses explicit date range so product totals match the sales dashboard exactly.
-    JOIN dim_product for name/brand/group/type.
-    Returns DataFrame with one row per iprod.
+    FAST: aggregates fact_sales by iprod only (no dim JOINs in the main query).
+    Then resolves names/groups in a separate small query.
     """
     end_date26 = f'{YEAR26}-{MONTH:02d}-{days_elapsed:02d}'
-    # Some rows in fact_sales store the barcode as iprod instead of the product code.
-    # Fix: join dim_item_barcode (dib) to resolve parcode, then join dim_product twice.
-    sql = f"""
+
+    # 1a. Fast aggregation — no JOINs to dim tables
+    sql_agg = f"""
         SELECT
-            fs.iprod,
-            COALESCE(MIN(dp.idesc),  MIN(dp2.idesc),  fs.iprod) AS name,
-            COALESCE(MIN(dp.brndesc),MIN(dp2.brndesc),'')        AS brand,
-            COALESCE(MIN(dp.igrdesc),MIN(dp2.igrdesc),'ไม่ระบุ') AS grp,
-            COALESCE(MIN(dp.itydesc),MIN(dp2.itydesc),'')        AS type_desc,
-            COALESCE(MIN(dp.igrcode),MIN(dp2.igrcode),'')        AS grp_code,
-            SUM(CASE WHEN fs.sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
-                     THEN fs.net_sales_amt ELSE 0 END)           AS s26,
-            SUM(CASE WHEN YEAR(fs.sodate)={YEAR25} AND MONTH(fs.sodate)={MONTH}
-                     THEN fs.net_sales_amt ELSE 0 END)           AS s25,
-            SUM(CASE WHEN fs.sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
-                     THEN COALESCE(fs.total_cost, 0) ELSE 0 END) AS cost26,
-            SUM(CASE WHEN fs.sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
-                     THEN fs.net_qty ELSE 0 END)                 AS q26,
-            SUM(CASE WHEN YEAR(fs.sodate)={YEAR25} AND MONTH(fs.sodate)={MONTH}
-                     THEN fs.net_qty ELSE 0 END)                 AS q25
-        FROM fact_sales fs
-        LEFT JOIN dim_product dp       ON dp.iprod  = fs.iprod
-        LEFT JOIN dim_item_barcode dib ON dib.barcode = fs.iprod AND dib.baractive = 'Y'
-        LEFT JOIN dim_product dp2      ON dp2.iprod = dib.parcode
-        WHERE fs.solinetype = 'N'
-          AND {STORE_FILTER}
+            iprod,
+            SUM(CASE WHEN sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
+                     THEN net_sales_amt ELSE 0 END)           AS s26,
+            SUM(CASE WHEN YEAR(sodate)={YEAR25} AND MONTH(sodate)={MONTH}
+                     THEN net_sales_amt ELSE 0 END)           AS s25,
+            SUM(CASE WHEN sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
+                     THEN COALESCE(total_cost, 0) ELSE 0 END) AS cost26,
+            SUM(CASE WHEN sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
+                     THEN net_qty ELSE 0 END)                 AS q26,
+            SUM(CASE WHEN YEAR(sodate)={YEAR25} AND MONTH(sodate)={MONTH}
+                     THEN net_qty ELSE 0 END)                 AS q25
+        FROM fact_sales
+        WHERE solinetype = 'N'
+          AND sotowhs REGEXP '^[0-9]+$'
+          AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
           AND (
-              (fs.sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}')
-              OR
-              (YEAR(fs.sodate)={YEAR25} AND MONTH(fs.sodate)={MONTH})
+              (sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}')
+              OR (YEAR(sodate)={YEAR25} AND MONTH(sodate)={MONTH})
           )
-        GROUP BY fs.iprod
+        GROUP BY iprod
         HAVING s26 > 0
         ORDER BY s26 DESC
     """
-    df = pd.read_sql(sql, conn)
+    df = pd.read_sql(sql_agg, conn)
     for col in ['s26','s25','cost26','q26','q25']:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+
+    # 1b. Resolve names: query dim_product + dim_item_barcode for all found iprods
+    iprod_list = df['iprod'].tolist()
+    dim_map = _query_dim_product(conn, iprod_list)  # {iprod: {name,brand,grp,type,grp_code}}
+
+    df['name']      = df['iprod'].map(lambda x: dim_map.get(x, {}).get('name', x))
+    df['brand']     = df['iprod'].map(lambda x: dim_map.get(x, {}).get('brand', ''))
+    df['grp']       = df['iprod'].map(lambda x: dim_map.get(x, {}).get('grp', 'ไม่ระบุ'))
+    df['type_desc'] = df['iprod'].map(lambda x: dim_map.get(x, {}).get('type', ''))
+    df['grp_code']  = df['iprod'].map(lambda x: dim_map.get(x, {}).get('grp_code', ''))
     return df
+
+
+def _query_dim_product(conn, iprod_list):
+    """
+    Resolve product name/group/type for a list of iprods.
+    Handles two cases:
+      - iprod matches dim_product.iprod directly
+      - iprod is a barcode → look up via dim_item_barcode.parcode → dim_product
+    Returns {iprod: {name, brand, grp, type, grp_code}}
+    """
+    if not iprod_list:
+        return {}
+    placeholders = ','.join(['%s'] * len(iprod_list))
+
+    # Direct lookup in dim_product
+    cur = conn.cursor(dictionary=True)
+    cur.execute(f"""
+        SELECT iprod, idesc AS name, brndesc AS brand,
+               igrdesc AS grp, itydesc AS type_desc, igrcode AS grp_code
+        FROM dim_product
+        WHERE iprod IN ({placeholders})
+    """, iprod_list)
+    result = {}
+    for r in cur.fetchall():
+        result[r['iprod']] = {
+            'name':     r['name']     or r['iprod'],
+            'brand':    r['brand']    or '',
+            'grp':      r['grp']      or 'ไม่ระบุ',
+            'type':     r['type_desc']or '',
+            'grp_code': r['grp_code'] or '',
+        }
+
+    # For iprods not found (barcode-as-iprod), look up via dim_item_barcode
+    missing = [x for x in iprod_list if x not in result]
+    if missing:
+        pm = ','.join(['%s'] * len(missing))
+        cur.execute(f"""
+            SELECT dib.barcode, dp.iprod AS parcode,
+                   dp.idesc AS name, dp.brndesc AS brand,
+                   dp.igrdesc AS grp, dp.itydesc AS type_desc, dp.igrcode AS grp_code
+            FROM dim_item_barcode dib
+            JOIN dim_product dp ON dp.iprod = dib.parcode
+            WHERE dib.barcode IN ({pm}) AND dib.baractive = 'Y'
+        """, missing)
+        for r in cur.fetchall():
+            result[r['barcode']] = {
+                'name':     r['name']     or r['barcode'],
+                'brand':    r['brand']    or '',
+                'grp':      r['grp']      or 'ไม่ระบุ',
+                'type':     r['type_desc']or '',
+                'grp_code': r['grp_code'] or '',
+            }
+    cur.close()
+    return result
 
 
 # ── STEP 2: Barcodes (+ onhand/ipunit3 if columns exist) ─────────────────────
@@ -348,51 +402,4 @@ def main():
     print(f'  Product Data Builder  (MySQL-native)  May {YEAR26} vs {YEAR25}  days 1-{days_elapsed}')
     print('=' * 60)
 
-    cfg = _load_cfg()
-    if not cfg:
-        print('ERROR: db_config.json not found'); return
-
-    conn = _conn(cfg)
-    print(f'Connected to MySQL: {cfg["host"]}')
-
-    print(f'\n[1/4] Querying product sales (May {YEAR26} days 1-{days_elapsed} vs May {YEAR25}) ...')
-    df = query_product_sales(conn, days_elapsed)
-    total26 = df['s26'].sum()
-    total25 = df['s25'].sum()
-    yoy     = round((total26/total25-1)*100, 1) if total25 else 0
-    print(f'      {len(df):,} products | '
-          f'฿{total26:,.0f} ({yoy:+.1f}% YoY) | '
-          f'{int(df["q26"].sum()):,} units')
-
-    print('\n[2/4] Loading barcodes + onhand + ipunit3 ...')
-    bc_map, item_map = query_barcodes(conn, df['iprod'].tolist())
-    print(f'      {len(bc_map):,} barcodes')
-
-    print('\n[3/4] Store breakdown (ALL products, store-indexed) ...')
-    store_bd = query_store_breakdown(conn, days_elapsed)
-
-    conn.close()
-
-    print('\n[4/4] Building product_data.json ...')
-    branch_info = _load_branch_info()
-    output = build_json(df, bc_map, item_map, store_bd, branch_info, days_elapsed)
-
-    with open(OUT_JSON, 'w', encoding='utf-8') as f:
-        json.dump(output, f, ensure_ascii=False, separators=(',', ':'))
-
-    sz = os.path.getsize(OUT_JSON) // 1024
-    print('      Saved: %d KB | %d products | %d types | %d groups' % (
-        sz, len(output['products']), len(output['type_cats']), len(output['categories'])))
-
-    print('\n' + '='*60)
-    print('  Done! May %d days 1-%d: %.1fM | YoY: %+.1f%% | %d SKU' % (
-        YEAR26, days_elapsed, total26/1e6, yoy, len(output['products'])))
-    print('='*60)
-
-    if PUSH:
-        print('\nPushing to GitHub ...')
-        push_github(cfg)
-
-
-if __name__ == '__main__':
-    main()
+    cfg = _lo
