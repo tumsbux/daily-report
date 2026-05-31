@@ -99,13 +99,16 @@ def query_product_sales(conn):
     return df
 
 
-# ── STEP 2: Barcodes ──────────────────────────────────────────────────────────
+# ── STEP 2: Barcodes + onhand + ipunit3 ───────────────────────────────────────
 def query_barcodes(conn, iprod_list):
     if not iprod_list:
-        return {}
+        return {}, {}
     placeholders = ','.join(['%s'] * len(iprod_list))
     sql = f"""
-        SELECT parcode, MIN(barcode) AS barcode
+        SELECT parcode,
+               MIN(barcode)              AS barcode,
+               SUM(COALESCE(onhand, 0))  AS onhand,
+               MIN(COALESCE(ipunit3, 0)) AS ipunit3
         FROM dim_item_barcode
         WHERE parcode IN ({placeholders})
           AND baractive = 'Y'
@@ -115,10 +118,14 @@ def query_barcodes(conn, iprod_list):
     cur.execute(sql, iprod_list)
     rows = cur.fetchall()
     cur.close()
-    return {r['parcode']: r['barcode'] for r in rows}
+    bc_map   = {r['parcode']: r['barcode']              for r in rows}
+    item_map = {r['parcode']: {'onhand': float(r['onhand'] or 0),
+                                'ipunit3': float(r['ipunit3'] or 0)}
+                for r in rows}
+    return bc_map, item_map
 
 
-# ── STEP 3: Store-level breakdown for top 100 ─────────────────────────────────
+# ── STEP 3: Store-level breakdown for top 500 ─────────────────────────────────
 def query_store_breakdown(conn, iprod_list):
     if not iprod_list:
         return {}
@@ -126,10 +133,11 @@ def query_store_breakdown(conn, iprod_list):
     sql = f"""
         SELECT
             fs.iprod,
-            LPAD(fs.sotowhs, 3, '0') AS whs,
-            YEAR(fs.sodate)          AS yr,
-            SUM(fs.net_sales_amt)    AS sales,
-            SUM(fs.net_qty)          AS qty
+            LPAD(fs.sotowhs, 3, '0')       AS whs,
+            YEAR(fs.sodate)                AS yr,
+            SUM(fs.net_sales_amt)          AS sales,
+            SUM(fs.net_qty)                AS qty,
+            SUM(COALESCE(fs.total_cost,0)) AS cost
         FROM fact_sales fs
         WHERE fs.solinetype = 'N'
           AND {STORE_FILTER}
@@ -151,12 +159,16 @@ def query_store_breakdown(conn, iprod_list):
         breakdown[r['iprod']][f"{r['whs']}:{sfx}"] = {
             'sales': round(float(r['sales'] or 0)),
             'qty':   round(float(r['qty']   or 0)),
+            'cost':  round(float(r['cost']  or 0)),
         }
     return dict(breakdown)
 
 
 # ── STEP 4: Build JSON ────────────────────────────────────────────────────────
-def build_json(df, barcode_map, store_breakdown, branch_info):
+def build_json(df, barcode_map, item_map, store_breakdown, branch_info):
+    today      = date.today()
+    days_elapsed = today.day  # May: day of month = days elapsed
+
     products = []
     for rank, (_, row) in enumerate(df.iterrows(), 1):
         s26   = float(row['s26'])
@@ -165,52 +177,99 @@ def build_json(df, barcode_map, store_breakdown, branch_info):
         q25   = float(row['q25'])
         cost26= float(row['cost26'])
         gp26  = s26 - cost26
+        iprod = row['iprod']
+        info  = item_map.get(iprod, {})
         products.append({
             'rank':    rank,
-            'iprod':   row['iprod'],
-            'barcode': barcode_map.get(row['iprod'], row['iprod']),
+            'iprod':   iprod,
+            'barcode': barcode_map.get(iprod, iprod),
             'name':    str(row['name']  or '')[:40],
             'brand':   str(row['brand'] or '')[:25],
             'group':   str(row['grp']   or 'ไม่ระบุ')[:30],
             'type':    str(row['type_desc'] or '')[:25],
-            'q26':  round(q26),
-            'q25':  round(q25),
-            'q_yoy': round((q26/q25-1)*100, 1) if q25 else None,
-            's26':  round(s26),
-            's25':  round(s25),
-            's_yoy': round((s26/s25-1)*100, 1) if s25 else None,
-            'gp26':  round(gp26),
-            'gp_pct': round(gp26/s26*100, 1) if s26 else 0,
+            'q26':     round(q26),
+            'q25':     round(q25),
+            'q_yoy':   round((q26/q25-1)*100, 1) if q25 else None,
+            's26':     round(s26),
+            's25':     round(s25),
+            's_yoy':   round((s26/s25-1)*100, 1) if s25 else None,
+            'cost26':  round(cost26),
+            'gp26':    round(gp26),
+            'gp_pct':  round(gp26/s26*100, 1) if s26 else 0,
+            'onhand':  round(info.get('onhand', 0)),
+            'ipunit3': round(info.get('ipunit3', 0)),
         })
 
-    # Categories (group by grp)
-    cat = defaultdict(lambda: {'sales26':0,'sales25':0,'qty26':0,'qty25':0,'count':0})
+    # Categories by igrdesc (group)
+    cat = defaultdict(lambda: {'sales26':0,'sales25':0,'cost26':0,'qty26':0,'qty25':0,'count':0})
     for _, row in df.iterrows():
         g = str(row['grp'] or 'ไม่ระบุ')[:30]
         cat[g]['sales26'] += float(row['s26'])
         cat[g]['sales25'] += float(row['s25'])
+        cat[g]['cost26']  += float(row['cost26'])
         cat[g]['qty26']   += float(row['q26'])
         cat[g]['qty25']   += float(row['q25'])
         cat[g]['count']   += 1
     categories = []
-    for g, v in sorted(cat.items(), key=lambda x: x[1]['sales26'], reverse=True)[:30]:
-        s26, s25 = v['sales26'], v['sales25']
+    for g, v in sorted(cat.items(), key=lambda x: x[1]['sales26'], reverse=True)[:50]:
+        s26, s25, c26 = v['sales26'], v['sales25'], v['cost26']
+        gp = s26 - c26
         categories.append({
             'group':   g,
             'count':   v['count'],
             'sales26': round(s26),
             'sales25': round(s25),
+            'cost26':  round(c26),
+            'gp26':    round(gp),
+            'gp_pct':  round(gp/s26*100, 1) if s26 else 0,
             'qty26':   round(v['qty26']),
             'qty25':   round(v['qty25']),
-            's_yoy': round((s26/s25-1)*100, 1) if s25 else None,
+            's_yoy':   round((s26/s25-1)*100, 1) if s25 else None,
+        })
+
+    # Type-level categories (itydesc) with igrdesc_count + barcode_count
+    type_agg = defaultdict(lambda: {
+        'sales26':0,'sales25':0,'cost26':0,'qty26':0,'qty25':0,
+        'barcodes':set(),'grps':set()
+    })
+    for _, row in df.iterrows():
+        t = str(row['type_desc'] or 'ไม่ระบุประเภท')[:30]
+        type_agg[t]['sales26'] += float(row['s26'])
+        type_agg[t]['sales25'] += float(row['s25'])
+        type_agg[t]['cost26']  += float(row['cost26'])
+        type_agg[t]['qty26']   += float(row['q26'])
+        type_agg[t]['qty25']   += float(row['q25'])
+        bc = barcode_map.get(row['iprod'], row['iprod'])
+        type_agg[t]['barcodes'].add(bc)
+        type_agg[t]['grps'].add(str(row['grp'] or 'ไม่ระบุ')[:30])
+    total_s26 = sum(v['sales26'] for v in type_agg.values()) or 1
+    type_cats = []
+    for t, v in sorted(type_agg.items(), key=lambda x: x[1]['sales26'], reverse=True):
+        s26, s25, c26 = v['sales26'], v['sales25'], v['cost26']
+        gp = s26 - c26
+        type_cats.append({
+            'type':        t,
+            'sales26':     round(s26),
+            'sales25':     round(s25),
+            'cost26':      round(c26),
+            'gp26':        round(gp),
+            'gp_pct':      round(gp/s26*100, 1) if s26 else 0,
+            'qty26':       round(v['qty26']),
+            'qty25':       round(v['qty25']),
+            's_yoy':       round((s26/s25-1)*100, 1) if s25 else None,
+            'pct_of_total': round(s26/total_s26*100, 2),
+            'barcode_cnt': len(v['barcodes']),
+            'grp_cnt':     len(v['grps']),
         })
 
     return {
-        'generated': date.today().isoformat(),
-        'month26':   f'{YEAR26}-{MONTH:02d}',
-        'month25':   f'{YEAR25}-{MONTH:02d}',
-        'products':  products,
-        'categories': categories,
+        'generated':    today.isoformat(),
+        'days_elapsed': days_elapsed,
+        'month26':      f'{YEAR26}-{MONTH:02d}',
+        'month25':      f'{YEAR25}-{MONTH:02d}',
+        'products':     products,
+        'categories':   categories,
+        'type_cats':    type_cats,
         'store_breakdown': store_breakdown,
         'store_info': {
             k: {'name': v['name'], 'dm': v['dm'], 'rm': v['rm']}
@@ -269,20 +328,20 @@ def main():
           f'฿{total26:,.0f} ({yoy:+.1f}% YoY) | '
           f'{int(df["q26"].sum()):,} units')
 
-    print('\n[2/4] Loading barcodes ...')
-    bc_map = query_barcodes(conn, df['iprod'].tolist())
+    print('\n[2/4] Loading barcodes + onhand + ipunit3 ...')
+    bc_map, item_map = query_barcodes(conn, df['iprod'].tolist())
     print(f'      {len(bc_map):,} barcodes')
 
-    print('\n[3/4] Store breakdown (top 100 products) ...')
-    top100 = df.head(100)['iprod'].tolist()
-    store_bd = query_store_breakdown(conn, top100)
+    print('\n[3/4] Store breakdown (top 500 products) ...')
+    top500 = df.head(500)['iprod'].tolist()
+    store_bd = query_store_breakdown(conn, top500)
     print(f'      {sum(len(v) for v in store_bd.values()):,} store-product entries')
 
     conn.close()
 
     print('\n[4/4] Building product_data.json ...')
     branch_info = _load_branch_info()
-    output = build_json(df, bc_map, store_bd, branch_info)
+    output = build_json(df, bc_map, item_map, store_bd, branch_info)
 
     with open(OUT_JSON, 'w', encoding='utf-8') as f:
         json.dump(output, f, ensure_ascii=False, separators=(',', ':'))
@@ -290,7 +349,8 @@ def main():
     sz = os.path.getsize(OUT_JSON) // 1024
     print(f'      Saved: {sz:,} KB | '
           f'{len(output["products"])} products | '
-          f'{len(output["categories"])} categories')
+          f'{len(output["type_cats"])} types | '
+          f'{len(output["categories"])} groups')
 
     print('\n' + '='*60)
     print(f'  ✅ Done! May {YEAR26}: ฿{total26/1e6:.1f}M  |  '
@@ -299,9 +359,4 @@ def main():
     print('='*60)
 
     if PUSH:
-        print('\nPushing to GitHub ...')
-        push_github(cfg)
-
-
-if __name__ == '__main__':
-    main()
+        print('\nPushi
