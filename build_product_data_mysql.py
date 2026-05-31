@@ -99,16 +99,31 @@ def query_product_sales(conn):
     return df
 
 
-# ── STEP 2: Barcodes + onhand + ipunit3 ───────────────────────────────────────
+# ── STEP 2: Barcodes (+ onhand/ipunit3 if columns exist) ─────────────────────
+def _dim_barcode_columns(conn):
+    """Return set of column names in dim_item_barcode."""
+    cur = conn.cursor()
+    cur.execute("SHOW COLUMNS FROM dim_item_barcode")
+    cols = {row[0].lower() for row in cur.fetchall()}
+    cur.close()
+    return cols
+
 def query_barcodes(conn, iprod_list):
     if not iprod_list:
         return {}, {}
     placeholders = ','.join(['%s'] * len(iprod_list))
+
+    # Check which optional columns exist
+    cols = _dim_barcode_columns(conn)
+    extra = []
+    if 'onhand'  in cols: extra.append("SUM(COALESCE(onhand,0))  AS onhand")
+    if 'ipunit3' in cols: extra.append("MIN(COALESCE(ipunit3,0)) AS ipunit3")
+    extra_sql = (', ' + ', '.join(extra)) if extra else ''
+
     sql = f"""
         SELECT parcode,
-               MIN(barcode)              AS barcode,
-               SUM(COALESCE(onhand, 0))  AS onhand,
-               MIN(COALESCE(ipunit3, 0)) AS ipunit3
+               MIN(barcode) AS barcode
+               {extra_sql}
         FROM dim_item_barcode
         WHERE parcode IN ({placeholders})
           AND baractive = 'Y'
@@ -118,10 +133,11 @@ def query_barcodes(conn, iprod_list):
     cur.execute(sql, iprod_list)
     rows = cur.fetchall()
     cur.close()
-    bc_map   = {r['parcode']: r['barcode']              for r in rows}
-    item_map = {r['parcode']: {'onhand': float(r['onhand'] or 0),
-                                'ipunit3': float(r['ipunit3'] or 0)}
-                for r in rows}
+    bc_map   = {r['parcode']: r['barcode'] for r in rows}
+    item_map = {r['parcode']: {
+                    'onhand':  float(r['onhand']  or 0) if 'onhand'  in cols else 0,
+                    'ipunit3': float(r['ipunit3'] or 0) if 'ipunit3' in cols else 0,
+                } for r in rows}
     return bc_map, item_map
 
 
@@ -342,17 +358,4 @@ def main():
 
     conn.close()
 
-    print('\n[4/4] Building product_data.json ...')
-    branch_info = _load_branch_info()
-    output = build_json(df, bc_map, item_map, store_bd, branch_info)
-
-    with open(OUT_JSON, 'w', encoding='utf-8') as f:
-        json.dump(output, f, ensure_ascii=False, separators=(',', ':'))
-
-    sz = os.path.getsize(OUT_JSON) // 1024
-    print(f'      Saved: {sz:,} KB | '
-          f'{len(output["products"])} products | '
-          f'{len(output["type_cats"])} types | '
-          f'{len(output["categories"])} groups')
-
-    pri
+    print('\n[4/4] Building prod
