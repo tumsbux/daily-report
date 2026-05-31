@@ -379,12 +379,12 @@ def push_github(cfg):
     shutil.rmtree(REPO_DIR, ignore_errors=True)
 
 
+
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--day', type=int, default=None,
-                        help='Last finalized day (1-31). Default: yesterday.')
+    parser.add_argument('--day', type=int, default=None)
     parser.add_argument('--no-push', action='store_true')
     args = parser.parse_args()
     global PUSH
@@ -394,12 +394,11 @@ def main():
     if args.day:
         days_elapsed = args.day
     else:
-        # For May 2026: whsddpact lags, use yesterday capped at 30
         days_elapsed = min(today.day - 1, 30) if MONTH == 5 and today.day > 30 else today.day - 1
         days_elapsed = max(days_elapsed, 1)
 
     print('=' * 60)
-    print(f'  Product Data Builder  (MySQL-native)  May {YEAR26} vs {YEAR25}  days 1-{days_elapsed}')
+    print('  Product Data Builder  May %d vs %d  days 1-%d' % (YEAR26, YEAR25, days_elapsed))
     print('=' * 60)
 
     cfg = _load_cfg()
@@ -407,27 +406,26 @@ def main():
         print('ERROR: db_config.json not found'); return
 
     conn = _conn(cfg)
-    print(f'Connected to MySQL: {cfg["host"]}')
+    print('Connected to MySQL: ' + cfg['host'])
 
-    print(f'\n[1/4] Querying product sales (May {YEAR26} days 1-{days_elapsed} vs May {YEAR25}) ...')
+    print('[1/4] Querying product sales ...')
     df = query_product_sales(conn, days_elapsed)
     total26 = df['s26'].sum()
     total25 = df['s25'].sum()
-    yoy     = round((total26/total25-1)*100, 1) if total25 else 0
-    print(f'      {len(df):,} products | '
-          f'฿{total26:,.0f} ({yoy:+.1f}% YoY) | '
-          f'{int(df["q26"].sum()):,} units')
+    yoy = round((total26/total25-1)*100, 1) if total25 else 0
+    print('      %d products | %.1fM (%+.1f%% YoY) | %d units' % (
+        len(df), total26/1e6, yoy, int(df['q26'].sum())))
 
-    print('\n[2/4] Loading barcodes + onhand + ipunit3 ...')
+    print('[2/4] Loading barcodes ...')
     bc_map, item_map = query_barcodes(conn, df['iprod'].tolist())
-    print(f'      {len(bc_map):,} barcodes')
+    print('      %d barcodes' % len(bc_map))
 
-    print('\n[3/4] Store breakdown (ALL products, store-indexed) ...')
+    print('[3/4] Store breakdown (ALL products) ...')
     store_bd = query_store_breakdown(conn, days_elapsed)
 
     conn.close()
 
-    print('\n[4/4] Building product_data.json ...')
+    print('[4/4] Building product_data.json ...')
     branch_info = _load_branch_info()
     output = build_json(df, bc_map, item_map, store_bd, branch_info, days_elapsed)
 
@@ -435,16 +433,14 @@ def main():
         json.dump(output, f, ensure_ascii=False, separators=(',', ':'))
 
     sz = os.path.getsize(OUT_JSON) // 1024
-    print('      Saved: %d KB | %d products | %d types | %d groups' % (
-        sz, len(output['products']), len(output['type_cats']), len(output['categories'])))
+    print('      Saved: %d KB | %d products | %d types' % (
+        sz, len(output['products']), len(output.get('type_cats', []))))
 
-    print('\n' + '='*60)
-    print('  Done! May %d days 1-%d: %.1fM | YoY: %+.1f%% | %d SKU' % (
+    print('Done! May %d days 1-%d: %.1fM | YoY: %+.1f%% | %d SKU' % (
         YEAR26, days_elapsed, total26/1e6, yoy, len(output['products'])))
-    print('='*60)
 
     if PUSH:
-        print('\nPushing to GitHub ...')
+        print('Pushing to GitHub ...')
         push_github(cfg)
 
 
