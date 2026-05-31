@@ -69,15 +69,15 @@ def query_product_sales(conn, days_elapsed):
     sql = f"""
         SELECT
             fs.iprod,
-            COALESCE(dp.idesc,  dp2.idesc,  fs.iprod)    AS name,
-            COALESCE(dp.brndesc,dp2.brndesc,'')           AS brand,
-            COALESCE(dp.igrdesc,dp2.igrdesc,'ไม่ระบุ')   AS grp,
-            COALESCE(dp.itydesc,dp2.itydesc,'')           AS type_desc,
-            COALESCE(dp.igrcode,dp2.igrcode,'')           AS grp_code,
+            COALESCE(MIN(dp.idesc),  MIN(dp2.idesc),  fs.iprod) AS name,
+            COALESCE(MIN(dp.brndesc),MIN(dp2.brndesc),'')        AS brand,
+            COALESCE(MIN(dp.igrdesc),MIN(dp2.igrdesc),'ไม่ระบุ') AS grp,
+            COALESCE(MIN(dp.itydesc),MIN(dp2.itydesc),'')        AS type_desc,
+            COALESCE(MIN(dp.igrcode),MIN(dp2.igrcode),'')        AS grp_code,
             SUM(CASE WHEN fs.sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
-                     THEN fs.net_sales_amt ELSE 0 END)          AS s26,
+                     THEN fs.net_sales_amt ELSE 0 END)           AS s26,
             SUM(CASE WHEN YEAR(fs.sodate)={YEAR25} AND MONTH(fs.sodate)={MONTH}
-                     THEN fs.net_sales_amt ELSE 0 END)          AS s25,
+                     THEN fs.net_sales_amt ELSE 0 END)           AS s25,
             SUM(CASE WHEN fs.sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
                      THEN COALESCE(fs.total_cost, 0) ELSE 0 END) AS cost26,
             SUM(CASE WHEN fs.sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
@@ -85,9 +85,9 @@ def query_product_sales(conn, days_elapsed):
             SUM(CASE WHEN YEAR(fs.sodate)={YEAR25} AND MONTH(fs.sodate)={MONTH}
                      THEN fs.net_qty ELSE 0 END)                 AS q25
         FROM fact_sales fs
-        LEFT JOIN dim_product dp  ON dp.iprod  = fs.iprod
+        LEFT JOIN dim_product dp       ON dp.iprod  = fs.iprod
         LEFT JOIN dim_item_barcode dib ON dib.barcode = fs.iprod AND dib.baractive = 'Y'
-        LEFT JOIN dim_product dp2 ON dp2.iprod = dib.parcode
+        LEFT JOIN dim_product dp2      ON dp2.iprod = dib.parcode
         WHERE fs.solinetype = 'N'
           AND {STORE_FILTER}
           AND (
@@ -95,10 +95,7 @@ def query_product_sales(conn, days_elapsed):
               OR
               (YEAR(fs.sodate)={YEAR25} AND MONTH(fs.sodate)={MONTH})
           )
-        GROUP BY fs.iprod,
-                 COALESCE(dp.idesc, dp2.idesc), COALESCE(dp.brndesc, dp2.brndesc),
-                 COALESCE(dp.igrdesc, dp2.igrdesc), COALESCE(dp.itydesc, dp2.itydesc),
-                 COALESCE(dp.igrcode, dp2.igrcode)
+        GROUP BY fs.iprod
         HAVING s26 > 0
         ORDER BY s26 DESC
     """

@@ -161,6 +161,24 @@ Each HTML file contains a `const D = {...}` JavaScript blob. Scripts use brace-m
 
 ---
 
+## Known Issues & Fixes (2026-05-31 session — part 2)
+
+### Problem: build_product_data_mysql.py — MySQL GROUP BY error (only_full_group_by)
+**Error:** `Expression #2 of SELECT list is not in GROUP BY clause ... incompatible with sql_mode=only_full_group_by`  
+**Root cause:** The new dual-JOIN query (`dim_product dp` + `dim_product dp2` via `dim_item_barcode`) had non-aggregated columns from `dp2` not in GROUP BY.  
+**Fix applied:** Wrapped all dp/dp2 text columns in `MIN()` → `GROUP BY fs.iprod` only.  
+**Pattern to remember:** MySQL `only_full_group_by` mode requires every SELECT column to be either aggregated or in GROUP BY. Use `MIN(col)` for dimension columns when grouping by a key.
+
+### Problem: Product name shows barcode instead of product name (e.g. 8859828701185)
+**Root cause:** Some `fact_sales` rows store the barcode value as `iprod` instead of the product code. `LEFT JOIN dim_product ON dp.iprod = fs.iprod` fails (no match). `COALESCE(dp.idesc, fs.iprod)` returns the barcode string as the name.  
+**Example:** `fs.iprod = '8859828701185'`, `dim_item_barcode.parcode = '011033123'`, `dim_product.idesc = 'ถังฝา20gl.สีดำ(CNN)'`  
+**Fix applied:** Added `LEFT JOIN dim_item_barcode dib ON dib.barcode = fs.iprod` + `LEFT JOIN dim_product dp2 ON dp2.iprod = dib.parcode` → `COALESCE(MIN(dp.idesc), MIN(dp2.idesc), fs.iprod) AS name`
+
+### Problem: Store filter shows wrong products (top-500 only, wrong amounts)
+**Root cause 1:** `store_breakdown` was product-indexed (`{iprod: {whs: {sales,qty}}}`) with top-500 limit. Products outside top-500 fell through and returned global data → wrong totals.  
+**Root cause 2:** Structure didn't support efficient RM/DM aggregation.  
+**Fix applied:** Changed to store-indexed `{whs: {iprod: [s26, q26]}}` covering ALL products (threshold ≥500 baht). JS now aggregates across all stores in scope.
+
 ## Known Issues & Fixes (2026-05-31 session)
 
 ### Problem: product_dashboard.html shows no data (all "—")
@@ -271,33 +289,4 @@ When running manually (or when auto-scheduler missed a day):
 2. Run: `py "F:\co work dashboard\rebuild_fraud_analysis.py" --no-push`
 3. Run: `py "F:\co work dashboard\update_dashboard.py" --day N`
    - N = last day with finalized MySQL data (check whsddpact)
-   - Omit `--day` to auto-detect (yesterday's date)
-4. Verify printed summary for MTD total, GP%, transactions
-5. Dashboard live at https://tumsbux.github.io/daily-report/ within ~1 min
-
-**If only fraud dashboard needs updating:** `run_inject_fraud.bat`
-
----
-
-## Developer Setup (New Machine)
-
-1. Install Python 3 + `pip install mysql-connector-python pandas openpyxl`
-2. Create `F:\co work dashboard\db_config.json` with MySQL credentials + GitHub PAT (repo write scope)
-3. Test MySQL: `py test_mysql_connection.py`
-4. Full run: `py rebuild_fraud_analysis.py --no-push && py build_product_data_mysql.py --no-push && py update_dashboard.py`
-5. Add the 6 secrets to GitHub repo → Settings → Secrets → Actions (DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_DATABASE, GH_PAT)
-6. **Never commit `db_config.json`**
-7. Cowork Scheduled Task: already disabled — GitHub Actions handles everything
-
----
-
-## Common Pitfalls
-
-- **`<span id="td-days">N</span>`** must be updated every run. If skipped, dashboard shows stale day number.
-- **Both files must match:** `sales_dashboard_v8.html` and `index.html` must always contain the same underlying data.
-- **Store code padding:** MySQL may return `'1'`, `'001'`, or `1` (int). Scripts store both raw and padded keys.
-- **rebuild_fraud_analysis.py must run BEFORE update_dashboard.py** — master runner reads `fraud_data.json` that rebuild produces.
-- **`whsddpact` may lag 1–2 days** — use `--day N` with N = last finalized day, not today.
-- **File truncation:** If a script crashes mid-write, HTML files can be truncated (missing JS tail). Dashboard goes blank. Restore from git: `git show <commit>:<file> > <file>` then re-inject data.
-- **Chart.js SRI hash:** Never add `integrity=` attribute to Chart.js CDN tag — it breaks silently if hash mismatches.
-- **GitHub Actions fraud step:** Has `continue-on-error: true` — a yellow warning on fraud step is normal and safe.
+   - Omit `--day` to auto-detect (ye
