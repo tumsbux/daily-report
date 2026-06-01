@@ -71,6 +71,41 @@ tbody tr:hover{background:#f8f9ff}
 .sa::after{content:'⇅'}
 .sa.asc::after{content:'▲'}.sa.desc::after{content:'▼'}
 .sa.asc,.sa.desc{opacity:1;color:#6366f1}
+/* ── RESPONSIVE ──────────────────────────────────────────── */
+@media(max-width:900px){
+  .sum-row{grid-template-columns:repeat(3,1fr)}
+  .filter-bar select{min-width:120px}
+  table{font-size:11px}
+  th,td{padding:5px 7px}
+}
+@media(max-width:600px){
+  nav{padding:8px 12px}
+  nav h1{font-size:13px}
+  .nav-date{display:none}
+  .filter-bar{padding:6px 10px;gap:5px;top:37px}
+  .filter-bar label{display:none}
+  .filter-sep{display:none}
+  .filter-bar select{min-width:0;flex:1;font-size:11px;padding:4px 4px}
+  .search-box{min-width:0;flex:1 1 100%;font-size:11px}
+  .reset-btn{font-size:11px;padding:4px 8px}
+  .sum-row{grid-template-columns:repeat(2,1fr)}
+  .sum-row .sc:last-child{grid-column:span 2}
+  .sc{padding:10px 12px}
+  .sc-val{font-size:17px}
+  .page{padding:8px 10px;gap:8px}
+  .card-head{padding:8px 12px}
+  .tbl-wrap{max-height:320px}
+  #prod-tbl-wrap{max-height:420px}
+  .prod-name{max-width:140px}
+  .pag-row{padding:6px 10px;gap:4px}
+  .pag-row button{padding:2px 7px;font-size:11px}
+  .chip{font-size:10px;padding:2px 7px}
+}
+@media(max-width:400px){
+  .sum-row{grid-template-columns:1fr 1fr}
+  .sc-val{font-size:15px}
+  nav h1{font-size:12px}
+}
 </style>
 </head>
 <body>
@@ -97,31 +132,46 @@ tbody tr:hover{background:#f8f9ff}
   <label>ประเภท</label>
   <select id="f-type" onchange="onFilter('type')"><option value="">ทั้งหมด</option></select>
   <button class="reset-btn" onclick="resetFilter()">✕ ล้างตัวกรอง</button>
-  <button class="reset-btn" onclick="showLinetypeModal()" style="background:#4f46e5;color:#fff;border-color:#4f46e5">📋 ยอดขายตาม Line Type</button>
+  <button class="reset-btn" onclick="showLinetypeModal()" style="background:#4f46e5;color:#fff;border-color:#4f46e5">📋 Line Type</button>
   <input class="search-box" id="f-search" placeholder="🔍 ค้นหา ชื่อ / บาร์โค้ด / กลุ่ม..." oninput="onFilter('search')">
   <span class="filter-info" id="filter-info"></span>
 </div>
 
 <!-- LINE TYPE MODAL -->
-<div id="lt-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999;align-items:center;justify-content:center">
-  <div style="background:#1e2130;border-radius:12px;padding:24px;min-width:520px;max-width:90vw;max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.5)">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <h3 style="margin:0;color:#e2e8f0;font-size:16px">📋 ยอดขายตาม solinetype — พ.ค. 2026 (stores 1–500)</h3>
-      <button onclick="document.getElementById('lt-modal').style.display='none'" style="background:none;border:none;color:#94a3b8;font-size:20px;cursor:pointer">✕</button>
+<style>
+#lt-modal .lt-box{
+  background:#1e2130;border-radius:12px;padding:20px;
+  width:min(540px,96vw);max-height:85vh;overflow-y:auto;
+  box-shadow:0 8px 32px rgba(0,0,0,.5);
+}
+#lt-table{width:100%;border-collapse:collapse;font-size:13px}
+@media(max-width:480px){
+  #lt-table{font-size:11px}
+  #lt-modal .lt-box{padding:14px;border-radius:8px}
+  #lt-modal h3{font-size:13px!important}
+}
+</style>
+<div id="lt-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999;align-items:center;justify-content:center;padding:8px">
+  <div class="lt-box">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:8px">
+      <h3 style="margin:0;color:#e2e8f0;font-size:15px;line-height:1.3">📋 ยอดขายตาม solinetype<br><span style="font-size:11px;color:#94a3b8;font-weight:400">พ.ค. 2026 · stores 1–500</span></h3>
+      <button onclick="document.getElementById('lt-modal').style.display='none'" style="background:none;border:none;color:#94a3b8;font-size:22px;cursor:pointer;flex-shrink:0">✕</button>
     </div>
-    <table id="lt-table" style="width:100%;border-collapse:collapse;font-size:13px">
-      <thead>
-        <tr style="color:#94a3b8;border-bottom:1px solid #334155">
-          <th style="text-align:left;padding:8px 4px">Line Type</th>
-          <th style="text-align:right;padding:8px 4px">ยอดขาย (฿)</th>
-          <th style="text-align:right;padding:8px 4px">% ของรวม</th>
-          <th style="text-align:right;padding:8px 4px">จำนวนบิล</th>
-          <th style="text-align:right;padding:8px 4px">จำนวนชิ้น</th>
-        </tr>
-      </thead>
-      <tbody id="lt-tbody"></tbody>
-      <tfoot id="lt-tfoot"></tfoot>
-    </table>
+    <div style="overflow-x:auto">
+      <table id="lt-table">
+        <thead>
+          <tr style="color:#94a3b8;border-bottom:1px solid #334155">
+            <th style="text-align:left;padding:8px 6px;white-space:nowrap">Line Type</th>
+            <th style="text-align:right;padding:8px 6px;white-space:nowrap">ยอดขาย (฿)</th>
+            <th style="text-align:right;padding:8px 6px;white-space:nowrap">%</th>
+            <th style="text-align:right;padding:8px 6px;white-space:nowrap">บิล</th>
+            <th style="text-align:right;padding:8px 6px;white-space:nowrap">ชิ้น</th>
+          </tr>
+        </thead>
+        <tbody id="lt-tbody"></tbody>
+        <tfoot id="lt-tfoot"></tfoot>
+      </table>
+    </div>
   </div>
 </div>
 
@@ -355,21 +405,21 @@ function showLinetypeModal(){
     const isN = r.type==='N';
     const style = isN?'color:#34d399':'color:#e2e8f0';
     return `<tr style="border-bottom:1px solid #1e293b">
-      <td style="padding:8px 4px;${style};font-weight:${isN?'700':'400'}">${r.type||'—'}</td>
-      <td style="text-align:right;padding:8px 4px;${style}">${r.sales.toLocaleString()}</td>
-      <td style="text-align:right;padding:8px 4px;color:#94a3b8">${pct}%</td>
-      <td style="text-align:right;padding:8px 4px;color:#94a3b8">${r.bills.toLocaleString()}</td>
-      <td style="text-align:right;padding:8px 4px;color:#94a3b8">${r.qty.toLocaleString()}</td>
+      <td style="padding:7px 6px;${style};font-weight:${isN?'700':'400'}">${r.type||'—'}</td>
+      <td style="text-align:right;padding:7px 6px;${style}">${r.sales.toLocaleString()}</td>
+      <td style="text-align:right;padding:7px 6px;color:#94a3b8">${pct}%</td>
+      <td style="text-align:right;padding:7px 6px;color:#94a3b8">${r.bills.toLocaleString()}</td>
+      <td style="text-align:right;padding:7px 6px;color:#94a3b8">${r.qty.toLocaleString()}</td>
     </tr>`;
   }).join('');
   const totBills = rows.reduce((s,r)=>s+r.bills,0);
   const totQty   = rows.reduce((s,r)=>s+r.qty,0);
   tfoot.innerHTML = `<tr style="border-top:2px solid #475569;font-weight:700;color:#f1f5f9">
-    <td style="padding:8px 4px">รวม</td>
-    <td style="text-align:right;padding:8px 4px">${total.toLocaleString()}</td>
-    <td style="text-align:right;padding:8px 4px">100%</td>
-    <td style="text-align:right;padding:8px 4px">${totBills.toLocaleString()}</td>
-    <td style="text-align:right;padding:8px 4px">${totQty.toLocaleString()}</td>
+    <td style="padding:7px 6px">รวม</td>
+    <td style="text-align:right;padding:7px 6px">${total.toLocaleString()}</td>
+    <td style="text-align:right;padding:7px 6px">100%</td>
+    <td style="text-align:right;padding:7px 6px">${totBills.toLocaleString()}</td>
+    <td style="text-align:right;padding:7px 6px">${totQty.toLocaleString()}</td>
   </tr>`;
   const modal = document.getElementById('lt-modal');
   modal.style.display='flex';
@@ -633,92 +683,4 @@ function renderProdPage(days){
     return`<tr>
       <td><span class="rank-num">${start+i+1}</span></td>
       <td style="font-family:monospace;font-size:11px">${p.barcode||p.iprod}</td>
-      <td class="prod-name b" title="${p.name||''}">${p.name||''}</td>
-      <td><span class="badge-grp">${p.group||''}</span></td>
-      <td class="r">${fmt(p.q26)}</td>
-      <td class="r">${fmt(p.s26)}</td>
-      <td class="r">${fmt(cost26)}</td>
-      <td class="r">${fmt(gp26)}</td>
-      <td class="r">${p.gp_pct!=null?p.gp_pct.toFixed(1)+'%':'—'}</td>
-      <td class="r">${perDay}</td>
-      <td class="r">${perWk}</td>
-      <td class="r">${p.onhand?fmt(p.onhand):'—'}</td>
-      <td class="r">${p.ipunit3?fmt(p.ipunit3):'—'}</td>
-      <td class="r ${difQty>=0?'yoy-p':'yoy-n'}">${difQty>=0?'+':''}${fmt(difQty)}</td>
-      <td class="r">${yoyBadge(p.s_yoy)}</td>
-    </tr>`;
-  }).join('');
-  renderPagination();
-}
-
-function renderPagination(){
-  const total=filteredProds.length;
-  const pages=Math.ceil(total/PAGE_SIZE);
-  const start=prodPage*PAGE_SIZE+1;
-  const end=Math.min((prodPage+1)*PAGE_SIZE,total);
-  document.getElementById('p-info').textContent=`แสดง ${start.toLocaleString()}–${end.toLocaleString()} จาก ${total.toLocaleString()} รายการ`;
-  document.getElementById('p-prev').disabled=prodPage===0;
-  document.getElementById('p-next').disabled=prodPage>=pages-1;
-  const show=[];
-  for(let i=0;i<pages;i++){if(i===0||i===pages-1||Math.abs(i-prodPage)<=2)show.push(i);}
-  let btns='',prev=-1;
-  for(const i of show){
-    if(prev>=0&&i-prev>1)btns+='<button disabled style="border:none;background:none;cursor:default">…</button>';
-    btns+=`<button class="${i===prodPage?'active':''}" onclick="goPage(${i})">${i+1}</button>`;
-    prev=i;
-  }
-  document.getElementById('p-nums').innerHTML=btns;
-}
-
-function changePage(d){goPage(prodPage+d);}
-function goPage(p){
-  const pages=Math.ceil(filteredProds.length/PAGE_SIZE);
-  prodPage=Math.max(0,Math.min(p,pages-1));
-  renderProdPage(D.days_elapsed||30);
-  document.getElementById('prod-tbl-wrap').scrollTop=0;
-}
-
-// ── SORT PRODUCT TABLE ────────────────────────────────────────────────────────
-function sortProd(col,th){
-  if(prodSortCol===col)prodSortDir*=-1;
-  else{prodSortCol=col;prodSortDir=-1;}
-  document.querySelectorAll('#prod-tbl th .sa').forEach(s=>s.className='sa');
-  th.querySelector('.sa').className='sa '+(prodSortDir===-1?'desc':'asc');
-  applyAll();
-}
-
-// ── SORT STATIC TABLES ────────────────────────────────────────────────────────
-function sortStatic(tblId,col,th){
-  const key=tblId+':'+col;
-  tblSortState[key]=(tblSortState[key]||1)*-1;
-  const dir=tblSortState[key];
-  th.closest('table').querySelectorAll('th .sa').forEach(s=>s.className='sa');
-  th.querySelector('.sa').className='sa '+(dir===1?'asc':'desc');
-  const tbody=document.getElementById(tblId).querySelector('tbody');
-  const rows=[...tbody.querySelectorAll('tr')];
-  rows.sort((a,b)=>{
-    const ta=a.cells[col].textContent.trim().replace(/[,%+]/g,'');
-    const tb=b.cells[col].textContent.trim().replace(/[,%+]/g,'');
-    const na=parseFloat(ta),nb=parseFloat(tb);
-    return isNaN(na)?dir*ta.localeCompare(tb,'th'):dir*(na-nb);
-  });
-  rows.forEach(r=>tbody.appendChild(r));
-}
-</script>
-</body>
-</html>
-orAll('th .sa').forEach(s=>s.className='sa');
-  th.querySelector('.sa').className='sa '+(dir===1?'asc':'desc');
-  const tbody=document.getElementById(tblId).querySelector('tbody');
-  const rows=[...tbody.querySelectorAll('tr')];
-  rows.sort((a,b)=>{
-    const ta=a.cells[col].textContent.trim().replace(/[,%+]/g,'');
-    const tb=b.cells[col].textContent.trim().replace(/[,%+]/g,'');
-    const na=parseFloat(ta),nb=parseFloat(tb);
-    return isNaN(na)?dir*ta.localeCompare(tb,'th'):dir*(na-nb);
-  });
-  rows.forEach(r=>tbody.appendChild(r));
-}
-</script>
-</body>
-</html>
+      <td class="prod-nam
