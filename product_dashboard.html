@@ -224,6 +224,7 @@ const DATA_URL = 'product_data.json';
 let D = null;
 let fRM='', fDM='', fStore='', fType='', fSearch='';
 let s25Scope=null; // store-level May2025 total for in-scope stores — fixes per-store YoY
+let s26Scope=null; // store-level May2026 TRUE total (fixes HAVING>=500 undercount in header)
 let prodSortCol=0, prodSortDir=1;
 let prodPage=0;
 const PAGE_SIZE=50;
@@ -337,11 +338,13 @@ function applyAll(){
     scopeStores=new Set(Object.entries(si).filter(([,v])=>v.rm===fRM).map(([k])=>k.padStart(3,'0')));
   }
 
-  // Compute store-level May2025 baseline for in-scope stores (fixes YoY when filtering by store/DM/RM)
+  // Compute store-level baselines for in-scope stores
   if(scopeStores){
     s25Scope=[...scopeStores].reduce((sum,whs)=>sum+(si[whs]?.s25_may||0),0);
+    s26Scope=[...scopeStores].reduce((sum,whs)=>sum+(si[whs]?.s26_may||0),0)||null;
   } else {
-    s25Scope=null; // global view: use product-level s25 sum (correct for all-stores)
+    s25Scope=null; // global: use product-level sums (correct for all-stores)
+    s26Scope=null;
   }
 
   // Build working product list
@@ -454,7 +457,8 @@ function aggByGrp(prods,total){
 
 // ── RENDER SUMMARY ────────────────────────────────────────────────────────────
 function renderSummary(prods){
-  const s26 =prods.reduce((s,p)=>s+p.s26,0);
+  // Use true store total when filtering (fixes HAVING>=500 undercount); fall back to product sum for global view
+  const s26 =s26Scope!==null ? s26Scope : prods.reduce((s,p)=>s+p.s26,0);
   // Use store-level s25_may when filtering (fixes -98% YoY bug); fall back to product sum for global view
   const s25 =s25Scope!==null ? s25Scope : prods.reduce((s,p)=>s+p.s25,0);
   const gp26=prods.reduce((s,p)=>s+(p.gp26!=null?p.gp26:Math.round(p.s26-p.s26*p.gp_pct/100)),0);
