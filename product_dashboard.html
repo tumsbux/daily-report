@@ -97,8 +97,32 @@ tbody tr:hover{background:#f8f9ff}
   <label>ประเภท</label>
   <select id="f-type" onchange="onFilter('type')"><option value="">ทั้งหมด</option></select>
   <button class="reset-btn" onclick="resetFilter()">✕ ล้างตัวกรอง</button>
+  <button class="reset-btn" onclick="showLinetypeModal()" style="background:#4f46e5;color:#fff;border-color:#4f46e5">📋 ยอดขายตาม Line Type</button>
   <input class="search-box" id="f-search" placeholder="🔍 ค้นหา ชื่อ / บาร์โค้ด / กลุ่ม..." oninput="onFilter('search')">
   <span class="filter-info" id="filter-info"></span>
+</div>
+
+<!-- LINE TYPE MODAL -->
+<div id="lt-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999;align-items:center;justify-content:center">
+  <div style="background:#1e2130;border-radius:12px;padding:24px;min-width:520px;max-width:90vw;max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.5)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h3 style="margin:0;color:#e2e8f0;font-size:16px">📋 ยอดขายตาม solinetype — พ.ค. 2026 (stores 1–500)</h3>
+      <button onclick="document.getElementById('lt-modal').style.display='none'" style="background:none;border:none;color:#94a3b8;font-size:20px;cursor:pointer">✕</button>
+    </div>
+    <table id="lt-table" style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead>
+        <tr style="color:#94a3b8;border-bottom:1px solid #334155">
+          <th style="text-align:left;padding:8px 4px">Line Type</th>
+          <th style="text-align:right;padding:8px 4px">ยอดขาย (฿)</th>
+          <th style="text-align:right;padding:8px 4px">% ของรวม</th>
+          <th style="text-align:right;padding:8px 4px">จำนวนบิล</th>
+          <th style="text-align:right;padding:8px 4px">จำนวนชิ้น</th>
+        </tr>
+      </thead>
+      <tbody id="lt-tbody"></tbody>
+      <tfoot id="lt-tfoot"></tfoot>
+    </table>
+  </div>
 </div>
 
 <div class="page">
@@ -318,6 +342,38 @@ function resetFilter(){
   fRM=fDM=fStore=fType=fSearch='';
   populateDM(); populateStore();
   applyAll();
+}
+
+function showLinetypeModal(){
+  const rows = (D.linetype_breakdown||[]);
+  if(!rows.length){ alert('ไม่มีข้อมูล linetype_breakdown ในไฟล์ JSON\nกรุณารัน build_product_data_mysql.py ใหม่'); return; }
+  const total = rows.reduce((s,r)=>s+r.sales, 0)||1;
+  const tbody = document.getElementById('lt-tbody');
+  const tfoot = document.getElementById('lt-tfoot');
+  tbody.innerHTML = rows.map(r=>{
+    const pct = (r.sales/total*100).toFixed(1);
+    const isN = r.type==='N';
+    const style = isN?'color:#34d399':'color:#e2e8f0';
+    return `<tr style="border-bottom:1px solid #1e293b">
+      <td style="padding:8px 4px;${style};font-weight:${isN?'700':'400'}">${r.type||'—'}</td>
+      <td style="text-align:right;padding:8px 4px;${style}">${r.sales.toLocaleString()}</td>
+      <td style="text-align:right;padding:8px 4px;color:#94a3b8">${pct}%</td>
+      <td style="text-align:right;padding:8px 4px;color:#94a3b8">${r.bills.toLocaleString()}</td>
+      <td style="text-align:right;padding:8px 4px;color:#94a3b8">${r.qty.toLocaleString()}</td>
+    </tr>`;
+  }).join('');
+  const totBills = rows.reduce((s,r)=>s+r.bills,0);
+  const totQty   = rows.reduce((s,r)=>s+r.qty,0);
+  tfoot.innerHTML = `<tr style="border-top:2px solid #475569;font-weight:700;color:#f1f5f9">
+    <td style="padding:8px 4px">รวม</td>
+    <td style="text-align:right;padding:8px 4px">${total.toLocaleString()}</td>
+    <td style="text-align:right;padding:8px 4px">100%</td>
+    <td style="text-align:right;padding:8px 4px">${totBills.toLocaleString()}</td>
+    <td style="text-align:right;padding:8px 4px">${totQty.toLocaleString()}</td>
+  </tr>`;
+  const modal = document.getElementById('lt-modal');
+  modal.style.display='flex';
+  modal.onclick = e=>{ if(e.target===modal) modal.style.display='none'; };
 }
 
 // ── APPLY ALL ─────────────────────────────────────────────────────────────────
