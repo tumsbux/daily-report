@@ -683,4 +683,105 @@ function renderProdPage(days){
     return`<tr>
       <td><span class="rank-num">${start+i+1}</span></td>
       <td style="font-family:monospace;font-size:11px">${p.barcode||p.iprod}</td>
-      <td class="prod-nam
+      <td class="prod-nam    case 3:  return p.group||'';
+    case 4:  return p.s26||0;
+    case 5:  return p.cost26||0;
+    case 6:  return p.gp26||0;
+    case 7:  return p.gp_pct||0;
+    case 8:  return d?Math.round((p.s26||0)/d):0;
+    case 9:  return d?Math.round((p.q26||0)/d):0;
+    case 10: return (p.q26||0)/(p.ipunit3||1);
+    case 11: return p.onhand||0;
+    case 12: return p.ipunit3||0;
+    case 13: return (p.q26||0)-(p.q25||0);
+    case 14: return p.s_yoy!=null?p.s_yoy:-9999;
+    default: return 0;
+  }
+}
+
+function renderProdPage(){
+  const prods=filteredProds||[];
+  const start=prodPage*PAGE_SIZE;
+  const page=prods.slice(start,start+PAGE_SIZE);
+  const days=D?D.days_elapsed||30:30;
+  const tbody=document.getElementById('prod-tbody');
+  tbody.innerHTML=page.map(p=>{
+    const mv=days?Math.round((p.s26||0)/days):0;
+    const mq=days?Math.round((p.q26||0)/days):0;
+    const wkSales=Math.round((p.s26||0)/(days/7));
+    const covWk=p.ipunit3&&mq?Math.round(p.ipunit3/(mq/7*1)):null;
+    const difQty=(p.q26||0)-(p.q25||0);
+    return `<tr>
+      <td><span class="rank-num">${p.rank}</span></td>
+      <td>${p.barcode||p.iprod}</td>
+      <td class="prod-name b" title="${p.name}">${p.name}</td>
+      <td><span class="badge-grp">${p.group||'—'}</span></td>
+      <td class="r">${fmt(p.q26)}</td>
+      <td class="r b">${fmt(p.s26)}</td>
+      <td class="r">${fmt(p.cost26)}</td>
+      <td class="r">${fmt(p.gp26)}</td>
+      <td class="r">${p.gp_pct!=null?p.gp_pct.toFixed(1)+'%':'—'}</td>
+      <td class="r">${fmt(mv)}</td>
+      <td class="r">${fmt(mq)}</td>
+      <td class="r">${p.ipunit3||'—'}</td>
+      <td class="r">${p.onhand!=null?fmt(p.onhand):'—'}</td>
+      <td class="r ${difQty>=0?'yoy-p':'yoy-n'}">${difQty>=0?'+':''}${fmt(difQty)}</td>
+      <td class="r">${yoyBadge(p.s_yoy)}</td>
+    </tr>`;
+  }).join('');
+  renderPagination(prods.length);
+  document.getElementById('prod-cnt').textContent=prods.length.toLocaleString()+' รายการ';
+}
+
+function renderPagination(total){
+  const pages=Math.ceil(total/PAGE_SIZE)||1;
+  const row=document.getElementById('pag-btns');
+  const info=document.getElementById('pag-info');
+  let html='';
+  html+=`<button onclick="goPage(0)" ${prodPage===0?'disabled':''}>‹‹</button>`;
+  html+=`<button onclick="goPage(${prodPage-1})" ${prodPage===0?'disabled':''}>‹ ก่อน</button>`;
+  const lo=Math.max(0,prodPage-2), hi=Math.min(pages-1,prodPage+2);
+  for(let i=lo;i<=hi;i++) html+=`<button class="${i===prodPage?'active':''}" onclick="goPage(${i})">${i+1}</button>`;
+  html+=`<button onclick="goPage(${prodPage+1})" ${prodPage>=pages-1?'disabled':''}>ถัดไป ›</button>`;
+  html+=`<button onclick="goPage(${pages-1})" ${prodPage>=pages-1?'disabled':''}>››</button>`;
+  row.innerHTML=html;
+  const s=prodPage*PAGE_SIZE+1, e=Math.min((prodPage+1)*PAGE_SIZE,total);
+  info.textContent=total?`${s}–${e} จาก ${total.toLocaleString()}`:'ไม่มีข้อมูล';
+}
+
+function goPage(p){
+  const pages=Math.ceil((filteredProds||[]).length/PAGE_SIZE)||1;
+  prodPage=Math.max(0,Math.min(p,pages-1));
+  renderProdPage();
+}
+
+function sortStatic(tblId,col,th){
+  const tbl=document.getElementById(tblId);
+  const tbody=tbl.querySelector('tbody');
+  const rows=[...tbody.querySelectorAll('tr')];
+  const dir=th.dataset.dir==='asc'?-1:1;
+  tbl.querySelectorAll('th .sa').forEach(s=>s.className='sa');
+  const sa=th.querySelector('.sa');
+  if(sa) sa.className='sa '+(dir===1?'asc':'desc');
+  th.dataset.dir=dir===1?'asc':'desc';
+  rows.sort((a,b)=>{
+    const va=a.children[col]?.textContent.replace(/[,%+฿]/g,'').trim()||'';
+    const vb=b.children[col]?.textContent.replace(/[,%+฿]/g,'').trim()||'';
+    const na=parseFloat(va), nb=parseFloat(vb);
+    if(!isNaN(na)&&!isNaN(nb)) return dir*(na-nb);
+    return dir*va.localeCompare(vb,'th');
+  });
+  rows.forEach(r=>tbody.appendChild(r));
+}
+
+function sortProd(col,th){
+  if(prodSortCol===col) prodSortDir*=-1;
+  else{ prodSortCol=col; prodSortDir=-1; }
+  document.querySelectorAll('#prod-thead th .sa').forEach(s=>s.className='sa');
+  const sa=th.querySelector('.sa');
+  if(sa) sa.className='sa '+(prodSortDir===1?'asc':'desc');
+  applyAll();
+}
+</script>
+</body>
+</html>
