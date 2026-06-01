@@ -124,9 +124,9 @@ canvas{max-height:160px!important}
 <nav>
   <a class="nav-brand" href="index.html"><span>📊</span> Dashboard Hub</a>
   <a class="nav-link active" href="index.html">🏠 หน้าหลัก</a>
-  <a class="nav-link" href="sales_dashboard_v8.html">📈 Sales</a>
-  <a class="nav-link" href="fraud_dashboard.html">🛡️ Fraud</a>
-  <a class="nav-link" href="product_dashboard.html">📦 Product</a>
+  <a class="nav-link" href="sales_dashboard_v8.html" onclick="if(typeof Analytics!=='undefined')Analytics.dashboardNavigated('sales')">📈 Sales</a>
+  <a class="nav-link" href="fraud_dashboard.html" onclick="if(typeof Analytics!=='undefined')Analytics.dashboardNavigated('fraud')">🛡️ Fraud</a>
+  <a class="nav-link" href="product_dashboard.html" onclick="if(typeof Analytics!=='undefined')Analytics.dashboardNavigated('product')">📦 Product</a>
   <div class="nav-right">
     <span class="date-badge">📅 31 มิ.ย. 2569 · วัน 31/31</span>
     <span class="alert-dot">⚠ 4 HIGH</span>
@@ -189,7 +189,7 @@ canvas{max-height:160px!important}
     <div class="card">
       <div class="card-head">
         <h2>📈 Sales Dashboard</h2>
-        <a class="go-btn" href="sales_dashboard_v8.html">เปิด Dashboard →</a>
+        <a class="go-btn" href="sales_dashboard_v8.html" onclick="if(typeof Analytics!=='undefined')Analytics.dashboardNavigated('sales')">เปิด Dashboard →</a>
       </div>
       <div class="card-body">
         <div class="skpi-grid">
@@ -274,7 +274,7 @@ canvas{max-height:160px!important}
     <div class="card">
       <div class="card-head">
         <h2>🏢 ผลการขายรายสาขา RM</h2>
-        <a class="go-btn" href="sales_dashboard_v8.html">ดูรายละเอียด →</a>
+        <a class="go-btn" href="sales_dashboard_v8.html" onclick="if(typeof Analytics!=='undefined')Analytics.dashboardNavigated('sales')">ดูรายละเอียด →</a>
       </div>
       <div class="card-body">
         <table class="rm-tbl">

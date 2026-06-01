@@ -142,7 +142,7 @@ tbody tr:hover{background:#f8f9ff}
   <select id="f-type" onchange="onFilter('type')"><option value="">ทั้งหมด</option></select>
   <button class="reset-btn" onclick="resetFilter()">✕ ล้างตัวกรอง</button>
   <button class="reset-btn" onclick="showLinetypeModal()" style="background:#4f46e5;color:#fff;border-color:#4f46e5">📋 Line Type</button>
-  <input class="search-box" id="f-search" placeholder="🔍 ค้นหา ชื่อ / บาร์โค้ด / กลุ่ม..." oninput="onFilter('search')">
+  <input class="search-box" id="f-search" placeholder="🔍 ค้นหา ชื่อ / บาร์โค้ด / กลุ่ม..." oninput="onFilter('search');if(typeof Analytics!=='undefined'&&typeof filteredProds!=='undefined'){clearTimeout(window._srchT);window._srchT=setTimeout(function(){Analytics.searchPerformed(document.getElementById('f-search').value.length,(filteredProds||[]).length);},500);}">
   <span class="filter-info" id="filter-info"></span>
 </div>
 
@@ -328,8 +328,8 @@ const yoyBadge = v => v==null?'':
 // ── LOAD ──────────────────────────────────────────────────────────────────────
 fetch(DATA_URL+'?v='+Date.now())
   .then(r=>r.json())
-  .then(d=>{D=d;init();})
-  .catch(()=>{document.body.innerHTML+='<p style="color:red;padding:20px">โหลดข้อมูลล้มเหลว — ตรวจสอบ product_data.json</p>';});
+  .then(d=>{D=d;init();Analytics.dashboardViewed(D);})
+  .catch(()=>{Analytics.dataLoadFailed('fetch_failed');document.body.innerHTML+='<p style="color:red;padding:20px">โหลดข้อมูลล้มเหลว — ตรวจสอบ product_data.json</p>';});
 
 function init(){
   document.getElementById('nav-month').textContent=D.month26||'';
@@ -390,6 +390,7 @@ function onFilter(src){
   fStore=document.getElementById('f-store').value;
   fType =document.getElementById('f-type').value;
   fSearch=document.getElementById('f-search').value.trim().toLowerCase();
+  if(typeof Analytics!=='undefined')Analytics.filterApplied(src,fRM,fDM,fStore);
   applyAll();
 }
 
@@ -397,11 +398,13 @@ function resetFilter(){
   ['f-rm','f-dm','f-store','f-type'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('f-search').value='';
   fRM=fDM=fStore=fType=fSearch='';
+  if(typeof Analytics!=='undefined')Analytics.filterReset();
   populateDM(); populateStore();
   applyAll();
 }
 
 function showLinetypeModal(){
+  if(typeof Analytics!=='undefined')Analytics.linetypeModalViewed(fRM,fDM,fStore);
   const rows = (D.linetype_breakdown||[]);
   if(!rows.length){ alert('ไม่มีข้อมูล linetype_breakdown ในไฟล์ JSON\nกรุณารัน build_product_data_mysql.py ใหม่'); return; }
   const total = rows.reduce((s,r)=>s+r.sales, 0)||1;
@@ -753,6 +756,7 @@ function sortStatic(tblId,col,th){
 function sortProd(col,th){
   if(prodSortCol===col) prodSortDir*=-1;
   else{ prodSortCol=col; prodSortDir=-1; }
+  if(typeof Analytics!=='undefined')Analytics.sortChanged(col,prodSortDir===1?'asc':'desc');
   document.querySelectorAll('#prod-thead th .sa').forEach(s=>s.className='sa');
   const sa=th.querySelector('.sa');
   if(sa) sa.className='sa '+(prodSortDir===1?'asc':'desc');

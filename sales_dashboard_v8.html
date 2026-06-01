@@ -548,10 +548,10 @@ function filterTable(input,tid){
 }
 
 // ─── Navigation ───────────────────────────────────────────────────
-function goHome(){destroyCharts();view='home';selRM=null;selDM=null;selStore=null;render();updateTopDate();}
-function goReport(){destroyCharts();view='report';selRM=null;selDM=null;selStore=null;render();}
-function goExec(){destroyCharts();view='exec';selRM=null;selDM=null;selStore=null;render();}
-function goRM(rm){destroyCharts();view='rm';selRM=rm;selDM=null;selStore=null;render();}
+function goHome(){var _pv=view;destroyCharts();view='home';selRM=null;selDM=null;selStore=null;render();updateTopDate();if(typeof Analytics!=='undefined')Analytics.viewChanged('home',_pv);}
+function goReport(){var _pv=view;destroyCharts();view='report';selRM=null;selDM=null;selStore=null;render();if(typeof Analytics!=='undefined')Analytics.viewChanged('report',_pv);}
+function goExec(){var _pv=view;destroyCharts();view='exec';selRM=null;selDM=null;selStore=null;render();if(typeof Analytics!=='undefined')Analytics.viewChanged('exec',_pv);}
+function goRM(rm){var _pv=view;destroyCharts();view='rm';selRM=rm;selDM=null;selStore=null;render();if(typeof Analytics!=='undefined')Analytics.viewChanged('rm',_pv);}
 function goDM(dc){
   destroyCharts();view='dm';selDM=dc;selStore=null;
   const d=DM.find(x=>x.dm_code===dc);if(d&&!selRM)selRM=d.rm;
@@ -1099,6 +1099,7 @@ function render(){
 }
 updateTopDate();
 goHome();
+if(typeof Analytics!=='undefined')Analytics.dashboardViewed(D);
 </script>
 </body>
 </html>
