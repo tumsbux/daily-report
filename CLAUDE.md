@@ -26,19 +26,27 @@ A fully automated daily reporting system. Python scripts query a cloud MySQL dat
 **Daily pipeline (GitHub Actions — 08:30 Bangkok / 01:30 UTC) — ไม่ต้องเปิด laptop:**
 1. `rebuild_fraud_analysis.py --no-push` → builds fraud_data.json from MySQL  *(continue-on-error)*
 2. `build_product_data_mysql.py --no-push` → builds product_data.json from MySQL  *(continue-on-error)*
-3. `update_dashboard.py --day 30` → updates sales + injects fraud/product data → pushes all to GitHub Pages
+3. `update_dashboard.py` → updates sales + injects fraud/product data → pushes all to GitHub Pages
 
-**⚠️ May 2026 note:** Workflow hardcoded `--day 30` because whsddpact lags on day 31. Remove `--day 30` after May ends (June 1+).
+**Note:** ตั้งแต่ June 2026 เป็นต้นไป workflow ใช้ auto-detect day จาก fact_sales (ลบ `--day 30` ออกแล้ว 2026-05-31)
 
 **Cowork Scheduled Task:** ⛔ Disabled — replaced by GitHub Actions above
 
 **Manual run (if needed):**
+```powershell
+# One-command script (auto-detect day)
+& "F:\co work dashboard\run_manual_update.ps1"
+
+# หรือระบุ day เอง
+& "F:\co work dashboard\run_manual_update.ps1" -Day 30
+```
+
+หรือรันแยก step:
 ```
 py "F:\co work dashboard\rebuild_fraud_analysis.py" --no-push
 py "F:\co work dashboard\build_product_data_mysql.py" --no-push
-py "F:\co work dashboard\update_dashboard.py" --day 29
+py "F:\co work dashboard\update_dashboard.py"
 ```
-(replace 29 with actual finalized day — MySQL whsddpact lags 1–2 days)
 
 ---
 
@@ -158,6 +166,140 @@ Each HTML file contains a `const D = {...}` JavaScript blob. Scripts use brace-m
 11. Push to GitHub (clone temp repo → copy files → commit → push → delete temp)
 
 **Files pushed to GitHub:** `index.html`, `sales_dashboard_v8.html`, `fraud_dashboard.html`, `fraud_analysis.html`, `fraud_data.json`, `product_dashboard.html`, `product_data.json`
+
+---
+
+## Data Reconciliation Note (2026-05-31)
+
+### Dashboard vs Mobile App (เตือนใจ) — May 1–30, 2026
+
+| รายการ | Mobile App | Dashboard | หมายเหตุ |
+|---|---|---|---|
+| ยอดขาย net | 131,103,395 | 116,577,335 | ต่างกัน 14.5M |
+| ยอดคืน | 540,758 | 540,758 | ✅ ตรงกันทุกบาท |
+| GP% | 33.35% | 34.21% | App มี non-N lines ที่ GP ต่ำ |
+| จำนวนบิล | 897,794 | 865,283 | |
+
+**Root cause:** App ใช้ `solinetype NOT IN ('C', 'R')` แต่ dashboard ใช้ `solinetype = 'N'`  
+ส่วนต่าง ~14.5M = sales จาก line types อื่น (promotions, services, etc.) ที่ไม่ใช่ N/C/R  
+**Day 30 daily:** App 4,529,874 vs Dashboard 4,031,469 — ต่างกัน ~498K (same root cause)  
+**Returns ตรงกันทุกบาท** = fact_returns query ถูกต้อง ✅  
+**Fix applied (2026-05-31):** เปลี่ยน `solinetype = 'N'` → `solinetype NOT IN ('C', 'R')` ทุกจุดใน `update_dashboard.py` (3 queries) และ `build_product_data_mysql.py` (4 queries) → dashboard จะตรงกับ app
+
+---
+
+## Known Issues & Fixes (2026-05-31 session — part 7 — product dashboard)
+
+### Problem: product_dashboard.html — Store-level YoY แสดงผิด (-98% แทน -7.9%)
+**Symptom:** กรอง store 006 → ยอดขาย พ.ค.25 แสดง 28.2M แทนที่จะเป็น 989K → YoY = -98.2% (ผิดมาก)  
+**Root cause:** `p.s25` ใน product JSON = all-stores total (ทุกร้านรวมกัน) ไม่ใช่ per-store  
+  เมื่อกรอง store 006 → May26 = 498K (ถูก จาก store_breakdown) แต่ May25 = 28.2M (ผิด sum all products)  
+**Fix applied:**
+- **Python (`build_product_data_mysql.py`):** เพิ่ม `query_store_sales_may25(conn)` → query May 2025 per store → เพิ่ม `s25_may` ใน `store_info` ของ JSON
+- **JS (`product_dashboard.html`):** เพิ่ม `s25Scope` variable → เมื่อมี filter (store/DM/RM) ใช้ `sum(store_info[whs].s25_may)` แทน `sum(p.s25)` ใน `renderSummary()`
+**Pattern:** store_breakdown มีแค่ May 2026 per-store per-product — May 2025 ต้องแยก query และเก็บใน store_info
+**Follow-up fix:** เพิ่ม `query_store_sales_may26()` → `s26_may` ใน store_info → JS ใช้ `s26Scope` แทน sum(p.s26) ใน header KPI เพื่อแก้ปัญหา HAVING>=500 ทำให้ header ต่ำกว่าจริง
+
+---
+
+## Known Issues & Fixes (2026-06-01) — product_dashboard & build_product_data_mysql
+
+### Changes: product_dashboard.html — store-level KPI & Line Type button
+**store-level s26 header KPI fix:**
+- เพิ่ม `query_store_sales_may26(conn, days_elapsed)` → `s26_may` per store ใน `store_info`
+- JS: `s26Scope` = sum of `store_info[whs].s26_may` เมื่อมี filter → header แสดงยอดจริงแทนที่จะ sum จาก HAVING>=500 products
+- ก่อน fix: store 006 แสดง 645K (ขาด ~395K จาก products < 500฿) → หลัง fix: 1,040K ตรงกับ sales dashboard
+
+**Line Type button:**
+- เพิ่ม `query_sales_by_linetype(conn, days_elapsed)` → `linetype_breakdown` array ใน JSON
+- JS: ปุ่ม "📋 Line Type" ใน filter bar → modal แสดงยอดขาย/บิล/ชิ้น per solinetype
+- Responsive: `width:min(540px,96vw)`, `overflow-x:auto`, `@media(max-width:480px)`
+
+**Full responsive CSS:**
+- 900px: summary cards 3 คอลัมน์
+- 600px: filter labels ซ่อน, selects ยืดเต็ม, cards 2 คอลัมน์
+- 400px: font/padding เล็กสุด
+
+---
+
+## Known Issues & Fixes (2026-06-01) — GA4 Analytics
+
+### GA4 Tracking Added
+- **Measurement ID:** `G-E3ZFFKXFT8` (property: "Tuenjai Dashboard")
+- **analytics.js** — shared tracking module, included in all 4 HTML files via `<script src="analytics.js">`
+- **Events wired:** `dashboard_viewed`, `filter_applied`, `filter_reset`, `view_changed`, `sort_changed`, `linetype_modal_viewed`, `search_performed`, `data_load_failed`, `dashboard_navigated`
+- **7 Custom Dimensions** registered in GA4 Admin: `dashboard_name`, `filter_scope`, `filter_rm`, `filter_dm`, `filter_store`, `days_elapsed`, `data_month`
+- **Telemetry docs:** `.telemetry/` folder — `product.md`, `tracking-plan.yaml`, `delta.md`, `instrument.md`
+- **Note:** `analytics.js` ต้องอยู่ใน push_files ของ `update_dashboard.py` — ตรวจสอบถ้า GA4 หายหลัง daily run
+
+### Bug Fix: product_dashboard.html — pag-btns/pag-info null ref
+**Symptom:** "โหลดข้อมูลล้มเหลว" error แสดงแม้ข้อมูลโหลดได้  
+**Root cause:** `renderPagination()` เรียก `getElementById('pag-btns')` และ `getElementById('pag-info')` แต่ HTML มีแค่ `id="p-prev"`, `id="p-next"`, `id="p-info"` → null → TypeError → `.catch()` รับ  
+**Fix:** เปลี่ยน HTML pagination container เป็น `<div id="pag-btns">` และ `<span id="pag-info">`
+
+---
+
+## Known Issues & Fixes (2026-06-01) — rebuild_fraud_analysis.py
+
+### Problem: fraud script — MySQL sales MTD = 0 เมื่อรันวันที่ 1 ของเดือนใหม่
+**Symptom:** `MySQL sales MTD: 0 stores | ฿0` → fall back to whsdd → แสดง 205 stores แทน 203
+**Root cause 1:** `DATE_FORMAT(CURDATE(), '%Y-%m-01')` = '2026-06-01' เมื่อรันวัน 1 มิ.ย. → query June ซึ่งยังไม่มีข้อมูล
+**Root cause 2:** `solinetype = 'N'` ไม่ตรงกับ app / scripts อื่น
+**Root cause 3:** filter `NOT IN ('901','999')` รวม stores 501-900 → 205 stores แทน 203
+**Fix applied:** auto-detect latest month ด้วย `MAX(DATE_FORMAT(sodate, '%Y-%m-01'))` จาก fact_sales + เปลี่ยนเป็น `solinetype NOT IN ('C','R')` + เพิ่ม `BETWEEN 1 AND 500` filter
+
+## Known Issues & Fixes (2026-06-01)
+
+### Problem: update_dashboard.py — DAYS_ELAPSED=1 เมื่อรันวันที่ 1 ของเดือนใหม่
+**Symptom:** รันวัน 1 มิ.ย. → `today.day - 1 = 0` → `max(1,0) = 1` → query แค่ May day 1 → dashboard แสดง 4.8M MTD แทน ~135M  
+**Root cause:** `DAYS_ELAPSED = max(1, today.day - 1)` ไม่รองรับ month boundary  
+**Fix applied:** เพิ่ม fact_sales auto-detect ก่อน set DAYS_ELAPSED — query `MAX(DAY(sodate))` จาก fact_sales สำหรับ YEAR/MONTH ที่กำหนด → ถ้าพบ (เช่น 31) ใช้ค่านั้น; fallback ไป `today.day - 1` เฉพาะเมื่อ query ล้มเหลว  
+**Pattern:** เมื่อเริ่มเดือนใหม่ ให้ใช้ `-Day 31` (manual) หรือ auto-detect จาก fact_sales แทน date.today()
+
+---
+
+## Known Issues & Fixes (2026-05-31 session — part 6)
+
+### Problem: update_dashboard.py — "fact_sales MTD gross" ใน log แสดงตัวเลขพองผิด (double-count)
+**Symptom:** Log แสดง `fact_sales: 278 stores | ฿166M MTD gross` แต่ Workbench query จริงๆ ได้แค่ ~117M สำหรับ stores 1–500  
+**Root cause:** `_query_fact_sales_mtd` เก็บ dict entry เดียวกัน (same object reference) ใน 2–3 keys ต่อร้าน (`'1'`, `'001'`) เพื่อให้ lookup ได้ทุก format แต่ `sum(v['sales'] for v in result.values())` นับทุก key → double-count  
+**Fix applied:** ใช้ `{id(v): v for v in _fact_sales_mtd.values()}` เพื่อ deduplicate by object identity ก่อน sum → แสดงตัวเลขที่ถูกต้อง  
+**Note:** การคำนวณ sales จริงๆ ใน STEP 5 ถูกต้องตลอด (ใช้ `.get(code)` ทีละร้าน) — แค่ log line ผิด  
+**Reconcile:** Workbench 131.7M (May 1–31, NOT IN 901/999) − day31 (4.55M) − stores>500 (~10M) − returns (0.54M) = 116.6M ✓
+
+---
+
+## Known Issues & Fixes (2026-05-31 session — part 5)
+
+### Problem: update_dashboard.py — YoY Projected แสดง -1.3% แทนที่จะเป็น +11.4% (s25_may baseline ผิด)
+**Symptom:** Sales dashboard แสดง Projected YoY = -1.3% แต่ product dashboard แสดง +11.4% YoY  
+**Root cause:** `s25_may` ใน dashboard HTML ถูก populate จาก `whsddpact` May 2025 (~122M per RM total) ซึ่งสูงกว่า `fact_sales` May 2025 (105M) — สองระบบคำนวณยอด 2025 ต่างกัน  
+**Fix applied:** เพิ่ม `_query_fact_sales_may25(cfg)` — query `fact_sales` สำหรับ May 2025 ต่อร้าน → ใน STEP 5 อัปเดต `s25_may`, `txn_may25`, `ticket_avg_25`, `daily_txn_25` ทุกรอบจาก fact_sales 2025 แทน HTML เดิม  
+**Pattern:** ค่า YoY ต้องใช้ fact_sales ทั้งปี 2025 และ 2026 เพื่อให้ฐานเดียวกัน — whsddpact 2025 ≠ fact_sales 2025
+
+---
+
+## Known Issues & Fixes (2026-05-31 session — part 4)
+
+### Problem: update_dashboard.py — Daily Rate / Projected ต่ำกว่าจริง (fact_sales ล้าหลัง ~3 วัน)
+**Symptom:** `--day 30` ทำให้ `DAYS_ELAPSED=30` ถูกใช้เป็นตัวหาร แต่ `fact_sales` มีข้อมูลแค่ถึงวัน 27 → Daily Rate = 27วัน/30 ต่ำกว่าจริง → Projected ต่ำ → RM/DM/Store Projected ต่ำทุกระดับ  
+**Root cause:** Same pattern as build_product_data_mysql.py — fact_sales lags ~3 days behind DAYS_ELAPSED  
+**Fix applied:** เพิ่ม `MAX(DAY(sodate)) AS max_day_seen` ใน `_query_fact_sales_mtd()` → สร้าง `FACT_DAYS` global = actual max day in fact_sales → ใช้ `FACT_DAYS` แทน `DAYS_ELAPSED` เป็น denominator ใน daily/daily_txn/ret_daily ทุกจุด (store loop, `aggregate()`, summary)  
+**Two separate variables:**
+- `DAYS_ELAPSED` = query window + displayed day number (from `--day` or yesterday)  
+- `FACT_DAYS` = actual coverage days in fact_sales (auto-detected, may be < DAYS_ELAPSED)  
+**Pattern:** MTD totals ยังถูกต้อง (sum ตาม actual data), แต่ rate/projection ต้องหารด้วย FACT_DAYS ไม่ใช่ DAYS_ELAPSED
+
+---
+
+## Known Issues & Fixes (2026-05-31 session — part 3)
+
+### Problem: build_product_data_mysql.py — ยอดขายต่ำกว่าความเป็นจริง (fact_sales ล้าหลัง ~3 วัน)
+**Symptom:** Dashboard แสดง 117M แทน ~130M เพราะ `fact_sales` มีข้อมูลถึงแค่ ~27 พ.ค. แต่ `days_elapsed` คำนวณจาก `date.today()` = 30  
+**Root cause:** `fact_sales` data lake ล้าหลัง ~3 วันเสมอ ทำให้วัน 28–30 มียอด 0 แต่ถูกนับรวมในช่วงเวลา  
+**Fix applied:** เพิ่ม `detect_max_day(conn)` — query `MAX(DAY(sodate))` จาก `fact_sales` จริง (พร้อม store filter) แล้วใช้ค่านั้นเป็น `days_elapsed` แทน `date.today()`  
+**Logic:** ถ้าไม่มี `--day` → auto-detect จาก fact_sales | ถ้ามี `--day N` → ใช้ N (override)  
+**Pattern to remember:** `fact_sales` ล้าหลัง ~3 วัน, `whsddpact` ล้าหลัง 1–2 วัน — ทั้งคู่ต้อง detect จาก MySQL ไม่ใช่ `date.today()`
 
 ---
 
@@ -289,4 +431,33 @@ When running manually (or when auto-scheduler missed a day):
 2. Run: `py "F:\co work dashboard\rebuild_fraud_analysis.py" --no-push`
 3. Run: `py "F:\co work dashboard\update_dashboard.py" --day N`
    - N = last day with finalized MySQL data (check whsddpact)
-   - Omit `--day` to auto-detect (ye
+   - Omit `--day` to auto-detect (yesterday's date)
+4. Verify printed summary for MTD total, GP%, transactions
+5. Dashboard live at https://tumsbux.github.io/daily-report/ within ~1 min
+
+**If only fraud dashboard needs updating:** `run_inject_fraud.bat`
+
+---
+
+## Developer Setup (New Machine)
+
+1. Install Python 3 + `pip install mysql-connector-python pandas openpyxl`
+2. Create `F:\co work dashboard\db_config.json` with MySQL credentials + GitHub PAT (repo write scope)
+3. Test MySQL: `py test_mysql_connection.py`
+4. Full run: `py rebuild_fraud_analysis.py --no-push && py build_product_data_mysql.py --no-push && py update_dashboard.py`
+5. Add the 6 secrets to GitHub repo → Settings → Secrets → Actions (DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_DATABASE, GH_PAT)
+6. **Never commit `db_config.json`**
+7. Cowork Scheduled Task: already disabled — GitHub Actions handles everything
+
+---
+
+## Common Pitfalls
+
+- **`<span id="td-days">N</span>`** must be updated every run. If skipped, dashboard shows stale day number.
+- **Both files must match:** `sales_dashboard_v8.html` and `index.html` must always contain the same underlying data.
+- **Store code padding:** MySQL may return `'1'`, `'001'`, or `1` (int). Scripts store both raw and padded keys.
+- **rebuild_fraud_analysis.py must run BEFORE update_dashboard.py** — master runner reads `fraud_data.json` that rebuild produces.
+- **`whsddpact` may lag 1–2 days** — use `--day N` with N = last finalized day, not today.
+- **File truncation:** If a script crashes mid-write, HTML files can be truncated (missing JS tail). Dashboard goes blank. Restore from git: `git show <commit>:<file> > <file>` then re-inject data.
+- **Chart.js SRI hash:** Never add `integrity=` attribute to Chart.js CDN tag — it breaks silently if hash mismatches.
+- **GitHub Actions fraud step:** Has `continue-on-error: true` — a yellow warning on fraud step is normal and safe.

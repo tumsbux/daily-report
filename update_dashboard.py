@@ -132,7 +132,7 @@ def _query_txn_mtd(cfg, year, month):
                COUNT(DISTINCT sono) AS txn_count
         FROM fact_sales
         WHERE sodate >= %s AND sodate < %s
-          AND solinetype = 'N'
+          AND solinetype NOT IN ('C', 'R')
           AND sotowhs NOT IN ('901', '999', '0901', '0999')
         GROUP BY sotowhs
     """, (f'{year}-{month}-01',
@@ -152,9 +152,50 @@ def _query_txn_mtd(cfg, year, month):
         except: pass
     return result
 
+def _query_fact_sales_may25(cfg):
+    """Query fact_sales for full May 2025 per store.
+    Used to set authoritative s25_may (YoY baseline) from fact_sales instead of whsddpact."""
+    import mysql.connector
+    conn = mysql.connector.connect(
+        host=cfg['host'], port=cfg.get('port', 3306),
+        user=cfg['user'], password=cfg['password'],
+        database=cfg.get('database', 'data-lake'),
+        connection_timeout=60, charset='utf8mb4'
+    )
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT sotowhs AS whs,
+               SUM(net_sales_amt)   AS sales25,
+               COUNT(DISTINCT sono) AS txn25
+        FROM fact_sales
+        WHERE YEAR(sodate) = 2025 AND MONTH(sodate) = 5
+          AND solinetype NOT IN ('C', 'R')
+          AND sotowhs REGEXP '^[0-9]+$'
+          AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
+        GROUP BY sotowhs
+    """)
+    rows = cursor.fetchall()
+    cursor.close(); conn.close()
+    result = {}
+    for r in rows:
+        raw = str(r['whs'] or '').strip()
+        if not raw: continue
+        entry = {
+            's25':  float(r['sales25'] or 0),
+            'txn25': int(r['txn25']   or 0),
+        }
+        result[raw] = entry
+        try: result[str(int(raw))] = entry
+        except: pass
+        try: result[raw.zfill(3)] = entry
+        except: pass
+    return result
+
+
 def _query_fact_sales_mtd(cfg, year, month, days_elapsed):
     """Query fact_sales directly for MTD net_sales_amt + total_cost per store.
-    This is the authoritative sales source — matches the mobile app exactly."""
+    This is the authoritative sales source — matches the mobile app exactly.
+    Also returns the actual max day found in fact_sales (may lag DAYS_ELAPSED by ~3 days)."""
     import mysql.connector
     conn = mysql.connector.connect(
         host=cfg['host'], port=cfg.get('port', 3306),
@@ -168,20 +209,23 @@ def _query_fact_sales_mtd(cfg, year, month, days_elapsed):
         SELECT sotowhs AS whs,
                SUM(net_sales_amt)          AS sales_amt,
                SUM(COALESCE(total_cost,0)) AS cost_amt,
-               COUNT(DISTINCT sono)        AS txn_count
+               COUNT(DISTINCT sono)        AS txn_count,
+               MAX(DAY(sodate))            AS max_day_seen
         FROM fact_sales
         WHERE sodate BETWEEN %s AND %s
-          AND solinetype = 'N'
+          AND solinetype NOT IN ('C', 'R')
           AND sotowhs REGEXP '^[0-9]+$'
           AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
         GROUP BY sotowhs
     """, (f'{year}-{month}-01', end_date))
     rows = cursor.fetchall()
     cursor.close(); conn.close()
-    result = {}
+    result = {}; fact_max_day = 0
     for r in rows:
         raw = str(r['whs'] or '').strip()
         if not raw: continue
+        d = int(r.get('max_day_seen') or 0)
+        if d > fact_max_day: fact_max_day = d
         entry = {
             'sales': float(r['sales_amt'] or 0),
             'cost':  float(r['cost_amt']  or 0),
@@ -192,7 +236,7 @@ def _query_fact_sales_mtd(cfg, year, month, days_elapsed):
         except: pass
         try: result[raw.zfill(3)] = entry
         except: pass
-    return result
+    return result, fact_max_day
 
 
 def _query_whsdd(cfg, year, month):
@@ -239,7 +283,34 @@ today = date.today()
 if args.day:
     DAYS_ELAPSED = args.day
 else:
-    DAYS_ELAPSED = max(1, today.day - 1)
+    # Auto-detect from fact_sales — handles month-boundary correctly
+    # (e.g. June 1: today.day-1=0 but fact_sales still has May 31 data)
+    _db_cfg_early = _load_db_config()
+    _auto_day = 0
+    if _db_cfg_early:
+        try:
+            import mysql.connector as _mc
+            _c = _mc.connect(
+                host=_db_cfg_early['host'], port=_db_cfg_early.get('port', 3306),
+                user=_db_cfg_early['user'], password=_db_cfg_early['password'],
+                database=_db_cfg_early.get('database', 'data-lake'),
+                connection_timeout=30, charset='utf8mb4')
+            _cur = _c.cursor()
+            _cur.execute("""
+                SELECT MAX(DAY(sodate)) FROM fact_sales
+                WHERE YEAR(sodate)=%s AND MONTH(sodate)=%s
+                  AND solinetype NOT IN ('C','R')
+                  AND sotowhs REGEXP '^[0-9]+$'
+                  AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
+            """, (int(YEAR), int(MONTH)))
+            _row = _cur.fetchone()
+            _cur.close(); _c.close()
+            if _row and _row[0]: _auto_day = int(_row[0])
+        except Exception as _e:
+            print('  WARN: fact_sales day auto-detect failed: %s' % _e)
+    DAYS_ELAPSED = _auto_day if _auto_day > 0 else max(1, today.day - 1)
+    if _auto_day > 0:
+        print('  Auto-detected max day from fact_sales: %d' % DAYS_ELAPSED)
 
 print('=' * 62)
 print('  Sales Dashboard Updater -- Day %d/%d %s' % (DAYS_ELAPSED, DAYS_IN_MONTH, MONTH_NAME))
@@ -323,16 +394,39 @@ store_target_sales = {no: sum(store_target_days[no].values()) for no in store_ta
 # STEP 1b: Query fact_sales directly (authoritative source — matches mobile app)
 print('\n[1b] Querying fact_sales MTD (days 1-%d) for exact sales amounts ...' % DAYS_ELAPSED)
 _fact_sales_mtd = {}   # {store_code: {sales, cost, txn}}  — primary source
+_fact_max_day   = 0    # actual max day found in fact_sales
 if _db_cfg:
     try:
-        _fact_sales_mtd = _query_fact_sales_mtd(_db_cfg, YEAR, MONTH, DAYS_ELAPSED)
-        _fs_total = sum(v['sales'] for v in _fact_sales_mtd.values())
-        print('    fact_sales: %d stores | ฿%s MTD gross' % (
-            len(_fact_sales_mtd), format(int(_fs_total), ',')))
+        _fact_sales_mtd, _fact_max_day = _query_fact_sales_mtd(_db_cfg, YEAR, MONTH, DAYS_ELAPSED)
+        # Count unique stores only (dict has 2-3 keys per store for code format matching)
+        _unique_fs = {id(v): v for v in _fact_sales_mtd.values()}
+        _fs_total  = sum(v['sales'] for v in _unique_fs.values())
+        _fs_stores = len(_unique_fs)
+        print('    fact_sales: %d stores | ฿%s MTD gross | max day: %d' % (
+            _fs_stores, format(int(_fs_total), ','), _fact_max_day))
     except Exception as _fse:
         print('    WARNING: fact_sales query failed: %s -- will use whsddpact fallback' % _fse)
 else:
     print('    No DB config -- skipping fact_sales query')
+
+# FACT_DAYS = actual days with data in fact_sales (used as denominator for rates).
+# DAYS_ELAPSED is the query window and displayed day number.
+# fact_sales lags ~3 days, so FACT_DAYS < DAYS_ELAPSED is normal.
+FACT_DAYS = _fact_max_day if _fact_max_day > 0 else DAYS_ELAPSED
+if FACT_DAYS != DAYS_ELAPSED:
+    print('    ⚠ fact_sales covers days 1-%d (not 1-%d) — using %d for rate/projection' % (
+        FACT_DAYS, DAYS_ELAPSED, FACT_DAYS))
+
+# Query May 2025 from fact_sales — authoritative YoY baseline (replaces whsddpact 2025)
+_fact_sales_25 = {}
+if _db_cfg:
+    try:
+        _fact_sales_25 = _query_fact_sales_may25(_db_cfg)
+        _fs25_total = sum(v['s25'] for v in _fact_sales_25.values())
+        print('    fact_sales May25: %d stores | ฿%s (YoY baseline)' % (
+            len(_fact_sales_25), format(int(_fs25_total), ',')))
+    except Exception as _f25e:
+        print('    WARNING: fact_sales May25 query failed: %s -- keeping existing s25_may' % _f25e)
 
 # STEP 2: factXX.txt
 print('\n[2/7] Reading factXX.txt for unfinalized days ...')
@@ -512,11 +606,24 @@ for s in D['stores']:
         txn_mtd      = txn_target + txn_fact_f
         _used_whsdd_fallback += 1
 
-    daily     = round(net_sales / DAYS_ELAPSED) if DAYS_ELAPSED else 0
+    daily     = round(net_sales / FACT_DAYS) if FACT_DAYS else 0
     proj      = daily * DAYS_IN_MONTH
-    daily_txn = round(txn_mtd / DAYS_ELAPSED) if DAYS_ELAPSED else 0
+    daily_txn = round(txn_mtd / FACT_DAYS) if FACT_DAYS else 0
     ticket    = round(net_sales / txn_mtd) if txn_mtd else 0
-    s25  = s.get('s25_may', 0); t25 = s.get('ticket_avg_25', 0); dtxn25 = s.get('daily_txn_25', 0)
+
+    # YoY baseline: prefer fact_sales May 2025, fall back to existing HTML value
+    fs25 = _fact_sales_25.get(code)
+    if fs25:
+        s25   = fs25['s25']
+        txn25_store = fs25['txn25']
+        t25   = round(s25 / txn25_store) if txn25_store else 0
+        dtxn25 = round(txn25_store / DAYS_IN_MONTH) if txn25_store else 0
+    else:
+        s25    = s.get('s25_may', 0)
+        txn25_store = s.get('txn_may25', 0)
+        t25    = s.get('ticket_avg_25', 0)
+        dtxn25 = s.get('daily_txn_25', 0)
+
     s.update({
         'sales_mtd': round(net_sales), 'target': round(tar_mo), 'mtd_target': round(tar_mtd),
         'daily': daily, 'proj': proj, 'txn_mtd': txn_mtd, 'daily_txn': daily_txn,
@@ -524,6 +631,8 @@ for s in D['stores']:
         'gp_mtd': round(gp_mtd_amt), 'gp_pct': round(gp_pct, 2),
         'gp_proj': round(proj * gp_pct / 100), 'ret_mtd': round(ret),
         'ret_daily': round(ret / DAYS_ELAPSED) if DAYS_ELAPSED else 0,
+        's25_may': round(s25), 'txn_may25': txn25_store,
+        'ticket_avg_25': t25, 'daily_txn_25': dtxn25,
         'pct_target': safe_pct(net_sales, tar_mtd), 'proj_vs_tgt': safe_pct(proj, tar_mo),
         'proj_yoy': safe_yoy(proj, s25), 'ticket_avg_yoy': safe_yoy(ticket, t25),
         'txn_yoy': safe_yoy(daily_txn, dtxn25),
@@ -538,9 +647,9 @@ def aggregate(entity, stores):
     gp_mtd = sum(s['gp_mtd'] for s in stores); ret_mtd = sum(s['ret_mtd'] for s in stores)
     s25 = sum(s.get('s25_may', 0) for s in stores); txn25 = sum(s.get('txn_may25', 0) for s in stores)
     cnt = entity.get('cnt', len(stores))
-    daily = round(sm / DAYS_ELAPSED) if DAYS_ELAPSED else 0
+    daily = round(sm / FACT_DAYS) if FACT_DAYS else 0
     proj = daily * DAYS_IN_MONTH
-    daily_txn = round(txn / DAYS_ELAPSED) if DAYS_ELAPSED else 0
+    daily_txn = round(txn / FACT_DAYS) if FACT_DAYS else 0
     ticket = round(sm / txn) if txn else 0
     dtxn25 = round(txn25 / DAYS_IN_MONTH) if txn25 else 0
     ticket25 = round(s25 / txn25) if txn25 else 0
@@ -549,7 +658,7 @@ def aggregate(entity, stores):
         'daily': daily, 'proj': proj, 'txn_mtd': txn, 'daily_txn': daily_txn,
         'ticket_avg': ticket, 'gp_mtd': gp_mtd,
         'gp_pct': round(gp_mtd / sm * 100, 2) if sm else 0,
-        'ret_mtd': ret_mtd, 'ret_daily': round(ret_mtd / DAYS_ELAPSED) if DAYS_ELAPSED else 0,
+        'ret_mtd': ret_mtd, 'ret_daily': round(ret_mtd / FACT_DAYS) if FACT_DAYS else 0,
         'ret_per_store': round(ret_mtd / cnt) if cnt else 0,
         's25_may': s25, 'txn_may25': txn25, 'daily_txn_25': dtxn25, 'ticket_avg_25': ticket25,
         'pct_target': safe_pct(sm, tar_mtd), 'proj_vs_tgt': safe_pct(proj, tar_mo),
@@ -576,9 +685,9 @@ sm    = sum(s['sales_mtd'] for s in all_s); tar_mo = sum(s['target'] for s in al
 tar_mtd = sum(s['mtd_target'] for s in all_s); txn = sum(s['txn_mtd'] for s in all_s)
 gp_mtd = sum(s['gp_mtd'] for s in all_s); ret_mtd = sum(s['ret_mtd'] for s in all_s)
 s25 = sum(s.get('s25_may', 0) for s in all_s); txn25 = sum(s.get('txn_may25', 0) for s in all_s)
-daily = round(sm / DAYS_ELAPSED) if DAYS_ELAPSED else 0
+daily = round(sm / FACT_DAYS) if FACT_DAYS else 0
 proj = daily * DAYS_IN_MONTH
-daily_txn = round(txn / DAYS_ELAPSED) if DAYS_ELAPSED else 0
+daily_txn = round(txn / FACT_DAYS) if FACT_DAYS else 0
 ticket = round(sm / txn) if txn else 0
 dtxn25_tot = round(txn25 / DAYS_IN_MONTH) if txn25 else 0
 ticket25 = round(s25 / txn25) if txn25 else 0
@@ -586,12 +695,13 @@ store_cnt = D['summary'].get('store_cnt', len(all_s))
 
 D['summary'].update({
     'days_elapsed': DAYS_ELAPSED, 'days_remaining': DAYS_IN_MONTH - DAYS_ELAPSED,
+    'fact_days': FACT_DAYS,
     'total_mtd': sm, 'total_daily': daily, 'total_proj': proj,
     'total_target': round(tar_mo), 'total_mtd_target': round(tar_mtd),
     'total_gp_mtd': gp_mtd, 'total_gp_pct': round(gp_mtd / sm * 100, 2) if sm else 0,
     'total_txn': txn, 'total_daily_txn': daily_txn, 'total_ticket_avg': ticket,
     'total_s25': s25, 'total_ret_mtd': ret_mtd,
-    'total_ret_daily': round(ret_mtd / DAYS_ELAPSED) if DAYS_ELAPSED else 0,
+    'total_ret_daily': round(ret_mtd / FACT_DAYS) if FACT_DAYS else 0,
     'total_ret_per_store': round(ret_mtd / store_cnt) if store_cnt else 0,
     'total_pct_target': safe_pct(sm, tar_mtd), 'total_proj_vs_tgt': safe_pct(proj, tar_mo),
     'total_proj_yoy': safe_yoy(proj, s25), 'total_txn_may25': txn25,
@@ -981,7 +1091,8 @@ try:
 
     push_files = ['index.html', 'sales_dashboard_v8.html', 'fraud_dashboard.html',
                   'fraud_analysis.html', 'fraud_data.json',
-                  'product_dashboard.html', 'product_data.json']
+                  'product_dashboard.html', 'product_data.json',
+                  'analytics.js']
     for fname in push_files:
         src = os.path.join(FOLDER, fname)
         dst = os.path.join(REPO_DIR, fname)
@@ -1011,8 +1122,4 @@ except Exception as _e:
     print('  WARNING: GitHub push failed: ' + str(_e))
 finally:
     if os.path.exists(REPO_DIR):
-        shutil.rmtree(REPO_DIR, ignore_errors=True)
-
-print()
-print('All done.')
-  
+        shutil.rmtree(REPO_DIR, ignore_errors=
