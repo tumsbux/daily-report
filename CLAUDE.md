@@ -239,6 +239,35 @@ Each HTML file contains a `const D = {...}` JavaScript blob. Scripts use brace-m
 
 ---
 
+## Known Issues & Fixes (2026-06-02) — Month auto-detect & product dashboard
+
+### Problem: update_dashboard.py — MONTH hardcoded เป็น 05 (May)
+**Symptom:** Dashboard แสดง "พฤษภาคม 2026" ต่อไปแม้เข้าสู่ June แล้ว  
+**Root cause:** `YEAR = '2026'`, `MONTH = '05'` hardcoded ใน config block  
+**Fix applied:**
+- เปลี่ยนเป็น auto-detect จาก `date.today()` → `YEAR`, `MONTH`, `DAYS_IN_MONTH`, `MONTH_NAME_TH`
+- เพิ่ม `_TH_MONTHS` list สำหรับชื่อเดือนภาษาไทย
+- เพิ่ม `'month_name': MONTH_NAME_TH` ใน `D['summary'].update({...})` เพื่อให้ dashboard แสดงชื่อเดือนถูกต้อง
+**Pattern:** ต้องเดือนใหม่ script จะ auto-detect เอง ไม่ต้องแก้ code
+
+### Problem: build_product_data_mysql.py — YEAR26, MONTH hardcoded เป็น 2026, 5
+**Symptom:** Product dashboard แสดง "2026-05" และ YoY เทียบกับเดือนผิด  
+**Root cause:** `YEAR26, MONTH = 2026, 5` hardcoded ที่บรรทัด 26  
+**Fix applied:** เปลี่ยนเป็น `YEAR26, MONTH = 2026, 6` (ต้องอัปเดตทุกต้นเดือน)  
+**TODO:** ทำ true auto-detect จาก `date.today()` เหมือน update_dashboard.py
+
+### Problem: rebuild_fraud_analysis.py — truncated (SyntaxError line 769)
+**Root cause:** Edit tool เขียนไฟล์แล้ว truncate ส่วนท้าย  
+**Fix:** restore จาก git history commit `1ac2b14` + apply partial-month fix ใหม่  
+**Prevention:** ใช้ Python script แทน Edit tool สำหรับไฟล์ขนาดใหญ่
+
+### Problem: Product Line Type modal — alert error เมื่อ linetype_breakdown ว่าง
+**Symptom:** เปิดเดือนใหม่ (วันแรกๆ) → กด Line Type → alert error แดง  
+**Root cause:** `linetype_breakdown: []` เพราะข้อมูลยังน้อย  
+**Fix:** เปลี่ยน alert message เป็น "ยังไม่มีข้อมูล Line Type สำหรับช่วงนี้"
+
+---
+
 ## Known Issues & Fixes (2026-06-02) — rebuild_fraud_analysis.py partial month
 
 ### Problem: fraud dashboard แสดง 2026-06 (current partial month) แทน May
