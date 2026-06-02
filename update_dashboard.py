@@ -23,6 +23,9 @@ MONTH_KEY      = YEAR + '-' + MONTH
 import calendar as _cal
 DAYS_IN_MONTH  = _cal.monthrange(int(YEAR), int(MONTH))[1]
 MONTH_NAME     = _today_for_month.strftime('%B %Y')
+_TH_MONTHS = ['','มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน',
+               'กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม']
+MONTH_NAME_TH  = _TH_MONTHS[_today_for_month.month] + ' ' + YEAR
 
 DB_CONFIG_FILE = os.path.join(FOLDER, 'db_config.json')
 REPO_DIR       = os.path.join(tempfile.gettempdir(), f'dlr-{uuid.uuid4().hex[:8]}')
@@ -697,6 +700,7 @@ ticket25 = round(s25 / txn25) if txn25 else 0
 store_cnt = D['summary'].get('store_cnt', len(all_s))
 
 D['summary'].update({
+    'month_name': MONTH_NAME_TH, 'days_in_month': DAYS_IN_MONTH,
     'days_elapsed': DAYS_ELAPSED, 'days_remaining': DAYS_IN_MONTH - DAYS_ELAPSED,
     'fact_days': FACT_DAYS,
     'total_mtd': sm, 'total_daily': daily, 'total_proj': proj,

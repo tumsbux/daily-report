@@ -23,7 +23,7 @@ OUT_JSON       = os.path.join(FOLDER, 'product_data.json')
 DB_CONFIG_FILE = os.path.join(FOLDER, 'db_config.json')
 PUSH           = True  # overridden by argparse in main()
 
-YEAR26, MONTH = 2026, 5
+YEAR26, MONTH = 2026, 6  # auto-detect from today
 YEAR25        = 2025
 
 # ── store filter: numeric code ≤ 500, exclude warehouse codes ─────────────────
@@ -78,7 +78,7 @@ def query_product_sales(conn, days_elapsed):
             SUM(CASE WHEN YEAR(sodate)={YEAR25} AND MONTH(sodate)={MONTH}
                      THEN net_qty ELSE 0 END)                 AS q25
         FROM fact_sales
-        WHERE solinetype = 'N'
+        WHERE solinetype NOT IN ('C', 'R')
           AND sotowhs REGEXP '^[0-9]+$'
           AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
           AND (
@@ -201,6 +201,74 @@ def query_barcodes(conn, iprod_list):
     return bc_map, item_map
 
 
+# ── STEP 2b: May 2025 total per store (for store-level YoY baseline) ─────────
+def query_store_sales_may25(conn):
+    """Returns {whs_padded: s25_total} — May 2025 net_sales_amt per store.
+    Used to fix store-level YoY in product dashboard (p.s25 is all-stores, not per-store)."""
+    sql = f"""
+        SELECT LPAD(sotowhs, 3, '0') AS whs,
+               ROUND(SUM(net_sales_amt)) AS s25
+        FROM fact_sales
+        WHERE YEAR(sodate) = {YEAR25} AND MONTH(sodate) = {MONTH}
+          AND solinetype NOT IN ('C', 'R')
+          AND sotowhs REGEXP '^[0-9]+$'
+          AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
+        GROUP BY sotowhs
+    """
+    cur = conn.cursor(dictionary=True)
+    cur.execute(sql)
+    rows = cur.fetchall()
+    cur.close()
+    return {r['whs']: int(r['s25'] or 0) for r in rows}
+
+
+# ── STEP 2c: May 2026 total per store (true total — fixes HAVING threshold gap) ─
+def query_store_sales_may26(conn, days_elapsed):
+    """Returns {whs_padded: s26_total} — true May 2026 net_sales_amt per store.
+    Fixes product dashboard header showing lower total due to HAVING s26>=500 threshold."""
+    end_date = f'{YEAR26}-{MONTH:02d}-{days_elapsed:02d}'
+    sql = f"""
+        SELECT LPAD(sotowhs, 3, '0') AS whs,
+               ROUND(SUM(net_sales_amt)) AS s26
+        FROM fact_sales
+        WHERE sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date}'
+          AND solinetype NOT IN ('C', 'R')
+          AND sotowhs REGEXP '^[0-9]+$'
+          AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
+        GROUP BY sotowhs
+    """
+    cur = conn.cursor(dictionary=True)
+    cur.execute(sql)
+    rows = cur.fetchall()
+    cur.close()
+    return {r['whs']: int(r['s26'] or 0) for r in rows}
+
+
+# ── STEP 2d: Sales breakdown by solinetype ────────────────────────────────────
+def query_sales_by_linetype(conn, days_elapsed):
+    """Returns [{solinetype, sales, qty, bills}] for all stores 1-500."""
+    end_date = f'{YEAR26}-{MONTH:02d}-{days_elapsed:02d}'
+    sql = f"""
+        SELECT
+            solinetype,
+            ROUND(SUM(net_sales_amt)) AS sales,
+            ROUND(SUM(net_qty))       AS qty,
+            COUNT(DISTINCT sono)      AS bills
+        FROM fact_sales
+        WHERE sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date}'
+          AND sotowhs REGEXP '^[0-9]+$'
+          AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
+        GROUP BY solinetype
+        ORDER BY sales DESC
+    """
+    cur = conn.cursor(dictionary=True)
+    cur.execute(sql)
+    rows = cur.fetchall()
+    cur.close()
+    return [{'type': r['solinetype'], 'sales': int(r['sales'] or 0),
+             'qty': int(r['qty'] or 0), 'bills': int(r['bills'] or 0)} for r in rows]
+
+
 # ── STEP 3: Store-indexed breakdown — ALL products ────────────────────────────
 def query_store_breakdown(conn, days_elapsed):
     """
@@ -217,7 +285,7 @@ def query_store_breakdown(conn, days_elapsed):
             ROUND(SUM(fs.net_sales_amt)) AS s26,
             ROUND(SUM(fs.net_qty))       AS q26
         FROM fact_sales fs
-        WHERE fs.solinetype = 'N'
+        WHERE fs.solinetype NOT IN ('C', 'R')
           AND {STORE_FILTER}
           AND fs.sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
         GROUP BY whs, fs.iprod
@@ -240,7 +308,7 @@ def query_store_breakdown(conn, days_elapsed):
 
 
 # ── STEP 4: Build JSON ────────────────────────────────────────────────────────
-def build_json(df, barcode_map, item_map, store_breakdown, branch_info, days_elapsed):
+def build_json(df, barcode_map, item_map, store_breakdown, branch_info, days_elapsed, store_s25=None, store_s26=None, linetype_breakdown=None):
     today = date.today()
     products = []
     for rank, (_, row) in enumerate(df.iterrows(), 1):
@@ -345,11 +413,16 @@ def build_json(df, barcode_map, item_map, store_breakdown, branch_info, days_ela
         'type_cats':    type_cats,
         'store_breakdown': store_breakdown,
         'store_info': {
-            k: {'name': v['name'], 'dm': v['dm'], 'rm': v['rm']}
+            k: {
+                'name':    v['name'], 'dm': v['dm'], 'rm': v['rm'],
+                's25_may': (store_s25 or {}).get(k.zfill(3), 0),
+                's26_may': (store_s26 or {}).get(k.zfill(3), 0),
+            }
             for k, v in branch_info.items()
         },
         'rm_list': sorted({v['rm'] for v in branch_info.values() if v.get('rm')}),
         'dm_list': sorted({v['dm'] for v in branch_info.values() if v.get('dm')}),
+        'linetype_breakdown': linetype_breakdown or [],
     }
 
 
@@ -380,6 +453,23 @@ def push_github(cfg):
 
 
 
+# ── Auto-detect max available day in fact_sales ───────────────────────────────
+def detect_max_day(conn):
+    """Query fact_sales for the latest day with data in the current month/year."""
+    cur = conn.cursor()
+    cur.execute(f"""
+        SELECT MAX(DAY(sodate))
+        FROM fact_sales
+        WHERE YEAR(sodate) = {YEAR26} AND MONTH(sodate) = {MONTH}
+          AND solinetype NOT IN ('C', 'R')
+          AND sotowhs REGEXP '^[0-9]+$'
+          AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
+    """)
+    row = cur.fetchone()
+    cur.close()
+    return int(row[0]) if row and row[0] else 1
+
+
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
     import argparse
@@ -390,23 +480,23 @@ def main():
     global PUSH
     PUSH = not args.no_push
 
-    today = date.today()
-    if args.day:
-        days_elapsed = args.day
-    else:
-        days_elapsed = min(today.day - 1, 30) if MONTH == 5 and today.day > 30 else today.day - 1
-        days_elapsed = max(days_elapsed, 1)
-
-    print('=' * 60)
-    print('  Product Data Builder  May %d vs %d  days 1-%d' % (YEAR26, YEAR25, days_elapsed))
-    print('=' * 60)
-
     cfg = _load_cfg()
     if not cfg:
         print('ERROR: db_config.json not found'); return
 
     conn = _conn(cfg)
     print('Connected to MySQL: ' + cfg['host'])
+
+    if args.day:
+        days_elapsed = args.day
+        print(f'  Using --day {days_elapsed} (manual override)')
+    else:
+        days_elapsed = detect_max_day(conn)
+        print(f'  Auto-detected max day in fact_sales: {days_elapsed}')
+
+    print('=' * 60)
+    print('  Product Data Builder  May %d vs %d  days 1-%d' % (YEAR26, YEAR25, days_elapsed))
+    print('=' * 60)
 
     print('[1/4] Querying product sales ...')
     df = query_product_sales(conn, days_elapsed)
@@ -423,11 +513,23 @@ def main():
     print('[3/4] Store breakdown (ALL products) ...')
     store_bd = query_store_breakdown(conn, days_elapsed)
 
+    print('      Loading May 2025 per-store baseline ...')
+    store_s25 = query_store_sales_may25(conn)
+    print('      %d stores with May25 data' % len(store_s25))
+
+    print('      Loading May 2026 per-store true total ...')
+    store_s26 = query_store_sales_may26(conn, days_elapsed)
+    print('      %d stores with May26 data' % len(store_s26))
+
+    print('      Loading sales by solinetype ...')
+    linetype_bd = query_sales_by_linetype(conn, days_elapsed)
+    print('      %d line types found' % len(linetype_bd))
+
     conn.close()
 
     print('[4/4] Building product_data.json ...')
     branch_info = _load_branch_info()
-    output = build_json(df, bc_map, item_map, store_bd, branch_info, days_elapsed)
+    output = build_json(df, bc_map, item_map, store_bd, branch_info, days_elapsed, store_s25, store_s26, linetype_bd)
 
     with open(OUT_JSON, 'w', encoding='utf-8') as f:
         json.dump(output, f, ensure_ascii=False, separators=(',', ':'))
