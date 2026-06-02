@@ -406,7 +406,7 @@ function resetFilter(){
 function showLinetypeModal(){
   if(typeof Analytics!=='undefined')Analytics.linetypeModalViewed(fRM,fDM,fStore);
   const rows = (D.linetype_breakdown||[]);
-  if(!rows.length){ alert('ไม่มีข้อมูล linetype_breakdown ในไฟล์ JSON\nกรุณารัน build_product_data_mysql.py ใหม่'); return; }
+  if(!rows.length){ alert('ยังไม่มีข้อมูล Line Type สำหรับช่วงนี้\n(ข้อมูลจะแสดงเมื่อมียอดขายสะสมเพียงพอ)'); return; }
   const total = rows.reduce((s,r)=>s+r.sales, 0)||1;
   const tbody = document.getElementById('lt-tbody');
   const tfoot = document.getElementById('lt-tfoot');
