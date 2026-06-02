@@ -239,6 +239,19 @@ Each HTML file contains a `const D = {...}` JavaScript blob. Scripts use brace-m
 
 ---
 
+## Known Issues & Fixes (2026-06-02) — rebuild_fraud_analysis.py partial month
+
+### Problem: fraud dashboard แสดง 2026-06 (current partial month) แทน May
+**Symptom:** fraud dropdown มี "2026-06" และ ALL แสดงข้อมูลรวม June ซึ่งมีแค่ 1-2 วัน  
+**Root cause:** `rebuild_fraud_analysis.py` ดึง returns 3 เดือนย้อนหลัง รวมถึง returns วันที่ 1-2 มิ.ย. ทำให้ months list มี `2026-06`  
+**Fix:** หลัง build months list — ถ้า `today.day <= 6` ให้ลบ current month ออก (ข้อมูลยังไม่ครบ)  
+**Pattern:** ทุกวันที่ 1-6 ของเดือน fraud dashboard จะ exclude current month อัตโนมัติ
+
+### Note: Laptop local cron job
+ถ้ามี Task Scheduler หรือ cron บน laptop รัน update_dashboard.py อยู่ → ให้ปิดออก เพราะ GitHub Actions handle ทุกอย่างแล้ว การรันซ้ำซ้อนอาจทำให้ push conflict
+
+---
+
 ## Known Issues & Fixes (2026-06-01) — rebuild_fraud_analysis.py
 
 ### Problem: fraud script — MySQL sales MTD = 0 เมื่อรันวันที่ 1 ของเดือนใหม่
