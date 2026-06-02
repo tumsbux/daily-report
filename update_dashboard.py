@@ -15,11 +15,14 @@ INDEX_FILE     = os.path.join(FOLDER, 'index.html')
 TARGET_FILE    = os.path.join(FOLDER, 'target.txt')
 RETURNS_SQL    = os.path.join(FOLDER, 'data-lake_fact_returns.sql')
 
-YEAR           = '2026'
-MONTH          = '05'
+# Auto-detect current month from today's date
+_today_for_month = date.today()
+YEAR           = str(_today_for_month.year)
+MONTH          = f'{_today_for_month.month:02d}'
 MONTH_KEY      = YEAR + '-' + MONTH
-DAYS_IN_MONTH  = 31
-MONTH_NAME     = 'May 2026'
+import calendar as _cal
+DAYS_IN_MONTH  = _cal.monthrange(int(YEAR), int(MONTH))[1]
+MONTH_NAME     = _today_for_month.strftime('%B %Y')
 
 DB_CONFIG_FILE = os.path.join(FOLDER, 'db_config.json')
 REPO_DIR       = os.path.join(tempfile.gettempdir(), f'dlr-{uuid.uuid4().hex[:8]}')
