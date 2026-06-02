@@ -210,7 +210,7 @@ tr.click:hover .arrow{color:var(--accent);}
 <div class="topbar">
   <div class="logo">📊 Sales Dashboard<span>เตือนใจ พาณิชย์กรุ๊ป จำกัด</span></div>
   <div class="breadcrumb" id="bc"></div>
-  <div class="topdate" id="topdate">มิถุนายน 2026<br>MTD: 1–<span id="td-days">1</span> พ.ค.</div>
+  <div class="topdate" id="topdate">มิถุนายน 2026<br>MTD: 1–<span id="td-days">1</span> มิ.ย.</div>
   <button class="rpt-nav-btn" onclick="goExec()">📊 Executive</button> <button class="rpt-nav-btn" onclick="goReport()">📋 รายงาน</button>
   <a href="index.html" class="rpt-nav-btn" style="text-decoration:none">← Hub</a>
 </div>
@@ -627,7 +627,7 @@ function renderExec(){
     <div style="font-size:12px;opacity:.7;margin-bottom:2px">Executive Sales Dashboard</div>
     <div class="exec-title">📊 Sales Performance Report</div>
   </div>
-  <div class="exec-period">MTD Sales Report<br>1–${S.days_elapsed} พฤษภาคม 2569</div>
+  <div class="exec-period">MTD Sales Report<br>1–${S.days_elapsed} มิถุนายน 2569</div>
 </div>
 
 <div class="exec-grid">
@@ -920,10 +920,10 @@ function renderReport(){
   return`<div class="rpt-page">
   <div class="rpt-top">
     <div>
-      <div class="rpt-title">สรุปยอดขาย MTD 1&#x2013;${S.days_elapsed}/5/2569</div>
+      <div class="rpt-title">สรุปยอดขาย MTD 1&#x2013;${S.days_elapsed}/6/2569</div>
       <div class="rpt-sub">ภาพรวมทั้งหมดและแยกตาม RM</div>
     </div>
-    <div class="rpt-date-box">&#x1F4C5; ข้อมูล ณ วันที่<br><strong>${S.days_elapsed} พฤษภาคม 2569</strong></div>
+    <div class="rpt-date-box">&#x1F4C5; ข้อมูล ณ วันที่<br><strong>${S.days_elapsed} มิถุนายน 2569</strong></div>
     <div class="rpt-hl-box">
       <div class="rpt-hl-title">HIGHLIGHT ภาพรวม</div>
       ${hlItems}
