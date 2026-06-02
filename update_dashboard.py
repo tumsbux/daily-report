@@ -1122,4 +1122,7 @@ except Exception as _e:
     print('  WARNING: GitHub push failed: ' + str(_e))
 finally:
     if os.path.exists(REPO_DIR):
-        shutil.rmtree(REPO_DIR, ignore_errors=
+        shutil.rmtree(REPO_DIR, ignore_errors=True)
+
+print()
+print('All done.')
