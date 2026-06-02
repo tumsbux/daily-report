@@ -160,40 +160,20 @@ def _query_whsdd_sales_cost(cfg, year_month):
     return sales_map, cost_map
 
 def _query_sales_mtd(cfg):
-    """Latest-available month net sales + cost per store from fact_sales.
-    Auto-detects the latest month with data (handles month boundaries correctly).
+    """Current-month net sales + cost per store from fact_sales.
     Returns (sales_map, cost_map) where each is {whs: float}."""
-    # Auto-detect latest month in fact_sales (avoids querying June when May data is latest)
-    conn = _mysql_conn(cfg)
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT MAX(DATE_FORMAT(sodate, '%Y-%m-01'))
-        FROM fact_sales
-        WHERE sotowhs REGEXP '^[0-9]+$'
-          AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
-          AND solinetype NOT IN ('C','R')
-    """)
-    row = cur.fetchone()
-    cur.close()
-    latest_month_start = row[0] if row and row[0] else None
-
-    if not latest_month_start:
-        conn.close()
-        return {}, {}
-
     sql = """
         SELECT LPAD(sotowhs, 3, '0') AS whs,
                SUM(net_sales_amt)    AS sales_mtd,
                SUM(total_cost)       AS cost_mtd
         FROM fact_sales
-        WHERE sodate >= %s
-          AND YEAR(sodate) = YEAR(%s) AND MONTH(sodate) = MONTH(%s)
-          AND solinetype NOT IN ('C','R')
-          AND sotowhs REGEXP '^[0-9]+$'
-          AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
+        WHERE sodate >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+          AND solinetype = 'N'
+          AND sotowhs NOT IN ('901','999','0901','0999')
         GROUP BY sotowhs
     """
-    df = pd.read_sql(sql, conn, params=(latest_month_start, latest_month_start, latest_month_start))
+    conn = _mysql_conn(cfg)
+    df = pd.read_sql(sql, conn)
     conn.close()
     df['sales_mtd'] = pd.to_numeric(df['sales_mtd'], errors='coerce').fillna(0)
     df['cost_mtd']  = pd.to_numeric(df['cost_mtd'],  errors='coerce').fillna(0)
@@ -766,4 +746,16 @@ def main():
     for mo in months:
         sub = df[df['month'] == mo]
         out['data'][mo] = build_month(sub)
-        print(f'      {mo}: {sub["rtsono"].nunique()
+        print(f'      {mo}: {sub["rtsono"].nunique():,} bills | '
+              f'{len(sub):,} rows | \u0e3f{sub["amount"].sum():,.0f}')
+
+    with open(OUT_JSON, 'w', encoding='utf-8') as f:
+        json.dump(out, f, ensure_ascii=False)
+    sz = os.path.getsize(OUT_JSON) // 1024
+    print(f'      fraud_data.json saved ({sz:,} KB)')
+
+    if PUSH:
+        push_github()
+
+if __name__ == '__main__':
+    main()
