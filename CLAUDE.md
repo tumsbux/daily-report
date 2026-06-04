@@ -10,10 +10,11 @@
 
 ## 🔔 Session Management Rules (user preference)
 
-- **Warn at 85% context usage:** เมื่อรู้สึก conversation ยาวมาก (รวมไฟล์ใหญ่ที่อ่าน + ผลลัพธ์ tool หลายรอบ) ให้แจ้งผู้ใช้ **ทุกครั้ง** ก่อนทำงานต่อ — แนะนำให้ `/compact` หรือเริ่ม session ใหม่
-- **Compact every time at 85%:** สรุปสิ่งที่ทำในเซสชันให้กระชับ (commit list + ผลลัพธ์หลัก) ก่อน user สั่ง compact
-- **Update CLAUDE.md every time:** ทุกครั้งที่ compact หรือก่อน session จบ ให้ sync CLAUDE.md ด้วยการแก้ไข/fix ใหม่ที่เพิ่งทำ — push ขึ้น repo ด้วย (CLAUDE.md อยู่ใน main แล้ว ตั้งแต่ 2026-06-04)
-- หมายเหตุ: Claude ไม่สามารถ monitor context % แบบ realtime ได้ ต้อง self-estimate จากความยาวของ conversation
+- **Warn at long context (~85%):** เมื่อรู้สึก conversation ยาวมาก (อ่านไฟล์ใหญ่ + tool หลายรอบ) ให้แจ้งผู้ใช้ **ทุกครั้ง** ก่อนทำงานต่อ — แนะนำให้เริ่มแชทใหม่ใน Cowork (CLAUDE.md auto-load ให้ session ใหม่)
+- **Summary recap before session ends:** สรุปสิ่งที่ทำในเซสชันให้กระชับ (commit list + ผลลัพธ์หลัก) ทุกครั้งก่อน session อาจถูกตัด
+- **Update CLAUDE.md every fix:** ทุกครั้งที่แก้/เพิ่ม feature ให้ sync CLAUDE.md ทันที + push ขึ้น main (CLAUDE.md อยู่ใน repo แล้วตั้งแต่ 2026-06-04 → session ใหม่ pickup ได้เลย)
+- **ข้อจำกัด:** Cowork ไม่มี `/compact` (มีแต่ใน Claude Code CLI) — วิธีเดียวคือเริ่มแชทใหม่ Claude ไม่สามารถ monitor context % realtime ได้ ต้อง self-estimate จากความยาว
+- **Model note:** Opus 4.7 burns limits fast — สำหรับงาน routine (update, push) ใช้ Sonnet ได้ ประหยัดกว่า
 
 ---
 
@@ -249,8 +250,4 @@ Top products by sales value. Store/DM/RM filter. YoY comparison. Line Type modal
 ## D.summary JSON Key Fields
 
 ```
-days_elapsed, days_remaining, total_mtd, total_target, total_mtd_target,
-total_pct_target, total_proj, total_proj_vs_tgt, total_s25, total_proj_yoy,
-total_gp_mtd, total_gp_pct, total_txn, total_daily_txn, total_ticket_avg,
-total_ticket_avg_25, total_ticket_avg_yoy, total_txn_yoy, total_ret_mtd,
-total_ret_d
+days_elapsed, days_remaini
