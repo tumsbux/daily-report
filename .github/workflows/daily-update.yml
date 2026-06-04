@@ -1,18 +1,16 @@
 name: Daily Dashboard Update
 
 on:
-  # Multi-cron strategy: ยิงทุก 30 นาที ตั้งแต่ 22:00 UTC (05:00 BKK) ถึง 01:30 UTC (08:30 BKK)
-  # เป้าหมาย: รอบที่ delay น้อยสุดยิงใกล้ 08:30 BKK ที่สุด — รอบที่เหลือ skip อัตโนมัติ
-  # GH Actions free tier cron delay ~5h เป็นเรื่องปกติ — ตั้ง 8 slots เผื่อ delay
+  # Multi-cron strategy: ยิงทุก 30 นาที ตั้งแต่ 00:30 UTC (07:30 BKK) ถึง 02:30 UTC (09:30 BKK)
+  # เหตุผล: data จริงเข้า fact_sales / fact_returns ตอน 07:00 BKK — รัน cron ก่อนหน้านั้นได้ data เก่า ไม่มีประโยชน์
+  # เป้าหมาย: 08:30 BKK เป็น primary, slot อื่นเป็น fallback ถ้า GH Actions delay
+  # Skip-guard ทำให้รอบที่ commit สำเร็จเป็นรอบแรก รอบที่เหลือ skip อัตโนมัติ
   schedule:
-    - cron: '0 22 * * *'    # target 05:00 BKK
-    - cron: '30 22 * * *'   # target 05:30 BKK
-    - cron: '0 23 * * *'    # target 06:00 BKK
-    - cron: '30 23 * * *'   # target 06:30 BKK
-    - cron: '0 0 * * *'     # target 07:00 BKK
-    - cron: '30 0 * * *'    # target 07:30 BKK
+    - cron: '30 0 * * *'    # target 07:30 BKK (30 min หลัง data ready)
     - cron: '0 1 * * *'     # target 08:00 BKK
-    - cron: '30 1 * * *'    # target 08:30 BKK
+    - cron: '30 1 * * *'    # target 08:30 BKK (primary target)
+    - cron: '0 2 * * *'     # target 09:00 BKK (fallback)
+    - cron: '30 2 * * *'    # target 09:30 BKK (fallback)
   workflow_dispatch:
 
 env:
@@ -97,8 +95,4 @@ jobs:
         if: steps.guard.outputs.skip != 'true'
         continue-on-error: true
         timeout-minutes: 10
-        run: python build_product_data_mysql.py --no-push
-
-      - name: Run dashboard update
-        if: steps.guard.outputs.skip != 'true'
-        run
+        run: python build_

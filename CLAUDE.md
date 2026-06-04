@@ -38,8 +38,9 @@
 ## GitHub Actions Workflow
 
 **File:** `.github/workflows/daily-update.yml`  
-**Schedule (ตั้งแต่ 2026-06-04):** Multi-cron 8 slots ทุก 30 นาที จาก `0 22 * * *` ถึง `30 1 * * *` UTC (= **05:00–08:30 BKK**) — รอบไหน delay น้อยที่สุดยิงใกล้ 08:30 BKK ที่สุด รอบที่เหลือเจอ commit `auto:` ของวันนี้แล้วจะ skip ทันที (steps `if: steps.guard.outputs.skip != 'true'`)  
-**เหตุผล:** GH Actions free tier cron delay 0-5 ชม. ขึ้นกับ queue ตั้งหลาย slot ดักให้รอบใดรอบหนึ่งใกล้ 08:30 มากที่สุด  
+**Schedule (อัปเดต 2026-06-04 รอบ 2):** Multi-cron 5 slots ทุก 30 นาที จาก `30 0 * * *` ถึง `30 2 * * *` UTC (= **07:30–09:30 BKK**) — 08:30 BKK เป็น primary target รอบอื่น fallback ถ้า delay  
+**เหตุผล data timing:** fact_sales / fact_returns ETL จริงเข้าที่ 07:00 BKK — รัน cron ก่อนหน้านั้นจะ query data เก่า ไม่มีประโยชน์ ต้องเริ่มที่ 07:30 BKK (+30 นาที buffer)  
+**เหตุผล multi-slot:** GH Actions free tier cron delay 0-5 ชม. ขึ้นกับ queue ตั้งหลาย slot ดักให้รอบใดรอบหนึ่งใกล้ 08:30 มากที่สุด รอบที่ commit สำเร็จเป็นรอบแรก รอบที่เหลือ skip อัตโนมัติ (`if: steps.guard.outputs.skip != 'true'`)  
 **Concurrency:** `group: daily-update, cancel-in-progress: false` — ป้องกัน race ถ้า 2 รอบยิงทับกัน  
 **Fraud step:** `continue-on-error: true` — sales always updates even if fraud fails.  
 **Manual trigger:** github.com/tumsbux/daily-report/actions/workflows/daily-update.yml → Run workflow (bypass guard)
@@ -233,12 +234,4 @@ const monthLabels=Object.fromEntries((D.months||[]).map(k=>{const p=k.split('-')
 Hero KPIs: ยอดขาย MTD, vs เป้า MTD, Projected, YoY Projected, GP% | 4 KPI cards | RM table | Monthly trend chart
 
 ### sales_dashboard_v8.html — Sales
-| View | Content |
-|------|---------|
-| Home | KPI cards, Gauge YoY, Monthly Trend chart |
-| RM/DM/Store | Detail tables + charts |
-| Executive | 7-section report; `excTarget = total_target × 1.155` (+15.5% challenge) |
-| Report | RM cards + DM table + charts |
-
-### fraud_dashboard.html — Fraud Detection
-Tabs: Overvie
+|
