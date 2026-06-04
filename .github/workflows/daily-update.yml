@@ -36,6 +36,8 @@ jobs:
 
       - name: Skip if already ran today (Bangkok time)
         id: guard
+        # Manual trigger (workflow_dispatch) ALWAYS bypasses guard
+        if: github.event_name != 'workflow_dispatch'
         run: |
           TODAY_BKK=$(TZ='Asia/Bangkok' date +%Y-%m-%d)
           echo "Today (BKK): $TODAY_BKK"
@@ -99,8 +101,4 @@ jobs:
 
       - name: Run dashboard update
         if: steps.guard.outputs.skip != 'true'
-        run: python update_dashboard.py
-
-      - name: Clean up credentials
-        if: always()
-        run: rm -f db_config.json
+        run
