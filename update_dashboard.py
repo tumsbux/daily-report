@@ -649,6 +649,10 @@ for s in D['stores']:
         'txn_yoy': safe_yoy(daily_txn, dtxn25),
     })
     s['m26'][MONTH_KEY] = round(net_sales)
+    # Sync m25[prev-year-current-month] with s25_may (header card uses s25_may; list uses m25 → same source now)
+    _prev_yr_key = '%d-%s' % (int(YEAR) - 1, MONTH)
+    if 'm25' not in s or not isinstance(s.get('m25'), dict): s['m25'] = {}
+    s['m25'][_prev_yr_key] = round(s25)
 print('    fact_sales primary: %d stores | whsddpact fallback: %d stores' % (
     _used_fact_sales, _used_whsdd_fallback))
 
@@ -677,6 +681,10 @@ def aggregate(entity, stores):
         'txn_yoy': safe_yoy(daily_txn, dtxn25),
     })
     entity['m26'][MONTH_KEY] = sm
+    # Sync entity m25[prev-year-current-month] for RM/DM aggregate views (same-source as store level)
+    _prev_yr_key_e = '%d-%s' % (int(YEAR) - 1, MONTH)
+    if 'm25' not in entity or not isinstance(entity.get('m25'), dict): entity['m25'] = {}
+    entity['m25'][_prev_yr_key_e] = s25
 
 dm_stores = defaultdict(list); rm_stores = defaultdict(list)
 for s in D['stores']:
@@ -722,6 +730,10 @@ D['summary'].update({
     'total_txn_yoy': safe_yoy(daily_txn, dtxn25_tot),
 })
 D['summary']['m26_tot'][MONTH_KEY] = sm
+# Sync summary m25_tot[prev-year-current-month] so trend chart and home cards match (same source as per-store)
+_prev_yr_key_t = '%d-%s' % (int(YEAR) - 1, MONTH)
+if 'm25_tot' not in D['summary'] or not isinstance(D['summary'].get('m25_tot'), dict): D['summary']['m25_tot'] = {}
+D['summary']['m25_tot'][_prev_yr_key_t] = s25
 
 # Save sales_dashboard_v8.html
 new_json = json.dumps(D, ensure_ascii=False)
@@ -1174,22 +1186,4 @@ try:
         if os.path.exists(src):
             shutil.copy2(src, dst)
     _env = os.environ.copy()
-    _env['GIT_AUTHOR_NAME']     = 'Dashboard Bot'
-    _env['GIT_AUTHOR_EMAIL']    = 'bot@dashboard'
-    _env['GIT_COMMITTER_NAME']  = 'Dashboard Bot'
-    _env['GIT_COMMITTER_EMAIL'] = 'bot@dashboard'
-    subprocess.run(['git', '-C', REPO_DIR, 'add', '-A'],
-                   capture_output=True, env=_env)
-    _cr = subprocess.run(
-        ['git', '-C', REPO_DIR, 'commit', '-m',
-         'auto: Day %d/%d %s' % (DAYS_ELAPSED, DAYS_IN_MONTH, MONTH_NAME)],
-        capture_output=True, text=True, env=_env)
-    if 'nothing to commit' in (_cr.stdout + _cr.stderr):
-        print('  GitHub: nothing to commit (data unchanged)')
-    else:
-        _pr = subprocess.run(['git', '-C', REPO_DIR, 'push', 'origin', 'main'],
-                             capture_output=True, text=True, env=_env)
-        if _pr.returncode == 0:
-            print('  GitHub: pushed OK')
-        else:
-            print('  WARNING: push failed: '
+    _env['GIT_AUTHOR_NAME']

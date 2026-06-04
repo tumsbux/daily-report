@@ -145,10 +145,12 @@ Dashboard ใช้ `solinetype NOT IN ('C', 'R')` (ตรงกับ mobile ap
 **index.html chart rebuild** (ตั้งแต่ 2026-06-02):
 - `const months`, `m26vals`, `m25vals` rebuild จาก `D.summary.m26_tot`/`m25_tot` — เพิ่มเดือนใหม่อัตโนมัติ
 
-**YoY baseline auto-detect** (แก้ 2026-06-04):
-- `_query_fact_sales_may25()` เดิม hardcode `MONTH(sodate) = 5` → bug: ข้ามเดือนแล้ว header card "YYYY (ทั้งเดือน)" ยังโชว์ May 2025 (เพราะ label ถูก regex แทน "พ.ค.→มิ.ย." แต่ value ยังเป็น May)
-- แก้: query เป็น `YEAR(sodate) = {YEAR-1} AND MONTH(sodate) = {MONTH}` — auto-detect ตามเดือนปัจจุบัน
-- ฟังก์ชันยังชื่อ `_query_fact_sales_may25` และ field `s25_may` (legacy name คงไว้ backward-compat) แต่ทำงานเดือนปัจจุบันแล้ว
+**YoY baseline auto-detect + same-source** (แก้ 2026-06-04):
+- `_query_fact_sales_may25()` เดิม hardcode `MONTH(sodate) = 5` → header card "YYYY (ทั้งเดือน)" โชว์ May 2025 ทั้งที่ label เป็น มิ.ย.
+- แก้ query: `YEAR(sodate) = {YEAR-1} AND MONTH(sodate) = {MONTH}` — auto-detect
+- **Same-source sync (2nd fix):** Header card อ่าน `s.s25_may` (จาก fact_sales) แต่ list "ยอดขายรายเดือน 2025" อ่าน `s.m25[YYYY-MM]` (legacy data) → ต่างกัน ~26 บาท/store เพราะคนละ table
+- แก้: ใน update_dashboard.py หลัง set `s.s25_may` แล้ว → set `s.m25[YEAR-1-MONTH] = round(s25)` ด้วย (store + entity + summary.m25_tot ทั้ง 3 levels) → ทั้งสองอ่านจาก fact_sales เดียวกัน ตรงเป๊ะ
+- ฟังก์ชันยังชื่อ `_query_fact_sales_may25` + field `s25_may` (legacy name) แต่ทำงาน dynamic
 
 **sales_dashboard_v8.html `MTH` dynamic** (แก้ 2026-06-04):
 - เปลี่ยน `const MTH = {...}` (static dict ขาด 2025-01..04, 2026-06, label ผิด `2025-05`/`2026-05` เป็น "มิ.ย.") → **JS Proxy auto-format** ทุก key `YYYY-MM` เป็น `ม.ค. 25` style
@@ -239,15 +241,4 @@ Hero KPIs: ยอดขาย MTD, vs เป้า MTD, Projected, YoY Projected
 | Report | RM cards + DM table + charts |
 
 ### fraud_dashboard.html — Fraud Detection
-Tabs: Overview · Store Risk · พนักงาน (rtuname) · Return Bill · เวลา · ร้าน · DM · RM  
-Risk badges: HIGH / MEDIUM / LOW
-
-### product_dashboard.html — Products
-Top products by sales value. Store/DM/RM filter. YoY comparison. Line Type modal.
-
----
-
-## D.summary JSON Key Fields
-
-```
-days_elapsed, days_remaini
+Tabs: Overvie
