@@ -8,6 +8,15 @@
 
 ---
 
+## 🔔 Session Management Rules (user preference)
+
+- **Warn at 85% context usage:** เมื่อรู้สึก conversation ยาวมาก (รวมไฟล์ใหญ่ที่อ่าน + ผลลัพธ์ tool หลายรอบ) ให้แจ้งผู้ใช้ **ทุกครั้ง** ก่อนทำงานต่อ — แนะนำให้ `/compact` หรือเริ่ม session ใหม่
+- **Compact every time at 85%:** สรุปสิ่งที่ทำในเซสชันให้กระชับ (commit list + ผลลัพธ์หลัก) ก่อน user สั่ง compact
+- **Update CLAUDE.md every time:** ทุกครั้งที่ compact หรือก่อน session จบ ให้ sync CLAUDE.md ด้วยการแก้ไข/fix ใหม่ที่เพิ่งทำ — push ขึ้น repo ด้วย (CLAUDE.md อยู่ใน main แล้ว ตั้งแต่ 2026-06-04)
+- หมายเหตุ: Claude ไม่สามารถ monitor context % แบบ realtime ได้ ต้อง self-estimate จากความยาวของ conversation
+
+---
+
 ## ⚡ Quick Context
 
 ระบบ Dashboard อัปเดตอัตโนมัติทุกวัน 08:30 Bangkok ผ่าน **GitHub Actions** (ไม่ต้องเปิด laptop)
@@ -244,18 +253,4 @@ days_elapsed, days_remaining, total_mtd, total_target, total_mtd_target,
 total_pct_target, total_proj, total_proj_vs_tgt, total_s25, total_proj_yoy,
 total_gp_mtd, total_gp_pct, total_txn, total_daily_txn, total_ticket_avg,
 total_ticket_avg_25, total_ticket_avg_yoy, total_txn_yoy, total_ret_mtd,
-total_ret_daily, total_ret_per_store, month_name (Thai),
-m26_tot {YYYY-MM: amount}, m25_tot {YYYY-MM: amount}
-```
-
----
-
-## Common Pitfalls & Prevention
-
-- **File truncation:** HTML files ขนาดใหญ่อาจ truncated ถ้า write crash กลางทาง → dashboard blank หรือ JS ไม่ทำงาน  
-  Restore: `git show <commit>:<file> > <file>` then re-inject data  
-  Prevention: ตรวจ `tail -5 <file>` ให้ลงท้ายด้วย `</html>`  
-  Sizes: `sales_dashboard_v8.html` ≈ 290KB+, `index.html` ≈ 19KB+, `product_dashboard.html` ≈ 31KB+
-
-- **⚠️ Edit tool truncation on long-line HTML (พบ 2026-06-04):** Claude `Edit` tool บนไฟล์ที่มีบรรทัดยาวมาก (เช่น `sales_dashboard_v8.html` ที่ embed D เป็น minified JSON บรรทัดเดียว ~243KB) อาจ **ตัดท้ายไฟล์เงียบๆ** หลัง replace สำเร็จ — ไม่มี error report  
-  Case: แก้ `const MTH` บรรทัด 221 สำเร็จ แต่ท้ายไฟล์หาย `updateTopDate(); goHome(); ...</html>` → dashboard render แค
+total_ret_d
