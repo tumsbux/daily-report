@@ -25,6 +25,8 @@ DAYS_IN_MONTH  = _cal.monthrange(int(YEAR), int(MONTH))[1]
 MONTH_NAME     = _today_for_month.strftime('%B %Y')
 _TH_MONTHS = ['','มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน',
                'กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม']
+_TH_MONTHS_SHORT = ['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.',
+                    'ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
 MONTH_NAME_TH  = _TH_MONTHS[_today_for_month.month] + ' ' + YEAR
 
 DB_CONFIG_FILE = os.path.join(FOLDER, 'db_config.json')
@@ -159,9 +161,12 @@ def _query_txn_mtd(cfg, year, month):
     return result
 
 def _query_fact_sales_may25(cfg):
-    """Query fact_sales for full May 2025 per store.
-    Used to set authoritative s25_may (YoY baseline) from fact_sales instead of whsddpact."""
+    """Query fact_sales for full previous-year same-month per store.
+    Used to set authoritative s25_may (YoY baseline) from fact_sales instead of whsddpact.
+    NOTE: name kept 'may25' for backward compat; query is dynamic (YEAR-1, current MONTH)."""
     import mysql.connector
+    _y_prev = int(YEAR) - 1
+    _m_cur  = int(MONTH)
     conn = mysql.connector.connect(
         host=cfg['host'], port=cfg.get('port', 3306),
         user=cfg['user'], password=cfg['password'],
@@ -169,12 +174,12 @@ def _query_fact_sales_may25(cfg):
         connection_timeout=60, charset='utf8mb4'
     )
     cursor = conn.cursor(dictionary=True)
-    cursor.execute("""
+    cursor.execute(f"""
         SELECT sotowhs AS whs,
                SUM(net_sales_amt)   AS sales25,
                COUNT(DISTINCT sono) AS txn25
         FROM fact_sales
-        WHERE YEAR(sodate) = 2025 AND MONTH(sodate) = 5
+        WHERE YEAR(sodate) = {_y_prev} AND MONTH(sodate) = {_m_cur}
           AND solinetype NOT IN ('C', 'R')
           AND sotowhs REGEXP '^[0-9]+$'
           AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
@@ -423,16 +428,16 @@ if FACT_DAYS != DAYS_ELAPSED:
     print('    ⚠ fact_sales covers days 1-%d (not 1-%d) — using %d for rate/projection' % (
         FACT_DAYS, DAYS_ELAPSED, FACT_DAYS))
 
-# Query May 2025 from fact_sales — authoritative YoY baseline (replaces whsddpact 2025)
+# Query previous-year same-month from fact_sales — authoritative YoY baseline (replaces whsddpact 2025)
 _fact_sales_25 = {}
 if _db_cfg:
     try:
         _fact_sales_25 = _query_fact_sales_may25(_db_cfg)
         _fs25_total = sum(v['s25'] for v in _fact_sales_25.values())
-        print('    fact_sales May25: %d stores | ฿%s (YoY baseline)' % (
-            len(_fact_sales_25), format(int(_fs25_total), ',')))
+        print('    fact_sales %s/%s: %d stores | ฿%s (YoY baseline)' % (
+            str(int(YEAR) - 1), MONTH, len(_fact_sales_25), format(int(_fs25_total), ',')))
     except Exception as _f25e:
-        print('    WARNING: fact_sales May25 query failed: %s -- keeping existing s25_may' % _f25e)
+        print('    WARNING: fact_sales YoY baseline query failed: %s -- keeping existing s25_may' % _f25e)
 
 # STEP 2: factXX.txt
 print('\n[2/7] Reading factXX.txt for unfinalized days ...')
@@ -723,6 +728,25 @@ new_json = json.dumps(D, ensure_ascii=False)
 html     = html[:json_start] + new_json + html[json_end:]
 html     = re.sub(r'<span id="td-days">\d+</span>',
                   '<span id="td-days">%d</span>' % DAYS_ELAPSED, html)
+
+# Replace hardcoded Thai month labels in sales_dashboard_v8.html
+_mo_i  = int(MONTH)
+_pm_i  = _mo_i - 1 if _mo_i > 1 else 12
+_yr_i  = int(YEAR)
+_be_i  = _yr_i + 543
+for _old, _new in [
+    (_TH_MONTHS[_pm_i] + ' ' + YEAR,                    _TH_MONTHS[_mo_i] + ' ' + YEAR),
+    (_TH_MONTHS[_pm_i] + ' ' + str(_yr_i - 1),          _TH_MONTHS[_mo_i] + ' ' + str(_yr_i - 1)),
+    (_TH_MONTHS[_pm_i] + ' ' + str(_be_i),               _TH_MONTHS[_mo_i] + ' ' + str(_be_i)),
+    (_TH_MONTHS_SHORT[_pm_i] + ' ' + YEAR[-2:],         _TH_MONTHS_SHORT[_mo_i] + ' ' + YEAR[-2:]),
+    (_TH_MONTHS_SHORT[_pm_i] + ' ' + str(_yr_i - 1)[-2:], _TH_MONTHS_SHORT[_mo_i] + ' ' + str(_yr_i - 1)[-2:]),
+    (_TH_MONTHS_SHORT[_pm_i] + ' ' + YEAR,              _TH_MONTHS_SHORT[_mo_i] + ' ' + YEAR),
+    (_TH_MONTHS_SHORT[_pm_i] + ' ' + str(_yr_i - 1),   _TH_MONTHS_SHORT[_mo_i] + ' ' + str(_yr_i - 1)),
+    (_TH_MONTHS_SHORT[_pm_i] + '</',                     _TH_MONTHS_SHORT[_mo_i] + '</'),
+    ('/' + str(_pm_i) + '/' + str(_be_i),                '/' + str(_mo_i) + '/' + str(_be_i)),
+]:
+    html = html.replace(_old, _new)
+
 with open(DASHBOARD_FILE, 'w', encoding='utf-8') as f:
     f.write(html)
 
@@ -751,18 +775,18 @@ def upd_skpi(html, val, label):
         r'\g<1>' + val + r'\g<2>', html)
 
 # Day badge
-idx = re.sub(r'(\d+ / 31|Day \d+/31)', 'Day %d/31' % DAYS_ELAPSED, idx)
+idx = re.sub(r'(\d+ / \d+|Day \d+/\d+)', 'Day %d/%d' % (DAYS_ELAPSED, DAYS_IN_MONTH), idx)
 idx = re.sub(r'(<div class="day-badge">)\d+(</div>)',
              r'\g<1>' + str(DAYS_ELAPSED) + r'\g<2>', idx)
 
-# date-badge nav (e.g. "19 พ.ค. 2569 · วัน 18/31")
+# date-badge nav (e.g. "1 มิ.ย. 2569 · วัน 1/30")
 THAI_MONTHS = ['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.',
                'ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
 YEAR_BE = today.year + 543
 THAI_MON = THAI_MONTHS[today.month]
-new_badge = '%d %s %d · วัน %d/31' % (DAYS_ELAPSED, THAI_MON, YEAR_BE, DAYS_ELAPSED)
+new_badge = '%d %s %d · วัน %d/%d' % (DAYS_ELAPSED, THAI_MON, YEAR_BE, DAYS_ELAPSED, DAYS_IN_MONTH)
 idx = re.sub(
-    r'\d+\s+\S+\s+\d{4}\s+·\s+วัน\s+\d+/31',
+    r'\d+\s+\S+\s+\d{4}\s+·\s+วัน\s+\d+/\d+',
     new_badge, idx)
 
 # Hero KPIs (Thai labels)
@@ -864,10 +888,30 @@ for rm in sorted(D['rm'], key=lambda r: str(r.get('rm', ''))):
 new_rm = 'const RM_DATA = [\n' + ',\n'.join(rm_rows) + '\n];'
 idx = re.sub(r'const RM_DATA = \[[\s\S]*?\];', new_rm, idx)
 
-# Trend chart -- update May MTD value (last element in m26vals)
-mtd_str = '%.1f' % (sm / 1e6)
-def _replace_m26(m): return m.group(1) + mtd_str + m.group(2)
-idx = re.sub(r'(const m26vals = \[[^\]]*,)\s*[\d.]+(\];)', _replace_m26, idx)
+# Trend chart -- rebuild months/m26vals/m25vals dynamically from D['summary']
+_m26_tot = D['summary'].get('m26_tot', {})
+_m25_tot = D['summary'].get('m25_tot', {})
+_chart_mos, _v26, _v25 = [], [], []
+for _mn in range(1, _mo_i + 1):
+    _k26 = '%s-%02d' % (YEAR, _mn)
+    _k25 = '%d-%02d' % (_yr_i - 1, _mn)
+    _chart_mos.append(_TH_MONTHS_SHORT[_mn])
+    _v26.append('%.1f' % (_m26_tot.get(_k26, 0) / 1e6))
+    _v25.append('%.1f' % (_m25_tot.get(_k25, 0) / 1e6))
+idx = re.sub(r"const months\s*=\s*\[[^\]]*\];",
+             "const months = ['" + "','".join(_chart_mos) + "'];", idx)
+idx = re.sub(r"const m26vals\s*=\s*\[[^\]]*\];[^\n]*",
+             "const m26vals = [" + ','.join(_v26) + "];   // " + _TH_MONTHS_SHORT[_mo_i] + " = MTD", idx)
+idx = re.sub(r"const m25vals\s*=\s*\[[^\]]*\];[^\n]*",
+             "const m25vals = [" + ','.join(_v25) + "];   // " + _TH_MONTHS_SHORT[_mo_i] + " " + str(_yr_i - 1) + " full month", idx)
+
+# Update h1 title and other month labels in index.html
+for _old, _new in [
+    (_TH_MONTHS[_pm_i] + ' ' + str(_be_i), _TH_MONTHS[_mo_i] + ' ' + str(_be_i)),
+    (_TH_MONTHS[_pm_i] + ' ' + YEAR,       _TH_MONTHS[_mo_i] + ' ' + YEAR),
+    (_TH_MONTHS[_pm_i] + ' ' + str(_yr_i - 1), _TH_MONTHS[_mo_i] + ' ' + str(_yr_i - 1)),
+]:
+    idx = idx.replace(_old, _new)
 
 # Safety check -- ensure file ends properly
 if not idx.rstrip().endswith('</html>'):
@@ -1046,33 +1090,58 @@ if os.path.exists(FRAUD_FILE) and os.path.exists(FRAUD_JSON):
         with open(FRAUD_FILE, encoding='utf-8') as _ff:
             _fhtml = _ff.read()
 
-        # Replace embedded const D = {...};
-        _d_start = _fhtml.index('const D = {') + len('const D = ')
-        _depth = 0; _i = _d_start
-        while _i < len(_fhtml):
-            if _fhtml[_i] == '{':  _depth += 1
-            elif _fhtml[_i] == '}':
-                _depth -= 1
-                if _depth == 0: _d_end = _i + 1; break
-            _i += 1
-        _fhtml = _fhtml[:_d_start] + _new_D_json + _fhtml[_d_end:]
+        # If fraud_dashboard.html is truncated, regenerate from template
+        _FRAUD_TMPL = os.path.join(FOLDER, 'fraud_analysis_template.html')
+        _fraud_done = False
+        if '</html>' not in _fhtml and os.path.exists(_FRAUD_TMPL):
+            print('  NOTE: fraud_dashboard.html truncated — regenerating from template')
+            with open(_FRAUD_TMPL, encoding='utf-8') as _ft:
+                _fhtml = _ft.read()
+            _fhtml = _fhtml.replace('PLACEHOLDER_DATA', _new_D_json)
+            _fraud_badge = '%d %s %d · วัน 1–%d' % (DAYS_ELAPSED, THAI_MON, YEAR_BE, DAYS_IN_MONTH)
+            _fraud_re = r'(?:\d{4}-\d{2}-\d{2}|\d+\s+\S+\s+\d{4})\s+·\s+วัน\s+1[–\-]\d+(?:\s+\S+)?'
+            _fhtml = re.sub(_fraud_re, _fraud_badge, _fhtml)
+            with open(FRAUD_FILE, 'w', encoding='utf-8') as _ff:
+                _ff.write(_fhtml)
+            print('  fraud_dashboard.html regenerated from template + data injected')
+            _fraud_done = True
 
-        # Update nav-date badge
-        _fraud_badge = '%d %s %d \u00b7 \u0e27\u0e31\u0e19 1\u2013%d' % (DAYS_ELAPSED, THAI_MON, YEAR_BE, DAYS_ELAPSED)
-        _fhtml = re.sub(
-            r'\d+\s+\S+\s+\d{4}\s+\u00b7\s+\u0e27\u0e31\u0e19\s+1\u2013\d+',
-            _fraud_badge, _fhtml)
+        if not _fraud_done:
+            # Replace embedded const D = {...};  (normal brace-match path)
+            _d_search = _fhtml.find('const D={')
+            if _d_search < 0: _d_search = _fhtml.find('const D = {')
+            _d_start = _fhtml.index('{', _d_search)
+            _depth = 0; _i = _d_start
+            while _i < len(_fhtml):
+                if _fhtml[_i] == '{':  _depth += 1
+                elif _fhtml[_i] == '}':
+                    _depth -= 1
+                    if _depth == 0: _d_end = _i + 1; break
+                _i += 1
+            _fhtml = _fhtml[:_d_start] + _new_D_json + _fhtml[_d_end:]
 
-        with open(FRAUD_FILE, 'w', encoding='utf-8') as _ff:
-            _ff.write(_fhtml)
-        print('  fraud_dashboard.html data injected + nav-date -> day 1-%d' % DAYS_ELAPSED)
+            # Update ML month-label lookup → dynamic (replaces old hardcoded version)
+            _new_ml = ("const TH_MO_S=['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.',"
+                       "'ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];\n"
+                       "const ML=Object.fromEntries((D.months||[]).map(k=>{const[y,m]=k.split('-');return[k,TH_MO_S[+m]];}));")
+            _fhtml = re.sub(r"const ML=\{[^}]+\};", _new_ml, _fhtml)
+
+            # Update nav-date badge (matches both ISO and Thai date formats)
+            _fraud_badge = '%d %s %d · วัน 1–%d' % (DAYS_ELAPSED, THAI_MON, YEAR_BE, DAYS_IN_MONTH)
+            _fraud_re = r'(?:\d{4}-\d{2}-\d{2}|\d+\s+\S+\s+\d{4})\s+·\s+วัน\s+1[–\-]\d+(?:\s+\S+)?'
+            _fhtml = re.sub(_fraud_re, _fraud_badge, _fhtml)
+
+            with open(FRAUD_FILE, 'w', encoding='utf-8') as _ff:
+                _ff.write(_fhtml)
+            print('  fraud_dashboard.html data injected + nav-date -> day 1-%d/%d' % (DAYS_ELAPSED, DAYS_IN_MONTH))
     except Exception as _e:
         print('  WARNING fraud_dashboard.html data inject failed: %s' % _e)
         # Fallback: at least update the date badge
         try:
             with open(FRAUD_FILE, encoding='utf-8') as _ff: _fhtml = _ff.read()
-            _fraud_badge = '%d %s %d \u00b7 \u0e27\u0e31\u0e19 1\u2013%d' % (DAYS_ELAPSED, THAI_MON, YEAR_BE, DAYS_ELAPSED)
-            _fhtml = re.sub(r'\d+\s+\S+\s+\d{4}\s+\u00b7\s+\u0e27\u0e31\u0e19\s+1\u2013\d+', _fraud_badge, _fhtml)
+            _fraud_badge = '%d %s %d · วัน 1–%d' % (DAYS_ELAPSED, THAI_MON, YEAR_BE, DAYS_IN_MONTH)
+            _fraud_re = r'(?:\d{4}-\d{2}-\d{2}|\d+\s+\S+\s+\d{4})\s+·\s+วัน\s+1[–\-]\d+(?:\s+\S+)?'
+            _fhtml = re.sub(_fraud_re, _fraud_badge, _fhtml)
             with open(FRAUD_FILE, 'w', encoding='utf-8') as _ff: _ff.write(_fhtml)
         except: pass
 
@@ -1098,8 +1167,7 @@ try:
 
     push_files = ['index.html', 'sales_dashboard_v8.html', 'fraud_dashboard.html',
                   'fraud_analysis.html', 'fraud_data.json',
-                  'product_dashboard.html', 'product_data.json',
-                  'analytics.js']
+                  'product_dashboard.html', 'product_data.json', 'analytics.js']
     for fname in push_files:
         src = os.path.join(FOLDER, fname)
         dst = os.path.join(REPO_DIR, fname)
@@ -1124,12 +1192,4 @@ try:
         if _pr.returncode == 0:
             print('  GitHub: pushed OK')
         else:
-            print('  WARNING: push failed: ' + _pr.stderr[-200:])
-except Exception as _e:
-    print('  WARNING: GitHub push failed: ' + str(_e))
-finally:
-    if os.path.exists(REPO_DIR):
-        shutil.rmtree(REPO_DIR, ignore_errors=True)
-
-print()
-print('All done.')
+            print('  WARNING: push failed: '
