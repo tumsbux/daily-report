@@ -1,12 +1,27 @@
 name: Daily Dashboard Update
 
 on:
+  # Multi-cron strategy: ยิงทุก 30 นาที ตั้งแต่ 22:00 UTC (05:00 BKK) ถึง 01:30 UTC (08:30 BKK)
+  # เป้าหมาย: รอบที่ delay น้อยสุดยิงใกล้ 08:30 BKK ที่สุด — รอบที่เหลือ skip อัตโนมัติ
+  # GH Actions free tier cron delay ~5h เป็นเรื่องปกติ — ตั้ง 8 slots เผื่อ delay
   schedule:
-    - cron: '30 1 * * *'
+    - cron: '0 22 * * *'    # target 05:00 BKK
+    - cron: '30 22 * * *'   # target 05:30 BKK
+    - cron: '0 23 * * *'    # target 06:00 BKK
+    - cron: '30 23 * * *'   # target 06:30 BKK
+    - cron: '0 0 * * *'     # target 07:00 BKK
+    - cron: '30 0 * * *'    # target 07:30 BKK
+    - cron: '0 1 * * *'     # target 08:00 BKK
+    - cron: '30 1 * * *'    # target 08:30 BKK
   workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+# ป้องกัน race condition ถ้า 2 รอบยิงทับกัน
+concurrency:
+  group: daily-update
+  cancel-in-progress: false
 
 jobs:
   update:
@@ -16,16 +31,37 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4.2.2
+        with:
+          fetch-depth: 20  # need history for "already-ran-today" check
+
+      - name: Skip if already ran today (Bangkok time)
+        id: guard
+        run: |
+          TODAY_BKK=$(TZ='Asia/Bangkok' date +%Y-%m-%d)
+          echo "Today (BKK): $TODAY_BKK"
+          # หา commit message ที่ขึ้นต้นด้วย "auto:" และวันที่ committer (BKK) = วันนี้
+          FOUND=$(git log --since="${TODAY_BKK} 00:00 +0700" --until="${TODAY_BKK} 23:59 +0700" \
+                  --grep='^auto:' --pretty=format:'%h %ci %s' | head -1)
+          if [ -n "$FOUND" ]; then
+            echo "✅ Already ran today: $FOUND"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "▶️ No auto commit today yet — proceeding"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Set up Python 3.11
+        if: steps.guard.outputs.skip != 'true'
         uses: actions/setup-python@v5.3.0
         with:
           python-version: '3.11'
 
       - name: Install dependencies
+        if: steps.guard.outputs.skip != 'true'
         run: pip install mysql-connector-python pandas openpyxl
 
       - name: Create db_config.json from secrets
+        if: steps.guard.outputs.skip != 'true'
         env:
           DB_HOST:     ${{ secrets.DB_HOST }}
           DB_PORT:     ${{ secrets.DB_PORT }}
@@ -50,16 +86,19 @@ jobs:
           "
 
       - name: Rebuild fraud analysis
+        if: steps.guard.outputs.skip != 'true'
         continue-on-error: true
         timeout-minutes: 15
         run: python rebuild_fraud_analysis.py --no-push
 
       - name: Build product data
+        if: steps.guard.outputs.skip != 'true'
         continue-on-error: true
         timeout-minutes: 10
         run: python build_product_data_mysql.py --no-push
 
       - name: Run dashboard update
+        if: steps.guard.outputs.skip != 'true'
         run: python update_dashboard.py
 
       - name: Clean up credentials
