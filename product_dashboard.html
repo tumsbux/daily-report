@@ -478,7 +478,16 @@ function applyAll(){
   // Build working product list
   let wProds;
   if(!scopeStores){
-    wProds=prods; // global — use product totals directly
+    // global scope — use product totals directly, but accumulate onhand across
+    // ALL stores from store_breakdown (p.onhand from dim_item_barcode is always
+    // 0 because that table doesn't have an onhand column — real source is ibl)
+    const ohTot={};
+    for(const ps of Object.values(sb)){
+      for(const [iprod,arr] of Object.entries(ps)){
+        if(arr.length>=3 && arr[2]) ohTot[iprod]=(ohTot[iprod]||0)+arr[2];
+      }
+    }
+    wProds=prods.map(p=>({...p, onhand: ohTot[p.iprod]||0}));
   } else {
     // Aggregate across all in-scope stores from store_breakdown
     // store_breakdown: {whs: {iprod: [s26, q26, onhand?]}} (onhand added 2026-06-05)
