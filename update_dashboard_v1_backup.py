@@ -51,22 +51,30 @@ GITHUB_TOKEN = _read_github_token()
 GITHUB_REPO  = _read_github_repo()
 GITHUB_URL   = 'https://' + GITHUB_TOKEN + '@github.com/' + GITHUB_REPO + '.git'
 
-# HELPERS — extracted to dashboards/ package (Phase 3b, 2026-06-05)
-# Pure helpers + MySQL queries now live in dashboards/helpers.py + dashboards/mysql_queries.py.
-# Call sites unchanged — old names preserved via `as` aliases below.
-from dashboards.helpers import valid_store, extract_json, safe_pct, safe_yoy
-from dashboards.mysql_queries import (
-    query_returns_mtd       as _query_returns_mtd,
-    query_txn_mtd           as _query_txn_mtd,
-    query_fact_sales_mtd    as _query_fact_sales_mtd,
-    query_whsdd             as _query_whsdd,
-    query_prev_year_same_month,
-)
+# HELPERS
+def valid_store(code):
+    try:    return int(code) <= 500
+    except: return False
 
-def _query_fact_sales_may25(cfg):
-    """Backward-compat shim: original took only `cfg` and read module YEAR/MONTH.
-    New impl takes (cfg, year, month) — wrapper passes current YEAR/MONTH."""
-    return query_prev_year_same_month(cfg, YEAR, MONTH)
+def extract_json(html):
+    marker = 'const D='
+    start  = html.index(marker) + len(marker)
+    depth = 0; i = start
+    while i < len(html):
+        if html[i] == '{':  depth += 1
+        elif html[i] == '}':
+            depth -= 1
+            if depth == 0: end = i + 1; break
+        i += 1
+    return json.loads(html[start:end]), start, end
+
+def safe_pct(num, denom, decimals=1):
+    try:    return round(num / denom * 100, decimals) if denom else None
+    except: return None
+
+def safe_yoy(new_val, old_val, decimals=1):
+    try:    return round((new_val / old_val - 1) * 100, decimals) if old_val else None
+    except: return None
 
 def _load_db_config():
     if not os.path.exists(DB_CONFIG_FILE):
@@ -74,7 +82,208 @@ def _load_db_config():
     with open(DB_CONFIG_FILE, encoding='utf-8') as f:
         return json.load(f)
 
-# MySQL query functions removed — now imported from dashboards.mysql_queries above.
+def _query_returns_mtd(cfg, year, month):
+    """Query fact_returns for MTD return amount per store.
+    Returns (store_ret_dict, total_amt, total_bills, max_day)."""
+    import mysql.connector
+    next_mo = (f'{int(year)+1}-01-01' if int(month) == 12
+               else f'{year}-{int(month)+1:02d}-01')
+    conn = mysql.connector.connect(
+        host=cfg['host'], port=cfg.get('port', 3306),
+        user=cfg['user'], password=cfg['password'],
+        database=cfg.get('database', 'data-lake'),
+        connection_timeout=30, charset='utf8mb4'
+    )
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT warehouse_code AS whs,
+               SUM(allocated_net_amount) AS ret_amount,
+               COUNT(DISTINCT rtsono)    AS ret_bills,
+               MAX(DAY(return_date))     AS max_day
+        FROM fact_returns
+        WHERE rtstatus = 'U'
+          AND return_date BETWEEN %s AND CURDATE()
+          AND warehouse_code NOT IN ('901', '999')
+        GROUP BY warehouse_code
+    """, (f'{year}-{month}-01',))
+    rows = cursor.fetchall()
+    cursor.close(); conn.close()
+    result = {}; total_amt = 0.0; total_bills = 0; max_day = 0
+    for r in rows:
+        raw = str(r['whs'] or '').strip()
+        if not raw: continue
+        amt   = float(r['ret_amount'] or 0)
+        bills = int(r['ret_bills']   or 0)
+        d     = int(r['max_day']     or 0)
+        total_amt += amt; total_bills += bills
+        if d > max_day: max_day = d
+        result[raw] = amt
+        try: result[str(int(raw))]  = amt
+        except: pass
+        try: result[raw.zfill(3)]   = amt
+        except: pass
+    return result, total_amt, total_bills, max_day
+
+def _query_txn_mtd(cfg, year, month):
+    """Query fact_sales for distinct SO count per store MTD (transaction count).
+    fact_sales columns: sotowhs (store), sodate (date), solinetype, sono (order no)."""
+    import mysql.connector
+    conn = mysql.connector.connect(
+        host=cfg['host'], port=cfg.get('port', 3306),
+        user=cfg['user'], password=cfg['password'],
+        database=cfg.get('database', 'data-lake'),
+        connection_timeout=30, charset='utf8mb4'
+    )
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT sotowhs AS whs,
+               COUNT(DISTINCT sono) AS txn_count
+        FROM fact_sales
+        WHERE sodate >= %s AND sodate < %s
+          AND solinetype NOT IN ('C', 'R')
+          AND sotowhs NOT IN ('901', '999', '0901', '0999')
+        GROUP BY sotowhs
+    """, (f'{year}-{month}-01',
+          f'{int(year)+1}-01-01' if int(month) == 12 else f'{year}-{int(month)+1:02d}-01'))
+    rows = cursor.fetchall()
+    cursor.close(); conn.close()
+    # Return both raw and padded keys so whichever format the dashboard uses will match
+    result = {}
+    for r in rows:
+        raw = str(r['whs'] or '').strip()
+        if not raw: continue
+        cnt = int(r['txn_count'] or 0)
+        result[raw] = cnt
+        try: result[str(int(raw))] = cnt   # unpadded e.g. '1'
+        except: pass
+        try: result[raw.zfill(3)] = cnt    # padded   e.g. '001'
+        except: pass
+    return result
+
+def _query_fact_sales_may25(cfg):
+    """Query fact_sales for full previous-year same-month per store.
+    Used to set authoritative s25_may (YoY baseline) from fact_sales instead of whsddpact.
+    NOTE: name kept 'may25' for backward compat; query is dynamic (YEAR-1, current MONTH)."""
+    import mysql.connector
+    _y_prev = int(YEAR) - 1
+    _m_cur  = int(MONTH)
+    conn = mysql.connector.connect(
+        host=cfg['host'], port=cfg.get('port', 3306),
+        user=cfg['user'], password=cfg['password'],
+        database=cfg.get('database', 'data-lake'),
+        connection_timeout=60, charset='utf8mb4'
+    )
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute(f"""
+        SELECT sotowhs AS whs,
+               SUM(net_sales_amt)   AS sales25,
+               COUNT(DISTINCT sono) AS txn25
+        FROM fact_sales
+        WHERE YEAR(sodate) = {_y_prev} AND MONTH(sodate) = {_m_cur}
+          AND solinetype NOT IN ('C', 'R')
+          AND sotowhs REGEXP '^[0-9]+$'
+          AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
+        GROUP BY sotowhs
+    """)
+    rows = cursor.fetchall()
+    cursor.close(); conn.close()
+    result = {}
+    for r in rows:
+        raw = str(r['whs'] or '').strip()
+        if not raw: continue
+        entry = {
+            's25':  float(r['sales25'] or 0),
+            'txn25': int(r['txn25']   or 0),
+        }
+        result[raw] = entry
+        try: result[str(int(raw))] = entry
+        except: pass
+        try: result[raw.zfill(3)] = entry
+        except: pass
+    return result
+
+
+def _query_fact_sales_mtd(cfg, year, month, days_elapsed):
+    """Query fact_sales directly for MTD net_sales_amt + total_cost per store.
+    This is the authoritative sales source — matches the mobile app exactly.
+    Also returns the actual max day found in fact_sales (may lag DAYS_ELAPSED by ~3 days)."""
+    import mysql.connector
+    conn = mysql.connector.connect(
+        host=cfg['host'], port=cfg.get('port', 3306),
+        user=cfg['user'], password=cfg['password'],
+        database=cfg.get('database', 'data-lake'),
+        connection_timeout=60, charset='utf8mb4'
+    )
+    cursor = conn.cursor(dictionary=True)
+    end_date = f'{year}-{month}-{int(days_elapsed):02d}'
+    cursor.execute("""
+        SELECT sotowhs AS whs,
+               SUM(net_sales_amt)          AS sales_amt,
+               SUM(COALESCE(total_cost,0)) AS cost_amt,
+               COUNT(DISTINCT sono)        AS txn_count,
+               MAX(DAY(sodate))            AS max_day_seen
+        FROM fact_sales
+        WHERE sodate BETWEEN %s AND %s
+          AND solinetype NOT IN ('C', 'R')
+          AND sotowhs REGEXP '^[0-9]+$'
+          AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
+        GROUP BY sotowhs
+    """, (f'{year}-{month}-01', end_date))
+    rows = cursor.fetchall()
+    cursor.close(); conn.close()
+    result = {}; fact_max_day = 0
+    for r in rows:
+        raw = str(r['whs'] or '').strip()
+        if not raw: continue
+        d = int(r.get('max_day_seen') or 0)
+        if d > fact_max_day: fact_max_day = d
+        entry = {
+            'sales': float(r['sales_amt'] or 0),
+            'cost':  float(r['cost_amt']  or 0),
+            'txn':   int(r['txn_count']   or 0),
+        }
+        result[raw] = entry
+        try: result[str(int(raw))] = entry
+        except: pass
+        try: result[raw.zfill(3)] = entry
+        except: pass
+    return result, fact_max_day
+
+
+def _query_whsdd(cfg, year, month):
+    """Query MYPOS2018_CENTER.whsdd for daily store targets + actuals.
+    Returns list of dicts with normalised string values (same shape as target.txt rows)."""
+    import mysql.connector
+    conn = mysql.connector.connect(
+        host=cfg['host'], port=cfg.get('port', 3306),
+        user=cfg['user'], password=cfg['password'],
+        connection_timeout=30, charset='utf8mb4'
+    )
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT whsddno, whsddyyyy, whsddmm, whsdddd,
+               whsddptar, whsddpact,
+               whsddpnetamt, whsddpnetcost
+        FROM MYPOS2018_CENTER.whsdd
+        WHERE whsddyyyy = %s AND whsddmm = %s
+    """, (int(year), int(month)))
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    result = []
+    for r in rows:
+        result.append({
+            'whsddno':       str(r['whsddno']),
+            'whsddyyyy':     str(r['whsddyyyy']),
+            'whsddmm':       str(r['whsddmm']).zfill(2),
+            'whsdddd':       str(r['whsdddd']).zfill(2),
+            'whsddptar':     float(r.get('whsddptar')  or 0),
+            'whsddpact':     float(r.get('whsddpact')  or 0),
+            'whsddpnetamt':  float(r.get('whsddpnetamt')  or 0),
+            'whsddpnetcost': float(r.get('whsddpnetcost') or 0),
+            'whsddtotdoc':   0,   # not in whsdd — txn count comes from fact_sales
+        })
+    return result
 
 # ARGUMENTS
 parser = argparse.ArgumentParser()

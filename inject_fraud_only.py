@@ -136,40 +136,41 @@ for mo, md in fd.get('data', {}).items():
         'reason':   md.get('reason', []),
     }
 
+# Template uses raw field names (n, n_rtu, n_so_dup, etc.) + D.sr + D.sr_count
+_sr = fd.get('sr', fd.get('store_risk', []))
+_sr_count = {
+    'H': sum(1 for s in _sr if s.get('level') == 'HIGH'),
+    'M': sum(1 for s in _sr if s.get('level') == 'MEDIUM'),
+    'L': sum(1 for s in _sr if s.get('level') == 'LOW'),
+}
 new_D = {
-    'generated':  fd.get('gen', fd.get('generated', '')),
-    'months':     fd.get('months', []),
-    'data':       new_data,
-    'store_risk': fd.get('sr', fd.get('store_risk', [])),
+    # afaa0d5 template (restored 2026-06-03) reads D.generated, D.data[mo] with
+    # LONG field names (new_data), and D.store_risk. Keep short-name aliases too
+    # for backward-compat with any older template build.
+    'generated': fd.get('gen', fd.get('generated', '')),
+    'gen':       fd.get('gen', fd.get('generated', '')),
+    'months':    fd.get('months', []),
+    'data':      new_data,            # renamed LONG-name fields (template JS needs these)
+    'store_risk': _sr,
+    'sr':        _sr,
+    'sr_count':  _sr_count,
 }
 new_D_json = json.dumps(new_D, ensure_ascii=False, separators=(',', ':'))
 print(f'      JSON blob size: {len(new_D_json):,} chars')
 
 # --- Inject into HTML ---
-print('[2/4] Reading fraud_dashboard.html ...')
-with open(FRAUD_FILE, encoding='utf-8') as f:
+FRAUD_TMPL = os.path.join(FOLDER, 'fraud_analysis_template.html')
+print('[2/4] Building fraud_dashboard.html from template ...')
+if not os.path.exists(FRAUD_TMPL):
+    print('ERROR: fraud_analysis_template.html not found')
+    raise SystemExit(1)
+with open(FRAUD_TMPL, encoding='utf-8') as f:
     html = f.read()
-print(f'      HTML size: {len(html):,} chars')
-
-MARKER = 'const D = {'
-if MARKER not in html:
-    print('ERROR: marker "const D = {" not found in fraud_dashboard.html')
+if 'PLACEHOLDER_DATA' not in html:
+    print('ERROR: PLACEHOLDER_DATA marker not found in template')
     raise SystemExit(1)
-
-d_start = html.index(MARKER) + len('const D = ')
-# Use json.JSONDecoder for accurate block boundary (handles { } inside strings)
-import json as _json
-try:
-    _decoder = _json.JSONDecoder()
-    _obj, _end_offset = _decoder.raw_decode(html, d_start)
-    d_end = _end_offset
-except _json.JSONDecodeError as e:
-    print(f'ERROR: Could not parse D block as JSON: {e}')
-    raise SystemExit(1)
-
-print(f'      Found D block at [{d_start}:{d_end}]')
-html = html[:d_start] + new_D_json + html[d_end:]
-print(f'      New HTML size: {len(html):,} chars')
+html = html.replace('PLACEHOLDER_DATA', new_D_json)
+print(f'      Template size: {os.path.getsize(FRAUD_TMPL):,} | JSON: {len(new_D_json):,} | Total: {len(html):,} chars')
 
 # --- Update nav-date badge (e.g. "28 พ.ค. 2569 · วัน 1–27") ---
 import re as _re
@@ -231,7 +232,6 @@ try:
         print('      GitHub push OK')
 except subprocess.CalledProcessError as e:
     print(f'      Git error: {e}')
-    print(f'      stderr: {e.stderr}')
 except Exception as e:
     print(f'      Push failed: {e}')
 finally:

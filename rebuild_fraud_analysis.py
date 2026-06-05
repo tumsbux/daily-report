@@ -80,7 +80,7 @@ def _mysql_conn(cfg):
         charset='utf8mb4'
     )
 
-def _query_returns_full(cfg, months_back=3):
+def _query_returns_full(cfg, months_back=4):
     """
     Single JOIN: fact_returns + dim_branch + dim_item_barcode + dim_product.
     Returns enriched DataFrame — store_name, dm, rm, parcode, idesc pre-filled.
@@ -575,8 +575,9 @@ def build_month(sub, barmap=None, prodmap=None):
     """Build all aggregations for one month (or ALL). barmap/prodmap ignored."""
     sub = sub.copy()
 
-    # Repeat SO (bills with >1 line)
-    so = sub.groupby('rtsono').agg(
+    # All return bills (per rtsono). The Return Bill table shows EVERY bill.
+    # so_dup (>1 line) is kept separately for the Repeat-SO fraud-signal stats.
+    so_all = sub.groupby('rtsono').agg(
         lines=('rtno', 'count'), amount=('amount', 'sum'),
         cashier=('rtuname', 'first'), fname=('fullname', 'first'),
         store=('whs', 'first'), store_name=('store_name', 'first'),
@@ -584,11 +585,18 @@ def build_month(sub, barmap=None, prodmap=None):
         zero=('is_zero', 'sum'), date=('return_date', 'first'),
         time=('rttime', 'first'),
     ).reset_index()
-    so = so[so['lines'] > 1].sort_values('amount', ascending=False)
+    so_dup = so_all[so_all['lines'] > 1]                  # >1 line — Fraud Signals stat only
+    so = so_all.sort_values('amount', ascending=False)    # ALL bills — Return Bill table
+    # Convert date (datetime64 → 'dd-mm-yyyy') before JSON serialization
+    if 'date' in so.columns and pd.api.types.is_datetime64_any_dtype(so['date']):
+        so = so.copy()
+        so['date'] = so['date'].dt.strftime('%d-%m-%Y')
+    so_list = json.loads(so.fillna('?').to_json(orient='records', date_format='iso', force_ascii=False))
 
-    # Product detail per rtsono
+    # Product detail per rtsono — for every bill shown (all of them, no cap)
+    _shown = {r.get('rtsono') for r in so_list}
     detail_map = (
-        sub[sub['rtsono'].isin(so['rtsono'])]
+        sub[sub['rtsono'].isin(_shown)]
         .groupby(['rtsono', 'iprod'])
         .agg(amount=('amount', 'sum'), return_qty=('return_qty', 'sum'),
              parcode=('parcode', 'first'), idesc=('idesc', 'first'))
@@ -607,11 +615,6 @@ def build_month(sub, barmap=None, prodmap=None):
                 'amt':     round(float(row['amount']), 2),
             })
         detail_dict[sono] = items
-    # Convert date (datetime64 → 'dd-mm-yyyy') before JSON serialization
-    if 'date' in so.columns and pd.api.types.is_datetime64_any_dtype(so['date']):
-        so = so.copy()
-        so['date'] = so['date'].dt.strftime('%d-%m-%Y')
-    so_list = json.loads(so.fillna('?').to_json(orient='records', date_format='iso', force_ascii=False))
     for r in so_list:
         r['detail'] = detail_dict.get(r.get('rtsono'), [])
 
@@ -670,8 +673,8 @@ def build_month(sub, barmap=None, prodmap=None):
             'n_store':    int(sub['whs'].nunique()),
             'n_zero':     int(sub['is_zero'].sum()),
             'zero_amt':   za,
-            'n_so_dup':   int(len(so)),
-            'so_dup_amt': float(so['amount'].sum()),
+            'n_so_dup':   int(len(so_dup)),
+            'so_dup_amt': float(so_dup['amount'].sum()),
             'night_amt':  na,
         },
         'rtu':     _rec(rtu.head(600)),
@@ -680,7 +683,7 @@ def build_month(sub, barmap=None, prodmap=None):
         'rm':      _rec(rm),
         'hour':    _rec(hr),
         'day':     _rec(dy),
-        'so':      so_list[:500],
+        'so':      so_list,
         'product': _build_product_agg(sub),
         'reason':  _build_reason_agg(sub),
     }
@@ -717,13 +720,6 @@ def main():
     print('[2/4] Loading returns (MySQL JOIN) ...')
     df = load_returns(umap)
     months = sorted(df['month'].dropna().unique())
-    # Exclude current partial month if we're within first 6 days
-    from datetime import date as _date
-    _today = _date.today()
-    _cur_mo = _today.strftime('%Y-%m')
-    if _today.day <= 6 and _cur_mo in months:
-        months = [m for m in months if m != _cur_mo]
-        print(f'      [skip] Excluded partial month {_cur_mo} (day {_today.day} <= 6)')
     print(f'      {len(df):,} rows | {df["rtsono"].nunique():,} bills | '
           f'months: {", ".join(months)}')
 

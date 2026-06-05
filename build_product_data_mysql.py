@@ -23,8 +23,10 @@ OUT_JSON       = os.path.join(FOLDER, 'product_data.json')
 DB_CONFIG_FILE = os.path.join(FOLDER, 'db_config.json')
 PUSH           = True  # overridden by argparse in main()
 
-YEAR26, MONTH = 2026, 6  # auto-detect from today
-YEAR25        = 2025
+# Auto-detect current month from today (fixed 2026-06-05: previously hardcoded)
+_today = date.today()
+YEAR26, MONTH = _today.year, _today.month
+YEAR25        = YEAR26 - 1
 
 # ── store filter: numeric code ≤ 500, exclude warehouse codes ─────────────────
 STORE_FILTER = """
@@ -247,15 +249,16 @@ def query_store_sales_may26(conn, days_elapsed):
 # ── STEP 2d: Sales breakdown by solinetype ────────────────────────────────────
 def query_sales_by_linetype(conn, days_elapsed):
     """Returns [{solinetype, sales, qty, bills}] for all stores 1-500."""
-    end_date = f'{YEAR26}-{MONTH:02d}-{days_elapsed:02d}'
     sql = f"""
         SELECT
-            solinetype,
+            IFNULL(solinetype, 'unknown') AS solinetype,
             ROUND(SUM(net_sales_amt)) AS sales,
             ROUND(SUM(net_qty))       AS qty,
             COUNT(DISTINCT sono)      AS bills
         FROM fact_sales
-        WHERE sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date}'
+        WHERE YEAR(sodate) = {YEAR26} AND MONTH(sodate) = {MONTH}
+          AND DAY(sodate) <= {days_elapsed}
+          AND solinetype NOT IN ('C', 'R')
           AND sotowhs REGEXP '^[0-9]+$'
           AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
         GROUP BY solinetype
