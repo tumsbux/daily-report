@@ -163,7 +163,7 @@ tbody tr:hover{background:#f8f9ff}
 <div id="lt-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999;align-items:center;justify-content:center;padding:8px">
   <div class="lt-box">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:8px">
-      <h3 style="margin:0;color:#e2e8f0;font-size:15px;line-height:1.3">📋 ยอดขายตาม solinetype<br><span style="font-size:11px;color:#94a3b8;font-weight:400">พ.ค. 2026 · stores 1–500</span></h3>
+      <h3 style="margin:0;color:#e2e8f0;font-size:15px;line-height:1.3">📋 ยอดขายตาม solinetype<br><span style="font-size:11px;color:#94a3b8;font-weight:400"><span id="lt-modal-month">—</span> · stores 1–500</span></h3>
       <button onclick="document.getElementById('lt-modal').style.display='none'" style="background:none;border:none;color:#94a3b8;font-size:22px;cursor:pointer;flex-shrink:0">✕</button>
     </div>
     <div style="overflow-x:auto">
@@ -188,7 +188,7 @@ tbody tr:hover{background:#f8f9ff}
   <!-- SUMMARY -->
   <div class="sum-row">
     <div class="sc" style="border-color:#6366f1">
-      <div class="sc-lbl">ยอดขาย พ.ค.26</div>
+      <div class="sc-lbl">ยอดขาย <span id="s-sales-label-mo">—</span></div>
       <div class="sc-val" id="s-sales">—</div>
       <div class="sc-sub" id="s-sales-yoy"></div>
     </div>
@@ -312,6 +312,15 @@ const PAGE_SIZE=50;
 let filteredProds=[];
 const tblSortState={};
 
+// ── DYNAMIC MONTH LABELS (added 2026-06-05 — replaces hardcoded "พ.ค.") ───────
+const _TH_MO_S=['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+const _NOW=new Date();
+const _CUR_M=_NOW.getMonth()+1;                 // 1-12
+const _CUR_Y=_NOW.getFullYear();                // 2026
+const _MTH_LABEL_26      =_TH_MO_S[_CUR_M]+' '+_CUR_Y;                  // "มิ.ย. 2026"
+const _MTH_LABEL_26_SHORT=_TH_MO_S[_CUR_M]+String(_CUR_Y).slice(-2);    // "มิ.ย.26"
+const _MTH_LABEL_25_SHORT=_TH_MO_S[_CUR_M]+String(_CUR_Y-1).slice(-2);  // "มิ.ย.25"
+
 // ── FORMAT ────────────────────────────────────────────────────────────────────
 const fmt  = n => n==null?'—':Math.round(n).toLocaleString('th-TH');
 const fmtM = n => {
@@ -335,6 +344,9 @@ function init(){
   document.getElementById('nav-month').textContent=D.month26||'';
   document.getElementById('nav-sku').textContent=(D.products||[]).length.toLocaleString()+' SKU';
   document.getElementById('nav-date').textContent='อัปเดต: '+(D.generated||'');
+  // Dynamic month labels (2026-06-05) — keeps card/modal in sync with current month
+  const _e1=document.getElementById('lt-modal-month');     if(_e1)_e1.textContent=_MTH_LABEL_26;
+  const _e2=document.getElementById('s-sales-label-mo');   if(_e2)_e2.textContent=_MTH_LABEL_26_SHORT;
   buildFilters();
   applyAll();
 }
@@ -586,13 +598,13 @@ function renderSummary(prods){
   const sYoy=s25?(s26/s25-1)*100:null;
   const qYoy=q25?(q26/q25-1)*100:null;
   document.getElementById('s-sales').textContent=fmtM(s26);
-  document.getElementById('s-sales-yoy').innerHTML=s25?`พ.ค.25: ${fmtM(s25)} ${yoyBadge(sYoy)}`:'';
+  document.getElementById('s-sales-yoy').innerHTML=s25?`${_MTH_LABEL_25_SHORT}: ${fmtM(s25)} ${yoyBadge(sYoy)}`:'';
   document.getElementById('s-gp').textContent=fmtM(gp26);
   document.getElementById('s-gp-pct').textContent='GP% = '+gpPct.toFixed(1)+'%';
   document.getElementById('s-cost').textContent=fmtM(c26);
   document.getElementById('s-cost-pct').textContent='Cost% = '+cPct.toFixed(1)+'%';
   document.getElementById('s-qty').textContent=fmt(q26);
-  document.getElementById('s-qty-yoy').innerHTML=q25?`พ.ค.25: ${fmt(q25)} ${yoyBadge(qYoy)}`:'';
+  document.getElementById('s-qty-yoy').innerHTML=q25?`${_MTH_LABEL_25_SHORT}: ${fmt(q25)} ${yoyBadge(qYoy)}`:'';
   document.getElementById('s-sku').textContent=prods.length.toLocaleString();
   document.getElementById('s-sku-sub').textContent=`จาก ${(D.products||[]).length.toLocaleString()} SKU ทั้งหมด`;
 }
@@ -738,25 +750,26 @@ function sortStatic(tblId,col,th){
   const tbl=document.getElementById(tblId);
   const tbody=tbl.querySelector('tbody');
   const rows=[...tbody.querySelectorAll('tr')];
-  const dir=th.dataset.dir==='asc'?-1:1;
+  const state=tblSortState[tblId]||{col:-1,dir:1};
+  const dir=(state.col===col)?-state.dir:(col===0?1:-1);
+  tblSortState[tblId]={col,dir};
+  rows.sort((a,b)=>{
+    const ca=a.cells[col].textContent.trim();
+    const cb=b.cells[col].textContent.trim();
+    const na=parseFloat(ca.replace(/[,%\s]/g,''));
+    const nb=parseFloat(cb.replace(/[,%\s]/g,''));
+    if(!isNaN(na)&&!isNaN(nb)) return (na-nb)*dir;
+    return ca.localeCompare(cb,'th')*dir;
+  });
+  rows.forEach(r=>tbody.appendChild(r));
   tbl.querySelectorAll('th .sa').forEach(s=>s.className='sa');
   const sa=th.querySelector('.sa');
   if(sa) sa.className='sa '+(dir===1?'asc':'desc');
-  th.dataset.dir=dir===1?'asc':'desc';
-  rows.sort((a,b)=>{
-    const va=a.children[col]?.textContent.replace(/[,%+]/g,'').trim()||'';
-    const vb=b.children[col]?.textContent.replace(/[,%+]/g,'').trim()||'';
-    const na=parseFloat(va), nb=parseFloat(vb);
-    if(!isNaN(na)&&!isNaN(nb)) return dir*(na-nb);
-    return dir*va.localeCompare(vb,'th');
-  });
-  rows.forEach(r=>tbody.appendChild(r));
 }
 
 function sortProd(col,th){
   if(prodSortCol===col) prodSortDir*=-1;
   else{ prodSortCol=col; prodSortDir=-1; }
-  if(typeof Analytics!=='undefined')Analytics.sortChanged(col,prodSortDir===1?'asc':'desc');
   document.querySelectorAll('#prod-thead th .sa').forEach(s=>s.className='sa');
   const sa=th.querySelector('.sa');
   if(sa) sa.className='sa '+(prodSortDir===1?'asc':'desc');
@@ -765,4 +778,3 @@ function sortProd(col,th){
 </script>
 </body>
 </html>
-                                                                                                                                                          
