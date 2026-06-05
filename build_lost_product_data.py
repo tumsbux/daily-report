@@ -1,0 +1,252 @@
+"""Builds lost_product_data.json — 6-year sales history per product (2021-2026).
+Identifies LOST products (no 2025+2026 sales) and STALE (no 2026 sales).
+
+Source: data-lake.bld_acc_*_lake (5 tables: 2021, 2022, 2023, 2024, current)
+Output: lost_product_data.json with full year-by-year qty grid + status + lost_score.
+"""
+import json, os, sys, warnings
+from datetime import date
+import mysql.connector
+import pandas as pd
+
+warnings.filterwarnings('ignore', category=UserWarning, module='pandas')
+
+FOLDER   = os.path.dirname(os.path.abspath(__file__))
+OUT_JSON = os.path.join(FOLDER, 'lost_product_data.json')
+
+YEAR_TABLES = {
+    2021: 'bld_acc_2021_lake',
+    2022: 'bld_acc_2022_lake',
+    2023: 'bld_acc_2023_lake',
+    2024: 'bld_acc_2024_lake',
+}
+CURRENT_TABLE = 'bld_acc_lake'   # holds 2025 + 2026
+CURRENT_YEAR  = date.today().year
+YEARS         = sorted(list(YEAR_TABLES.keys()) + [2025, CURRENT_YEAR])  # [2021..2026]
+
+
+# ── Connection ───────────────────────────────────────────────────────────────
+def _load_cfg():
+    try:
+        return json.load(open(os.path.join(FOLDER, 'db_config.json'), encoding='utf-8'))
+    except FileNotFoundError:
+        return None
+
+def _conn(cfg, db='data-lake'):
+    return mysql.connector.connect(
+        host=cfg['host'], port=cfg.get('port', 3306),
+        user=cfg['user'], password=cfg['password'],
+        database=db,
+    )
+
+
+# ── STEP 1: Per-year qty aggregation ─────────────────────────────────────────
+def query_year(conn, table, where_year=None):
+    """Returns {parcode: qty} for one year of sales.
+    If where_year given, also adds AND YEAR(sodate)=where_year (used for CURRENT_TABLE)."""
+    year_filter = f"AND YEAR(sodate) = {where_year}" if where_year else ""
+    sql = f"""
+        SELECT parcode, SUM(soqty) AS qty
+        FROM `{table}`
+        WHERE solinetype NOT IN ('C', 'R')
+          {year_filter}
+        GROUP BY parcode
+        HAVING qty > 0
+    """
+    df = pd.read_sql(sql, conn)
+    return dict(zip(df['parcode'].astype(str), df['qty'].astype(float)))
+
+
+# ── STEP 2: Name lookup (dim_product + dim_item_barcode bridge) ──────────────
+def query_name_map(conn, parcode_set):
+    """Lookup product name/brand/group from dim_product.
+    parcode in bld_acc usually = barcode → bridge via dim_item_barcode.
+    Some may match dim_product.iprod directly. Try both."""
+    if not parcode_set:
+        return {}
+    pl = list(parcode_set)
+    BATCH = 2000
+    result = {}
+    cur = conn.cursor(dictionary=True)
+
+    # 1) Direct match in dim_product
+    for i in range(0, len(pl), BATCH):
+        batch = pl[i:i+BATCH]
+        ph = ','.join(['%s'] * len(batch))
+        cur.execute(f"""
+            SELECT iprod, idesc AS name, brndesc AS brand,
+                   igrdesc AS grp, itydesc AS type_desc, ipunit3
+            FROM dim_product
+            WHERE iprod IN ({ph})
+        """, batch)
+        for r in cur.fetchall():
+            result[r['iprod']] = {
+                'iprod':   r['iprod'],
+                'name':    r['name']      or '',
+                'brand':   r['brand']     or '',
+                'group':   r['grp']       or 'ไม่ระบุ',
+                'type':    r['type_desc'] or '',
+                'ipunit3': float(r['ipunit3'] or 0),
+            }
+
+    # 2) Barcode bridge for the rest
+    missing = [p for p in pl if p not in result]
+    for i in range(0, len(missing), BATCH):
+        batch = missing[i:i+BATCH]
+        ph = ','.join(['%s'] * len(batch))
+        cur.execute(f"""
+            SELECT dib.barcode AS parcode, dp.iprod, dp.idesc AS name,
+                   dp.brndesc AS brand, dp.igrdesc AS grp,
+                   dp.itydesc AS type_desc, dp.ipunit3
+            FROM dim_item_barcode dib
+            JOIN dim_product dp ON dp.iprod = dib.parcode
+            WHERE dib.barcode IN ({ph})
+              AND dib.baractive = 'Y'
+        """, batch)
+        for r in cur.fetchall():
+            result[r['parcode']] = {
+                'iprod':   r['iprod'],
+                'name':    r['name']      or '',
+                'brand':   r['brand']     or '',
+                'group':   r['grp']       or 'ไม่ระบุ',
+                'type':    r['type_desc'] or '',
+                'ipunit3': float(r['ipunit3'] or 0),
+            }
+    cur.close()
+    return result
+
+
+# ── STEP 3: Compute status + lost_score ──────────────────────────────────────
+def classify(qty_by_year):
+    """Returns (status, last_year, years_gone, lost_score)."""
+    active = [y for y in YEARS if qty_by_year[y] > 0]
+    if not active:
+        return None, None, None, 0
+    last_year = max(active)
+    years_gone = CURRENT_YEAR - last_year
+    max_qty = max(qty_by_year.values())
+
+    # User's rule: LOST = no 2025 AND no 2026 sales
+    if qty_by_year[CURRENT_YEAR] > 0:
+        status = 'ACTIVE'
+        lost_score = 0
+    elif qty_by_year[CURRENT_YEAR - 1] > 0:
+        status = 'STALE'
+        lost_score = max_qty  # potential 1-year loss
+    else:
+        status = 'LOST'
+        # Recent biggest sellers gone → highest score
+        lost_score = years_gone * max_qty
+
+    return status, last_year, years_gone, round(lost_score)
+
+
+# ── MAIN ─────────────────────────────────────────────────────────────────────
+def main():
+    cfg = _load_cfg()
+    if not cfg:
+        print('ERROR: db_config.json not found'); return
+    conn = _conn(cfg)
+    print('Connected to data-lake @ ' + cfg['host'])
+    print('=' * 60)
+    print(f'  Lost Product Builder — years {YEARS[0]}..{YEARS[-1]}')
+    print('=' * 60)
+
+    # Per-year aggregation
+    year_qty = {}
+    for year, table in YEAR_TABLES.items():
+        print(f'[{year}] querying {table} ...')
+        year_qty[year] = query_year(conn, table)
+        print(f'  {len(year_qty[year]):,} parcodes, total qty={sum(year_qty[year].values()):,.0f}')
+
+    # Current table partitioned by year (2025, 2026)
+    for year in [2025, CURRENT_YEAR]:
+        print(f'[{year}] querying {CURRENT_TABLE} WHERE YEAR(sodate)={year} ...')
+        year_qty[year] = query_year(conn, CURRENT_TABLE, where_year=year)
+        print(f'  {len(year_qty[year]):,} parcodes, total qty={sum(year_qty[year].values()):,.0f}')
+
+    # Master parcode set
+    all_parcodes = set()
+    for yq in year_qty.values():
+        all_parcodes.update(yq.keys())
+    print(f'\nTotal unique parcodes across all years: {len(all_parcodes):,}')
+
+    # Name lookup
+    print('Resolving names from dim_product ...')
+    name_map = query_name_map(conn, all_parcodes)
+    print(f'  Names resolved: {len(name_map):,}/{len(all_parcodes):,}')
+    conn.close()
+
+    # Build product list
+    products = []
+    for parcode in all_parcodes:
+        qty_by_year = {y: round(float(year_qty[y].get(parcode, 0))) for y in YEARS}
+        status, last_year, years_gone, lost_score = classify(qty_by_year)
+        if status is None:
+            continue
+        info = name_map.get(parcode, {})
+        active_years = [y for y in YEARS if qty_by_year[y] > 0]
+        first_year = min(active_years)
+        total_qty = sum(qty_by_year.values())
+        max_qty = max(qty_by_year.values())
+
+        products.append({
+            'parcode':     parcode,
+            'iprod':       info.get('iprod', parcode),
+            'name':        info.get('name', '')[:50],
+            'brand':       info.get('brand', '')[:25],
+            'group':       info.get('group', 'ไม่ระบุ')[:30],
+            'type':        info.get('type', '')[:25],
+            'ipunit3':     round(info.get('ipunit3', 0)),
+            'q2021':       qty_by_year[2021],
+            'q2022':       qty_by_year[2022],
+            'q2023':       qty_by_year[2023],
+            'q2024':       qty_by_year[2024],
+            'q2025':       qty_by_year[2025],
+            'q2026':       qty_by_year[2026],
+            'first_year':  first_year,
+            'last_year':   last_year,
+            'years_active': len(active_years),
+            'years_gone':  years_gone,
+            'total_qty':   total_qty,
+            'max_qty':     max_qty,
+            'status':      status,
+            'lost_score':  lost_score,
+        })
+
+    # Sort by lost_score desc (biggest losses first) then by max_qty
+    products.sort(key=lambda p: (-p['lost_score'], -p['max_qty']))
+
+    n_active = sum(1 for p in products if p['status'] == 'ACTIVE')
+    n_stale  = sum(1 for p in products if p['status'] == 'STALE')
+    n_lost   = sum(1 for p in products if p['status'] == 'LOST')
+    qty_lost_last_year = sum(p['max_qty'] for p in products if p['status'] == 'LOST')
+
+    output = {
+        'generated':   date.today().isoformat(),
+        'years':       YEARS,
+        'current_year': CURRENT_YEAR,
+        'summary': {
+            'total_products':       len(products),
+            'active':               n_active,
+            'stale':                n_stale,
+            'lost':                 n_lost,
+            'qty_lost_peak':        qty_lost_last_year,   # peak historical qty of LOST products
+        },
+        'products':    products,
+    }
+
+    with open(OUT_JSON, 'w', encoding='utf-8') as f:
+        json.dump(output, f, ensure_ascii=False, separators=(',', ':'))
+
+    sz = os.path.getsize(OUT_JSON) // 1024
+    print(f'\n[OUT] Saved: {sz} KB | {len(products):,} products')
+    print(f'  ACTIVE: {n_active:,}  STALE: {n_stale:,}  LOST: {n_lost:,}')
+    print(f'  Peak historical qty of LOST products: {qty_lost_last_year:,}')
+    print(f'\nTop 10 LOST by impact:')
+    for p in [x for x in products if x['status']=='LOST'][:10]:
+        print(f'  {p["parcode"]:15} last={p["last_year"]} max_qty={p["max_qty"]:>6,} {p["name"][:40]}')
+
+
+if __name__ == '__main__':
+    main()
