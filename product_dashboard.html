@@ -717,8 +717,8 @@ function renderProdPage(){
       <td class="r">${p.gp_pct!=null?p.gp_pct.toFixed(1)+'%':'—'}</td>
       <td class="r">${fmt(mv)}</td>
       <td class="r">${fmt(mq)}</td>
-      <td class="r">${p.ipunit3||'—'}</td>
       <td class="r">${p.onhand!=null?fmt(p.onhand):'—'}</td>
+      <td class="r">${p.ipunit3||'—'}</td>
       <td class="r ${difQty>=0?'yoy-p':'yoy-n'}">${difQty>=0?'+':''}${fmt(difQty)}</td>
       <td class="r">${yoyBadge(p.s_yoy)}</td>
     </tr>`;

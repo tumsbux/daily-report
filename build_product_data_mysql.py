@@ -104,26 +104,43 @@ def query_product_sales(conn, days_elapsed):
     df['grp']       = df['iprod'].map(lambda x: dim_map.get(x, {}).get('grp', 'ไม่ระบุ'))
     df['type_desc'] = df['iprod'].map(lambda x: dim_map.get(x, {}).get('type', ''))
     df['grp_code']  = df['iprod'].map(lambda x: dim_map.get(x, {}).get('grp_code', ''))
+    df['ipunit3']   = df['iprod'].map(lambda x: dim_map.get(x, {}).get('ipunit3', 0))
     return df
+
+
+def _dim_product_columns(conn):
+    """Return set of column names in dim_product (lowercase)."""
+    cur = conn.cursor()
+    cur.execute("SHOW COLUMNS FROM dim_product")
+    cols = {row[0].lower() for row in cur.fetchall()}
+    cur.close()
+    return cols
 
 
 def _query_dim_product(conn, iprod_list):
     """
-    Resolve product name/group/type for a list of iprods.
+    Resolve product name/group/type/ipunit3 for a list of iprods.
     Handles two cases:
       - iprod matches dim_product.iprod directly
       - iprod is a barcode → look up via dim_item_barcode.parcode → dim_product
-    Returns {iprod: {name, brand, grp, type, grp_code}}
+    Returns {iprod: {name, brand, grp, type, grp_code, ipunit3}}
+    ipunit3 sourced from dim_product (fixed 2026-06-05 — previously from dim_item_barcode where col didn't exist → always 0)
     """
     if not iprod_list:
         return {}
     placeholders = ','.join(['%s'] * len(iprod_list))
+
+    # Detect ipunit3 column (defensive — dim_product schema may vary)
+    dp_cols = _dim_product_columns(conn)
+    ipu3_select = ', ipunit3' if 'ipunit3' in dp_cols else ''
+    has_ipu3    = 'ipunit3' in dp_cols
 
     # Direct lookup in dim_product
     cur = conn.cursor(dictionary=True)
     cur.execute(f"""
         SELECT iprod, idesc AS name, brndesc AS brand,
                igrdesc AS grp, itydesc AS type_desc, igrcode AS grp_code
+               {ipu3_select}
         FROM dim_product
         WHERE iprod IN ({placeholders})
     """, iprod_list)
@@ -135,16 +152,19 @@ def _query_dim_product(conn, iprod_list):
             'grp':      r['grp']      or 'ไม่ระบุ',
             'type':     r['type_desc']or '',
             'grp_code': r['grp_code'] or '',
+            'ipunit3':  float(r['ipunit3'] or 0) if has_ipu3 else 0,
         }
 
     # For iprods not found (barcode-as-iprod), look up via dim_item_barcode
     missing = [x for x in iprod_list if x not in result]
     if missing:
         pm = ','.join(['%s'] * len(missing))
+        bridge_ipu3 = ', dp.ipunit3' if has_ipu3 else ''
         cur.execute(f"""
             SELECT dib.barcode, dp.iprod AS parcode,
                    dp.idesc AS name, dp.brndesc AS brand,
                    dp.igrdesc AS grp, dp.itydesc AS type_desc, dp.igrcode AS grp_code
+                   {bridge_ipu3}
             FROM dim_item_barcode dib
             JOIN dim_product dp ON dp.iprod = dib.parcode
             WHERE dib.barcode IN ({pm}) AND dib.baractive = 'Y'
@@ -156,6 +176,7 @@ def _query_dim_product(conn, iprod_list):
                 'grp':      r['grp']      or 'ไม่ระบุ',
                 'type':     r['type_desc']or '',
                 'grp_code': r['grp_code'] or '',
+                'ipunit3':  float(r['ipunit3'] or 0) if has_ipu3 else 0,
             }
     cur.close()
     return result
@@ -374,7 +395,7 @@ def build_json(df, barcode_map, item_map, store_breakdown, branch_info, days_ela
             'gp26':    round(gp26),
             'gp_pct':  round(gp26/s26*100, 1) if s26 else 0,
             'onhand':  round(info.get('onhand', 0)),
-            'ipunit3': round(info.get('ipunit3', 0)),
+            'ipunit3': round(float(row.get('ipunit3', 0) or 0)),  # from dim_product (fixed 2026-06-05)
         })
 
     # Categories by igrdesc (group)
