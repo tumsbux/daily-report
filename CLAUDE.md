@@ -733,3 +733,96 @@ Each (parcode, whsno) has **3 rows** by (locno, shelfno):
 **Onhand formula:** `SUM(ibl_qty_beg_bal + ibl_qty_rec - ibl_qty_iss) WHERE locno='stock' AND shelfno='shelfno'`
 
 **Partner table `iml`** = movement log (
+
+---
+
+## Session 2026-06-05 (night) — Lost Product dashboard
+
+### New deliverable: Lost Product Analysis page
+
+**Files added/changed:**
+- `build_lost_product_data.py` — NEW. Aggregates 6-year sales history (2021-2026) from `data-lake.bld_acc_*_lake` tables.
+- `lost_product_dashboard.html` — NEW. Tabular view with year columns, status badges, RM/DM/Store filters, XLSX export.
+- `lost_product_data.json` — NEW data file (~55MB, regenerated daily).
+- `index.html` — added nav link + quick-link card.
+- `update_dashboard.py` — added to `push_files` list.
+- `run_manual_update.ps1` — added Lost Product as step 3a.
+
+**Pushed commits (chronological):**
+- `d4b48d6` — feat: initial Lost Product dashboard
+- `5bd7926` — fix: use iprod (not parcode) + sono substring for year filter
+- `a0c6b35` — feat: RM/DM/Store filters + per-store year breakdown
+- `a432930` — fix: restore truncated main() call
+- `880e805` — fix: correct sono substrings + dim_branch column
+
+### Data sources confirmed (verified via probe scripts)
+
+**`data-lake.bld_acc_*_lake` schema:**
+- Tables: `bld_acc_2021_lake`, `bld_acc_2022_lake`, `bld_acc_2023_lake`, `bld_acc_2024_lake`, `bld_acc_lake` (current = 2025+2026)
+- Columns: `sono`, `soserlno`, `iprod`, `soqty`, `sopricunit`, `solineamt`, `solinetype`, `qty`, `retqty`, etc.
+- **No `sodate` column** — date encoded in `sono`
+- **No `parcode` column** — product key is `iprod` (which is barcode-like, joins to `dim_item_barcode.barcode` -> bridge to `dim_product.iprod`)
+
+**`sono` format: `BL{4-digit-store}-YYMMDD-{seq}` (length 18)**
+- Example: `'BL0011-250101-0001'` = store 011 (= 11 zero-padded), date 2025-01-01, seq 0001
+- `SUBSTRING(sono,3,4)` -> store code (e.g. `'0011'` -> cast int = 11 -> format `'011'`)
+- `SUBSTRING(sono,8,2)` -> 2-digit year (e.g. `'25'`)
+- **Trap:** `SUBSTRING(sono,7,2)` hits the dash -> returns `'-2'`. Got bitten by this once.
+- **Trap:** `SUBSTRING(sono,3,3)` truncates to 3 chars (`'001'`) — works for stores 1-9 only, off by 10x for stores 10-500. Got bitten by this too.
+
+**`data-lake.dim_branch` schema:**
+- `code` (varchar 4) — store code, **3-digit zero-padded** (`'001'`, `'002'`, ..., `'500'`)
+- `name`, `dm_code`, `dm`, `rm_code`, `rm`, `prvn_code`, `prvn_name`, `updated_date`, `dump_at`, `wmparwhs`
+- 203 stores total. Used by `query_branch_info()` in builder to populate RM/DM/Store filters.
+
+### Year-filter logic
+- For year-specific tables (`bld_acc_2021_lake` ... `bld_acc_2024_lake`): no filter — table IS that year
+- For current table (`bld_acc_lake` holds 2025+2026): `WHERE SUBSTRING(sono,8,2) = '25'` or `'26'`
+
+### Status rules (chosen by user)
+- **LOST** = no sales in 2025 AND 2026 (had sales somewhere in 2021-2024)
+- **STALE** = has 2025 sales but not 2026
+- **ACTIVE** = has 2026 sales
+- `lost_score = years_gone * max_qty` for ranking (biggest sellers gone longest at top)
+
+### Per-store breakdown
+- `store_breakdown[whs][iprod] = [q2021, q2022, q2023, q2024, q2025, q2026]` (sparse — only nonzero iprods per store)
+- Result: 79 stores × ~10K iprods = 827K (whs,iprod) pairs
+- **Note:** dim_branch has 203 stores but only 79 appear in bld_acc sales (rest are likely warehouses/closed/zero-sale) — TODO verify
+
+### Final build numbers (2026-06-05 night)
+```
+2021: 36,930 iprods | 351K pairs | 31M qty
+2022: 39,765 iprods | 363K pairs | 33M qty
+2023: 38,140 iprods | 361K pairs | 35M qty
+2024: 37,306 iprods | 339K pairs | 39M qty
+2025: 37,357 iprods | 312K pairs | 42M qty
+2026: 30,095 iprods | 225K pairs | 19M qty (partial — through day 4)
+Total: 65,741 unique products
+ACTIVE: 30,095 | STALE: 10,831 | LOST: 24,815
+JSON output: 54MB
+```
+
+### Lessons from this session
+1. **User-stated formats need probe confirmation** — user said "3-digit store" but actual format is 4-digit zero-padded. Always verify with `SUBSTRING(sono,...)` test against real data before assuming.
+2. **Probe scripts saved are reusable** — `probe_dim_branch.py`, `probe_bld_acc_lake.py`, `cols_bld.py`, `probe_sono_and_dim_branch.py` are now in `scripts/explore/` for future column lookups.
+3. **Edit tool truncation strike #7** — `build_lost_product_data.py` got truncated mid-`main()` -> `mai` (no closing parens). Recovery: Python `Path.write_text()` to append the missing call. Confirms the rule: **for any file edit, use Python via Bash, not the Edit tool**.
+4. **PowerShell session pitfall:** opening a fresh terminal in the wrong folder silently fails the file lookups. Always `cd "F:\co work dashboard"` first in any one-liner block.
+
+### Files pushed in `update_dashboard.py` push_files list (current)
+`index.html, sales_dashboard_v8.html, fraud_dashboard.html, fraud_analysis.html, fraud_data.json, product_dashboard.html, product_data.json, lost_product_dashboard.html, lost_product_data.json, analytics.js`
+
+### Explore scripts added this session
+- `scripts/explore/probe_bld_acc_lake.py` — bld_acc_*_lake schema dumper
+- `scripts/explore/probe_dim_branch.py` — dim_branch + sono format verification
+- `scripts/explore/probe_sono_and_dim_branch.py` — first attempt at sono probe (superseded)
+- `scripts/explore/probe_dim_product_cols.py` — dim_product schema (used for ipunit3 fix earlier)
+- `scripts/explore/probe_ipunit3_lookup.py` — ipunit3 source verification
+- `scripts/explore/probe_ipunit3_flow.py` — end-to-end ipunit3 trace
+- `scripts/explore/cols_bld.py` — minimal column dumper
+
+### Queued for next session
+- Verify `79 stores in store_breakdown` is correct (vs 203 in dim_branch) — possibly need to check non-BL sono prefixes (WB? BC?) or whether dim_branch includes non-POS warehouses
+- Phase B: Days-until-OOS column on product_dashboard
+- Phase C: Dead Stock report (no sale >90d + onhand >0)
+- Phase D: Visual Adjustment audit (`ibl_locno='visual'`) — fraud signal
