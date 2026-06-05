@@ -695,6 +695,22 @@ Header order: col 11 = `Onhand`, col 12 = `ipunit3`. Cell render order was rever
 
 **JSON regen required:** Bug 2 fix only takes effect after `build_product_data_mysql.py` runs against MySQL. Sandbox cannot reach `203.154.83.62:13306` — Windows must run it (manual: `py build_product_data_mysql.py --no-push` then re-push, or wait for next 08:30 BKK cron). Bug 1 (HTML cell swap) takes effect immediately on next browser load — onhand values already in JSON will now appear under correct header.
 
+### Session 2026-06-05 (late evening) — ONHAND/IPUNIT3 follow-through
+
+**Commits pushed:**
+- `baba317` — fix(product): swap onhand/ipunit3 cells + source ipunit3 from dim_product
+- `b12a7cb` — data: regen product_data.json with ipunit3 from dim_product (13,074/13,077 nonzero)
+- `d15d8e4` — fix(product): aggregate onhand across all stores when scope=ALL
+
+**Bug 3 (d15d8e4):** When no RM/DM/store filter is active, the ONHAND column was showing 0 chain-wide because `wProds=prods` falls back to `p.onhand` from `dim_item_barcode` (which has no onhand column → always 0). Real onhand is in `store_breakdown[whs][iprod][2]` (from MyWMS ibl). **Fix:** in `product_dashboard.html` `if(!scopeStores)` branch, precompute `ohTot[iprod]` by summing `arr[2]` across all stores, then `wProds=prods.map(p=>({...p, onhand: ohTot[p.iprod]||0}))`. Store-filtered scope already did this correctly via aggMap.
+
+**Timing trap that wasted 30 min:** User regenerated JSON at 11:23 UTC, but my code edits weren't fully landed on disk until 11:30 UTC. JSON had ipunit3=0 not because code was wrong but because regen ran with partial edits. Probes confirmed code worked. Lesson: **after editing scripts via Cowork Edit tool, wait until all edits land + verify file mtime BEFORE telling user to regen.**
+
+**Edit-tool truncation strike #6 this session:** Editing `product_dashboard.html` (40KB) silently truncated the file from 40KB → 39627 bytes with no `</html>`. No null bytes this time — just plain truncation mid-`.forEach(...)`. Recovery: `cp /tmp/check_pushed/product_dashboard.html F:\co work dashboard\` (restore from GH clone), then re-apply via Python `Path.write_text()` instead of Edit tool. **New rule: for any HTML/JS file edit >20KB, use Python via Bash, not the Edit tool.**
+
+### Phase B/C/D — still queued for next session
+(see earlier section)
+
 ---
 
 ### MyWMS Database Knowledge (added 2026-06-05)
@@ -716,24 +732,4 @@ Each (parcode, whsno) has **3 rows** by (locno, shelfno):
 
 **Onhand formula:** `SUM(ibl_qty_beg_bal + ibl_qty_rec - ibl_qty_iss) WHERE locno='stock' AND shelfno='shelfno'`
 
-**Partner table `iml`** = movement log (before/after balances per event) · `iml_lake` in data-lake schema is ETL view
-
----
-
-### Lessons learned (session 2026-06-05)
-
-1. **Edit tool truncation/null-padding bug struck 5+ times** in this session. Pattern: Edit returns success, file size preserved, but tail gets silently cut (or padded with null bytes). Affected: `update_dashboard.py`, `product_dashboard.html`, `CLAUDE.md`, `push_scripts_to_github.bat`, `build_product_data_mysql.py`.
-   - **Workaround:** After ANY Edit on file >20KB, verify via bash: `python3 -c "d=open('f','rb').read(); print('size:',len(d),'tail:',d[-50:])"`. Tail must match expected end (`</html>`, `main()`, etc.). If truncated/padded, reconstruct via Python `open('f','wb').write(...)`.
-2. **`web_fetch` returns cached/stale content** for raw.githubusercontent.com - don't trust it for verifying just-pushed content. Use `git clone` instead.
-3. **GitHub push pitfalls in `push_scripts_to_github.bat`:**
-   - Sparse checkout + LF/CRLF interaction caused silent "nothing to commit" - fix: full clone + `git config core.autocrlf false`
-   - `git add data-lake_fact_*.sql` caused `fatal: Out of memory, realloc failed` - fix: skip SQL adds entirely, not needed for pipeline
-4. **Phase 3a/3b push history confused** - previous session (Phase 3a, ID `e846157b`) had pushed dashboards/ + lib/ already. The HEAD on GitHub was actually current - local match had been confused by stale web_fetch cache.
-
-### Files created this session
-- `update_dashboard_v1_backup.py` (Phase 3b safety net)
-- `test_phase3b_parity.bat` (zero-drift verifier)
-- `push_phase3b.ps1` (direct PowerShell push, autocrlf-safe, SHA256-verifying)
-- `scripts/explore/check_wms_ibl.py` (ibl access probe)
-- `scripts/explore/test_iprod_vs_ibl.py` (iprod=parcode 86.6% match probe)
-- `scripts/explore/test_ibl_join.py` (item_barcode bridge probe - not needed)
+**Partner table `iml`** = movement log (
