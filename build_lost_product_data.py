@@ -42,26 +42,33 @@ def _conn(cfg, db='data-lake'):
 
 # ── STEP 1: Per-year qty aggregation ─────────────────────────────────────────
 def query_year(conn, table, where_year=None):
-    """Returns {parcode: qty} for one year of sales.
-    If where_year given, also adds AND YEAR(sodate)=where_year (used for CURRENT_TABLE)."""
-    year_filter = f"AND YEAR(sodate) = {where_year}" if where_year else ""
+    """Returns {iprod: qty} for one year of sales.
+    Year tables (bld_acc_YYYY_lake) need no filter — the table IS that year.
+    Current table (bld_acc_lake) holds multiple years — sono format is
+    BL{store}-YYMMDD-{seq}, so SUBSTRING(sono,8,2) gives the 2-digit year."""
+    if where_year is not None:
+        yy = str(where_year)[-2:]
+        year_filter = f"AND SUBSTRING(sono,8,2) = '{yy}'"
+    else:
+        year_filter = ""
     sql = f"""
-        SELECT parcode, SUM(soqty) AS qty
+        SELECT iprod, SUM(soqty) AS qty
         FROM `{table}`
         WHERE solinetype NOT IN ('C', 'R')
           {year_filter}
-        GROUP BY parcode
+        GROUP BY iprod
         HAVING qty > 0
     """
     df = pd.read_sql(sql, conn)
-    return dict(zip(df['parcode'].astype(str), df['qty'].astype(float)))
+    return dict(zip(df['iprod'].astype(str), df['qty'].astype(float)))
 
 
 # ── STEP 2: Name lookup (dim_product + dim_item_barcode bridge) ──────────────
 def query_name_map(conn, parcode_set):
     """Lookup product name/brand/group from dim_product.
-    parcode in bld_acc usually = barcode → bridge via dim_item_barcode.
-    Some may match dim_product.iprod directly. Try both."""
+    iprod in bld_acc may equal dim_product.iprod directly,
+    or be a barcode that needs bridging via dim_item_barcode. Try both.
+    (Param still called parcode_set for backward-compat with caller)."""
     if not parcode_set:
         return {}
     pl = list(parcode_set)
@@ -161,7 +168,7 @@ def main():
 
     # Current table partitioned by year (2025, 2026)
     for year in [2025, CURRENT_YEAR]:
-        print(f'[{year}] querying {CURRENT_TABLE} WHERE YEAR(sodate)={year} ...')
+        print(f'[{year}] querying {CURRENT_TABLE} WHERE sono~"{str(year)[-2:]}" ...')
         year_qty[year] = query_year(conn, CURRENT_TABLE, where_year=year)
         print(f'  {len(year_qty[year]):,} parcodes, total qty={sum(year_qty[year].values()):,.0f}')
 
@@ -249,4 +256,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    mai
