@@ -275,10 +275,12 @@ def query_sales_by_linetype(conn, days_elapsed):
 # ── STEP 3: Store-indexed breakdown — ALL products ────────────────────────────
 def query_store_breakdown(conn, days_elapsed):
     """
-    Returns {store_code: {iprod: [s26, q26]}} for ALL products sold in May 2026.
+    Returns {store_code: {iprod: [s26, q26]}} for ALL products sold this month.
     Store-indexed (not product-indexed) so JS can filter by any store/DM/RM
     and see all products at that scope.
-    Threshold: s26 >= 500 baht to keep JSON lean.
+    Threshold: s26 > 0 — include every product that had ANY sales (no 500-baht cutoff).
+    Note (2026-06-05): removed `HAVING s26 >= 500` cutoff per user request.
+    Small stores now show all SKUs they actually sold. JSON size may grow 2-3x.
     """
     end_date26 = f'{YEAR26}-{MONTH:02d}-{days_elapsed:02d}'
     sql = f"""
@@ -292,7 +294,7 @@ def query_store_breakdown(conn, days_elapsed):
           AND {STORE_FILTER}
           AND fs.sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
         GROUP BY whs, fs.iprod
-        HAVING s26 >= 500
+        HAVING s26 > 0
         ORDER BY whs, s26 DESC
     """
     cur = conn.cursor(dictionary=True)
