@@ -15,12 +15,12 @@ FOLDER   = os.path.dirname(os.path.abspath(__file__))
 OUT_JSON = os.path.join(FOLDER, 'lost_product_data.json')
 
 YEAR_TABLES = {
-    2021: 'bld_acc_2021_lake',
-    2022: 'bld_acc_2022_lake',
-    2023: 'bld_acc_2023_lake',
-    2024: 'bld_acc_2024_lake',
+    2021: ('bld_acc_2021_lake', 'blh_acc_2021_lake'),
+    2022: ('bld_acc_2022_lake', 'blh_acc_2022_lake'),
+    2023: ('bld_acc_2023_lake', 'blh_acc_2023_lake'),
+    2024: ('bld_acc_2024_lake', 'blh_acc_2024_lake'),
 }
-CURRENT_TABLE = 'bld_acc_lake'   # holds 2025 + 2026
+CURRENT_TABLES = ('bld_acc_lake', 'blh_acc_lake')   # holds 2025 + 2026
 CURRENT_YEAR  = date.today().year
 YEARS         = sorted(list(YEAR_TABLES.keys()) + [2025, CURRENT_YEAR])  # [2021..2026]
 
@@ -41,34 +41,35 @@ def _conn(cfg, db='data-lake'):
 
 
 # ── STEP 1: Per-year qty aggregation ─────────────────────────────────────────
-def query_year(conn, table, where_year=None):
+def query_year(conn, bld_table, blh_table, where_year=None):
     """Returns ({iprod: total_qty}, {(whs,iprod): qty}) for one year of sales.
-    sono format: BL{4-digit-store}-YYMMDD-{seq}  (e.g. 'BL0011-250101-0001')
-      chars 1-2 = BL · chars 3-6 = store (zero-padded 4-digit) · char 7 = - · chars 8-13 = YYMMDD"""
+    JOIN bld_acc + blh_acc on sono to get real sotowhs (matches dim_branch.code)
+    and sodate (DATETIME, supports YEAR())."""
     if where_year is not None:
-        yy = str(where_year)[-2:]
-        year_filter = f"AND SUBSTRING(sono,8,2) = '{yy}'"
+        year_filter = f"AND YEAR(blh.sodate) = {where_year}"
     else:
         year_filter = ""
 
     sql_tot = f"""
-        SELECT iprod, SUM(soqty) AS qty
-        FROM `{table}`
-        WHERE solinetype NOT IN ('C', 'R')
+        SELECT bld.iprod, SUM(bld.soqty) AS qty
+        FROM `{bld_table}` bld
+        JOIN `{blh_table}` blh ON blh.sono = bld.sono
+        WHERE bld.solinetype NOT IN ('C', 'R')
           {year_filter}
-        GROUP BY iprod
+        GROUP BY bld.iprod
         HAVING qty > 0
     """
     df = pd.read_sql(sql_tot, conn)
     tot = dict(zip(df['iprod'].astype(str), df['qty'].astype(float)))
 
     sql_store = f"""
-        SELECT SUBSTRING(sono,3,4) AS whs, iprod, SUM(soqty) AS qty
-        FROM `{table}`
-        WHERE solinetype NOT IN ('C', 'R')
+        SELECT blh.sotowhs AS whs, bld.iprod, SUM(bld.soqty) AS qty
+        FROM `{bld_table}` bld
+        JOIN `{blh_table}` blh ON blh.sono = bld.sono
+        WHERE bld.solinetype NOT IN ('C', 'R')
           {year_filter}
-          AND SUBSTRING(sono,3,4) REGEXP '^[0-9]+$'
-        GROUP BY whs, iprod
+          AND blh.sotowhs REGEXP '^[0-9]+$'
+        GROUP BY blh.sotowhs, bld.iprod
         HAVING qty > 0
     """
     df2 = pd.read_sql(sql_store, conn)
@@ -217,16 +218,17 @@ def main():
     # Per-year aggregation (chain + per-store)
     year_qty = {}                 # {year: {iprod: qty}}
     year_store_qty = {}           # {year: {(whs,iprod): qty}}
-    for year, table in YEAR_TABLES.items():
-        print(f'[{year}] querying {table} ...')
-        tot, store = query_year(conn, table)
+    for year, (bld, blh) in YEAR_TABLES.items():
+        print(f'[{year}] JOIN {bld} + {blh} ...')
+        tot, store = query_year(conn, bld, blh)
         year_qty[year] = tot
         year_store_qty[year] = store
         print(f'  {len(tot):,} iprods | {len(store):,} (whs,iprod) | qty={sum(tot.values()):,.0f}')
 
+    bld_cur, blh_cur = CURRENT_TABLES
     for year in [2025, CURRENT_YEAR]:
-        print(f'[{year}] querying {CURRENT_TABLE} (sono YY={str(year)[-2:]}) ...')
-        tot, store = query_year(conn, CURRENT_TABLE, where_year=year)
+        print(f'[{year}] JOIN {bld_cur} + {blh_cur} WHERE YEAR(sodate)={year} ...')
+        tot, store = query_year(conn, bld_cur, blh_cur, where_year=year)
         year_qty[year] = tot
         year_store_qty[year] = store
         print(f'  {len(tot):,} iprods | {len(store):,} (whs,iprod) | qty={sum(tot.values()):,.0f}')
