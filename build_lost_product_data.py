@@ -43,11 +43,11 @@ def _conn(cfg, db='data-lake'):
 # ── STEP 1: Per-year qty aggregation ─────────────────────────────────────────
 def query_year(conn, table, where_year=None):
     """Returns ({iprod: total_qty}, {(whs,iprod): qty}) for one year of sales.
-    sono format: BL{3-digit-store}-YYMMDD-{seq}
-      chars 1-2 = BL · chars 3-5 = store · char 6 = - · chars 7-12 = YYMMDD."""
+    sono format: BL{4-digit-store}-YYMMDD-{seq}  (e.g. 'BL0011-250101-0001')
+      chars 1-2 = BL · chars 3-6 = store (zero-padded 4-digit) · char 7 = - · chars 8-13 = YYMMDD"""
     if where_year is not None:
         yy = str(where_year)[-2:]
-        year_filter = f"AND SUBSTRING(sono,7,2) = '{yy}'"
+        year_filter = f"AND SUBSTRING(sono,8,2) = '{yy}'"
     else:
         year_filter = ""
 
@@ -63,11 +63,11 @@ def query_year(conn, table, where_year=None):
     tot = dict(zip(df['iprod'].astype(str), df['qty'].astype(float)))
 
     sql_store = f"""
-        SELECT SUBSTRING(sono,3,3) AS whs, iprod, SUM(soqty) AS qty
+        SELECT SUBSTRING(sono,3,4) AS whs, iprod, SUM(soqty) AS qty
         FROM `{table}`
         WHERE solinetype NOT IN ('C', 'R')
           {year_filter}
-          AND SUBSTRING(sono,3,3) REGEXP '^[0-9]+$'
+          AND SUBSTRING(sono,3,4) REGEXP '^[0-9]+$'
         GROUP BY whs, iprod
         HAVING qty > 0
     """
@@ -151,7 +151,7 @@ def query_branch_info(conn):
     cur.execute("SHOW COLUMNS FROM dim_branch")
     cols = {r['Field'].lower(): r['Field'] for r in cur.fetchall()}
     pick = lambda *names: next((cols[n] for n in names if n in cols), None)
-    c_whs  = pick('whs','warehouse','warehouse_code','whscode','whsno','branch_code','store_code')
+    c_whs  = pick('code','branch_code','store_code','whs','warehouse','warehouse_code','whscode','whsno')
     c_name = pick('name','warehouse_name','whsname','branch_name','store_name','desc')
     c_dm   = pick('dm','dm_code','dm_name','district_manager','dmname')
     c_rm   = pick('rm','rm_code','rm_name','regional_manager','rmname','region')
