@@ -481,17 +481,19 @@ function applyAll(){
     wProds=prods; // global — use product totals directly
   } else {
     // Aggregate across all in-scope stores from store_breakdown
-    // store_breakdown: {whs: {iprod: [s26, q26]}}
-    const aggMap={}; // {iprod: {s26, q26}}
+    // store_breakdown: {whs: {iprod: [s26, q26, onhand?]}} (onhand added 2026-06-05)
+    const aggMap={}; // {iprod: {s26, q26, onhand}}
     for(const whs of scopeStores){
       const storeProds=sb[whs]||{};
-      for(const [iprod,[s26,q26]] of Object.entries(storeProds)){
-        if(!aggMap[iprod]) aggMap[iprod]={s26:0,q26:0};
+      for(const [iprod,arr] of Object.entries(storeProds)){
+        const s26=arr[0], q26=arr[1], oh=arr[2]||0;
+        if(!aggMap[iprod]) aggMap[iprod]={s26:0,q26:0,onhand:0};
         aggMap[iprod].s26+=s26;
         aggMap[iprod].q26+=q26;
+        aggMap[iprod].onhand+=oh;
       }
     }
-    // Build product list from global products, overriding s26/q26 from store agg
+    // Build product list from global products, overriding s26/q26/onhand from store agg
     // Use a Map for O(1) lookup of global product data
     const prodMap={};
     for(const p of prods) prodMap[p.iprod]=p;
@@ -508,6 +510,7 @@ function applyAll(){
         gp_pct:agg.s26?Math.round(gp26/agg.s26*1000)/10:0,
         s_yoy:base.s25?Math.round((agg.s26/base.s25-1)*1000)/10:null,
         q_yoy:base.q25?Math.round((agg.q26/base.q25-1)*1000)/10:null,
+        onhand:agg.onhand,  // per-store sum from MYWMS ibl (Phase A 2026-06-05)
       };
     }).filter(Boolean);
   }

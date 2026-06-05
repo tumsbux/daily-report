@@ -312,8 +312,39 @@ def query_store_breakdown(conn, days_elapsed):
     return dict(result)
 
 
+# ── STEP 3b: Per-store onhand from MyWMS ibl (added 2026-06-05) ──────────────
+def query_onhand_per_store(conn):
+    """Returns {(parcode, whs_padded): onhand_qty} from MYWMS2023_CENTER.ibl.
+    Direct join: iprod = ibl_parcode (86.6% match confirmed via test_iprod_vs_ibl.py).
+    Filter to locno='stock' shelfno='shelfno' = main shelf stock (excludes visual
+    adjustment and partner consignment rows). Stores 1-500 only."""
+    sql = """
+        SELECT LPAD(ibl_whsno, 3, '0') AS whs,
+               ibl_parcode AS iprod,
+               SUM(ibl_qty_beg_bal + ibl_qty_rec - ibl_qty_iss) AS onhand,
+               MAX(ibl_date_sale) AS last_sale
+        FROM MYWMS2023_CENTER.ibl
+        WHERE ibl_locno = 'stock'
+          AND ibl_shelfno = 'shelfno'
+          AND ibl_whsno REGEXP '^[0-9]+$'
+          AND CAST(ibl_whsno AS UNSIGNED) BETWEEN 1 AND 500
+        GROUP BY whs, ibl_parcode
+        HAVING onhand > 0
+    """
+    cur = conn.cursor(dictionary=True)
+    cur.execute(sql)
+    result = {}
+    n_rows = 0
+    for r in cur.fetchall():
+        n_rows += 1
+        result[(r['iprod'], r['whs'])] = int(float(r['onhand']))
+    cur.close()
+    print(f'      {n_rows:,} (iprod, store) onhand rows from MYWMS ibl')
+    return result
+
+
 # ── STEP 4: Build JSON ────────────────────────────────────────────────────────
-def build_json(df, barcode_map, item_map, store_breakdown, branch_info, days_elapsed, store_s25=None, store_s26=None, linetype_breakdown=None):
+def build_json(df, barcode_map, item_map, store_breakdown, branch_info, days_elapsed, store_s25=None, store_s26=None, linetype_breakdown=None, onhand_map=None):
     today = date.today()
     products = []
     for rank, (_, row) in enumerate(df.iterrows(), 1):
@@ -407,6 +438,17 @@ def build_json(df, barcode_map, item_map, store_breakdown, branch_info, days_ela
             'barcode_cnt': len(v['barcodes']),
             'grp_cnt':     len(v['grps']),
         })
+
+    # Merge onhand into store_breakdown as 3rd array element: [s26, q26, onhand]
+    # Old shape stays array-compatible — JS destructure `[s26, q26]` still works.
+    if onhand_map:
+        for whs, pmap in store_breakdown.items():
+            for iprod, vals in pmap.items():
+                oh = onhand_map.get((iprod, whs), 0)
+                if len(vals) == 2:
+                    vals.append(oh)
+                elif len(vals) >= 3:
+                    vals[2] = oh
 
     return {
         'generated':    today.isoformat(),
@@ -530,11 +572,18 @@ def main():
     linetype_bd = query_sales_by_linetype(conn, days_elapsed)
     print('      %d line types found' % len(linetype_bd))
 
+    print('      Loading per-store onhand from MYWMS ibl ...')
+    try:
+        onhand_map = query_onhand_per_store(conn)
+    except Exception as _e:
+        print(f'      WARNING: onhand query failed: {_e}')
+        onhand_map = {}
+
     conn.close()
 
     print('[4/4] Building product_data.json ...')
     branch_info = _load_branch_info()
-    output = build_json(df, bc_map, item_map, store_bd, branch_info, days_elapsed, store_s25, store_s26, linetype_bd)
+    output = build_json(df, bc_map, item_map, store_bd, branch_info, days_elapsed, store_s25, store_s26, linetype_bd, onhand_map)
 
     with open(OUT_JSON, 'w', encoding='utf-8') as f:
         json.dump(output, f, ensure_ascii=False, separators=(',', ':'))
@@ -547,7 +596,6 @@ def main():
         YEAR26, days_elapsed, total26/1e6, yoy, len(output['products'])))
 
     if PUSH:
-        print('Pushing to GitHub ...')
         push_github(cfg)
 
 
