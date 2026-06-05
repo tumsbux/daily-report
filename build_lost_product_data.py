@@ -42,16 +42,16 @@ def _conn(cfg, db='data-lake'):
 
 # ── STEP 1: Per-year qty aggregation ─────────────────────────────────────────
 def query_year(conn, table, where_year=None):
-    """Returns {iprod: qty} for one year of sales.
-    Year tables (bld_acc_YYYY_lake) need no filter — the table IS that year.
-    Current table (bld_acc_lake) holds multiple years — sono format is
-    BL{store}-YYMMDD-{seq}, so SUBSTRING(sono,8,2) gives the 2-digit year."""
+    """Returns ({iprod: total_qty}, {(whs,iprod): qty}) for one year of sales.
+    sono format: BL{3-digit-store}-YYMMDD-{seq}
+      chars 1-2 = BL · chars 3-5 = store · char 6 = - · chars 7-12 = YYMMDD."""
     if where_year is not None:
         yy = str(where_year)[-2:]
-        year_filter = f"AND SUBSTRING(sono,8,2) = '{yy}'"
+        year_filter = f"AND SUBSTRING(sono,7,2) = '{yy}'"
     else:
         year_filter = ""
-    sql = f"""
+
+    sql_tot = f"""
         SELECT iprod, SUM(soqty) AS qty
         FROM `{table}`
         WHERE solinetype NOT IN ('C', 'R')
@@ -59,8 +59,28 @@ def query_year(conn, table, where_year=None):
         GROUP BY iprod
         HAVING qty > 0
     """
-    df = pd.read_sql(sql, conn)
-    return dict(zip(df['iprod'].astype(str), df['qty'].astype(float)))
+    df = pd.read_sql(sql_tot, conn)
+    tot = dict(zip(df['iprod'].astype(str), df['qty'].astype(float)))
+
+    sql_store = f"""
+        SELECT SUBSTRING(sono,3,3) AS whs, iprod, SUM(soqty) AS qty
+        FROM `{table}`
+        WHERE solinetype NOT IN ('C', 'R')
+          {year_filter}
+          AND SUBSTRING(sono,3,3) REGEXP '^[0-9]+$'
+        GROUP BY whs, iprod
+        HAVING qty > 0
+    """
+    df2 = pd.read_sql(sql_store, conn)
+    store = {}
+    for whs, ip, q in zip(df2['whs'].astype(str), df2['iprod'].astype(str), df2['qty'].astype(float)):
+        try:
+            n = int(whs)
+            if 1 <= n <= 500:
+                store[(f'{n:03d}', ip)] = q
+        except ValueError:
+            pass
+    return tot, store
 
 
 # ── STEP 2: Name lookup (dim_product + dim_item_barcode bridge) ──────────────
@@ -123,6 +143,41 @@ def query_name_map(conn, parcode_set):
     return result
 
 
+# ── STEP 2b: Store info from dim_branch ──────────────────────────────────────
+def query_branch_info(conn):
+    """Returns {whs: {name, dm, rm}} from data-lake.dim_branch.
+    Defensive — handles column-name variants via SHOW COLUMNS."""
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SHOW COLUMNS FROM dim_branch")
+    cols = {r['Field'].lower(): r['Field'] for r in cur.fetchall()}
+    pick = lambda *names: next((cols[n] for n in names if n in cols), None)
+    c_whs  = pick('whs','warehouse','warehouse_code','whscode','whsno','branch_code','store_code')
+    c_name = pick('name','warehouse_name','whsname','branch_name','store_name','desc')
+    c_dm   = pick('dm','dm_code','dm_name','district_manager','dmname')
+    c_rm   = pick('rm','rm_code','rm_name','regional_manager','rmname','region')
+    if not c_whs:
+        cur.close(); return {}
+    sels = [f"`{c_whs}` AS whs"]
+    if c_name: sels.append(f"`{c_name}` AS name")
+    if c_dm:   sels.append(f"`{c_dm}` AS dm")
+    if c_rm:   sels.append(f"`{c_rm}` AS rm")
+    cur.execute(f"SELECT {', '.join(sels)} FROM dim_branch")
+    out = {}
+    for r in cur.fetchall():
+        try:
+            n = int(str(r['whs']).strip())
+            if 1 <= n <= 500:
+                out[f'{n:03d}'] = {
+                    'name': (r.get('name') or '').strip() if c_name else '',
+                    'dm':   (r.get('dm')   or '').strip() if c_dm   else '',
+                    'rm':   (r.get('rm')   or '').strip() if c_rm   else '',
+                }
+        except (ValueError, AttributeError):
+            pass
+    cur.close()
+    return out
+
+
 # ── STEP 3: Compute status + lost_score ──────────────────────────────────────
 def classify(qty_by_year):
     """Returns (status, last_year, years_gone, lost_score)."""
@@ -159,24 +214,42 @@ def main():
     print(f'  Lost Product Builder — years {YEARS[0]}..{YEARS[-1]}')
     print('=' * 60)
 
-    # Per-year aggregation
-    year_qty = {}
+    # Per-year aggregation (chain + per-store)
+    year_qty = {}                 # {year: {iprod: qty}}
+    year_store_qty = {}           # {year: {(whs,iprod): qty}}
     for year, table in YEAR_TABLES.items():
         print(f'[{year}] querying {table} ...')
-        year_qty[year] = query_year(conn, table)
-        print(f'  {len(year_qty[year]):,} parcodes, total qty={sum(year_qty[year].values()):,.0f}')
+        tot, store = query_year(conn, table)
+        year_qty[year] = tot
+        year_store_qty[year] = store
+        print(f'  {len(tot):,} iprods | {len(store):,} (whs,iprod) | qty={sum(tot.values()):,.0f}')
 
-    # Current table partitioned by year (2025, 2026)
     for year in [2025, CURRENT_YEAR]:
-        print(f'[{year}] querying {CURRENT_TABLE} WHERE sono~"{str(year)[-2:]}" ...')
-        year_qty[year] = query_year(conn, CURRENT_TABLE, where_year=year)
-        print(f'  {len(year_qty[year]):,} parcodes, total qty={sum(year_qty[year].values()):,.0f}')
+        print(f'[{year}] querying {CURRENT_TABLE} (sono YY={str(year)[-2:]}) ...')
+        tot, store = query_year(conn, CURRENT_TABLE, where_year=year)
+        year_qty[year] = tot
+        year_store_qty[year] = store
+        print(f'  {len(tot):,} iprods | {len(store):,} (whs,iprod) | qty={sum(tot.values()):,.0f}')
 
-    # Master parcode set
     all_parcodes = set()
     for yq in year_qty.values():
         all_parcodes.update(yq.keys())
     print(f'\nTotal unique parcodes across all years: {len(all_parcodes):,}')
+
+    print('Building per-store breakdown ...')
+    store_breakdown = {}
+    yidx = {y: i for i, y in enumerate(YEARS)}
+    for year, sd in year_store_qty.items():
+        idx = yidx[year]
+        for (whs, ip), q in sd.items():
+            arr = store_breakdown.setdefault(whs, {}).setdefault(ip, [0]*len(YEARS))
+            arr[idx] = round(q)
+    n_pairs = sum(len(p) for p in store_breakdown.values())
+    print(f'  {len(store_breakdown)} stores, {n_pairs:,} (whs,iprod) pairs')
+
+    print('Querying dim_branch ...')
+    branch_info = query_branch_info(conn)
+    print(f'  {len(branch_info)} stores with branch metadata')
 
     # Name lookup
     print('Resolving names from dim_product ...')
@@ -230,17 +303,19 @@ def main():
     qty_lost_last_year = sum(p['max_qty'] for p in products if p['status'] == 'LOST')
 
     output = {
-        'generated':   date.today().isoformat(),
-        'years':       YEARS,
-        'current_year': CURRENT_YEAR,
+        'generated':       date.today().isoformat(),
+        'years':           YEARS,
+        'current_year':    CURRENT_YEAR,
         'summary': {
-            'total_products':       len(products),
-            'active':               n_active,
-            'stale':                n_stale,
-            'lost':                 n_lost,
-            'qty_lost_peak':        qty_lost_last_year,   # peak historical qty of LOST products
+            'total_products': len(products),
+            'active':         n_active,
+            'stale':          n_stale,
+            'lost':           n_lost,
+            'qty_lost_peak':  qty_lost_last_year,
         },
-        'products':    products,
+        'products':        products,
+        'store_breakdown': store_breakdown,
+        'store_info':      branch_info,
     }
 
     with open(OUT_JSON, 'w', encoding='utf-8') as f:

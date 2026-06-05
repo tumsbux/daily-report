@@ -101,6 +101,15 @@ tbody tr:hover{background:#f8f9ff}
 </nav>
 
 <div class="filter-bar">
+  <label>RM</label>
+  <select id="f-rm" onchange="onScopeChange('rm')"><option value="">ทั้งหมด</option></select>
+  <div class="filter-sep"></div>
+  <label>DM</label>
+  <select id="f-dm" onchange="onScopeChange('dm')"><option value="">ทั้งหมด</option></select>
+  <div class="filter-sep"></div>
+  <label>ร้าน</label>
+  <select id="f-store" onchange="onScopeChange('store')"><option value="">ทั้งหมด</option></select>
+  <div class="filter-sep"></div>
   <label>สถานะ</label>
   <select id="f-status" onchange="applyAll()">
     <option value="">ทั้งหมด</option>
@@ -202,7 +211,44 @@ async function init(){
     const o=document.createElement('option');o.value=t;o.textContent=t;typeSel.appendChild(o);
   });
 
+  // RM / DM / Store from store_info
+  const si=D.store_info||{};
+  const rms=new Set(), dms=new Set();
+  Object.values(si).forEach(v=>{if(v.rm)rms.add(v.rm);if(v.dm)dms.add(v.dm);});
+  const rmSel=document.getElementById('f-rm');
+  [...rms].sort().forEach(r=>{const o=document.createElement('option');o.value=r;o.textContent=r;rmSel.appendChild(o);});
+  const dmSel=document.getElementById('f-dm');
+  [...dms].sort().forEach(d=>{const o=document.createElement('option');o.value=d;o.textContent=d;dmSel.appendChild(o);});
+  rebuildStoreOptions();
+
   renderKPI();
+  applyAll();
+}
+
+function rebuildStoreOptions(){
+  const si=D.store_info||{};
+  const fRM=document.getElementById('f-rm').value;
+  const fDM=document.getElementById('f-dm').value;
+  const stSel=document.getElementById('f-store');
+  const cur=stSel.value;
+  stSel.innerHTML='<option value="">ทั้งหมด</option>';
+  Object.entries(si).filter(([,v])=>{
+    if(fRM && v.rm!==fRM) return false;
+    if(fDM && v.dm!==fDM) return false;
+    return true;
+  }).sort(([a],[b])=>a.localeCompare(b)).forEach(([k,v])=>{
+    const o=document.createElement('option');o.value=k;o.textContent=k+' '+(v.name||'');
+    stSel.appendChild(o);
+  });
+  if(cur) stSel.value=cur;
+}
+
+function onScopeChange(which){
+  if(which==='rm' || which==='dm'){
+    if(which==='rm') document.getElementById('f-dm').value='';
+    document.getElementById('f-store').value='';
+    rebuildStoreOptions();
+  }
   applyAll();
 }
 
@@ -226,8 +272,66 @@ function applyAll(){
   const fType=document.getElementById('f-type').value;
   const fGone=+document.getElementById('f-gone').value||0;
   const fSearch=(document.getElementById('f-search').value||'').toLowerCase().trim();
+  const fRM=document.getElementById('f-rm').value;
+  const fDM=document.getElementById('f-dm').value;
+  const fStore=document.getElementById('f-store').value;
 
-  filtered=D.products.filter(p=>{
+  // Scope-aware product list — when RM/DM/Store filter, recompute year qty + status
+  // from store_breakdown[whs][iprod] = [q2021..q2026]
+  const si=D.store_info||{};
+  let scopeStores=null;
+  if(fStore){
+    scopeStores=new Set([fStore]);
+  } else if(fDM){
+    scopeStores=new Set(Object.entries(si).filter(([,v])=>v.dm===fDM).map(([k])=>k));
+  } else if(fRM){
+    scopeStores=new Set(Object.entries(si).filter(([,v])=>v.rm===fRM).map(([k])=>k));
+  }
+
+  let wProds;
+  if(!scopeStores){
+    wProds=D.products;
+  } else {
+    // Aggregate per iprod across in-scope stores
+    const sb=D.store_breakdown||{};
+    const agg={};  // {iprod: [q21,q22,q23,q24,q25,q26]}
+    for(const whs of scopeStores){
+      const ps=sb[whs]||{};
+      for(const [ip,arr] of Object.entries(ps)){
+        if(!agg[ip]) agg[ip]=[0,0,0,0,0,0];
+        for(let i=0;i<6;i++) agg[ip][i]+=arr[i]||0;
+      }
+    }
+    // Map to product list (look up name from D.products by iprod)
+    const pmap={};
+    for(const p of D.products) pmap[p.iprod||p.parcode]=p;
+    const cy=D.current_year||2026;
+    const YS=[2021,2022,2023,2024,2025,2026];
+    wProds=Object.entries(agg).map(([ip,arr])=>{
+      const base=pmap[ip]||{parcode:ip,iprod:ip,name:'',brand:'',group:'ไม่ระบุ',type:'',ipunit3:0};
+      const qty={2021:arr[0],2022:arr[1],2023:arr[2],2024:arr[3],2025:arr[4],2026:arr[5]};
+      const active=YS.filter(y=>qty[y]>0);
+      if(!active.length) return null;
+      const last_year=Math.max(...active);
+      const first_year=Math.min(...active);
+      const years_gone=cy-last_year;
+      const max_qty=Math.max(...arr);
+      const total=arr.reduce((a,b)=>a+b,0);
+      let status, lost_score;
+      if(qty[cy]>0){ status='ACTIVE'; lost_score=0; }
+      else if(qty[cy-1]>0){ status='STALE'; lost_score=max_qty; }
+      else { status='LOST'; lost_score=years_gone*max_qty; }
+      return {...base,
+        parcode:ip,
+        q2021:arr[0],q2022:arr[1],q2023:arr[2],
+        q2024:arr[3],q2025:arr[4],q2026:arr[5],
+        first_year, last_year, years_active:active.length,
+        years_gone, total_qty:total, max_qty,
+        status, lost_score:Math.round(lost_score)};
+    }).filter(Boolean);
+  }
+
+  filtered=wProds.filter(p=>{
     if(fStatus && p.status!==fStatus) return false;
     if(fGrp && p.group!==fGrp) return false;
     if(fType && p.type!==fType) return false;
@@ -253,7 +357,7 @@ function applyAll(){
   renderTable();
   renderRecom(fStatus);
   // Active filter label
-  const active=[fStatus&&'สถานะ: '+fStatus,fGrp&&'กลุ่ม: '+fGrp,fType&&'ประเภท: '+fType,fGone&&'หายไป ≥'+fGone+'ปี'].filter(Boolean);
+  const active=[fRM&&'RM: '+fRM,fDM&&'DM: '+fDM,fStore&&'ร้าน: '+fStore,fStatus&&'สถานะ: '+fStatus,fGrp&&'กลุ่ม: '+fGrp,fType&&'ประเภท: '+fType,fGone&&'หายไป ≥'+fGone+'ปี'].filter(Boolean);
   document.getElementById('filter-info').textContent=active.length?'🔍 '+active.join(' › '):'';
 }
 
@@ -367,6 +471,10 @@ function resetFilter(){
   document.getElementById('f-type').value='';
   document.getElementById('f-gone').value='';
   document.getElementById('f-search').value='';
+  document.getElementById('f-rm').value='';
+  document.getElementById('f-dm').value='';
+  document.getElementById('f-store').value='';
+  rebuildStoreOptions();
   applyAll();
 }
 
