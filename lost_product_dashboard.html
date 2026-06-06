@@ -252,14 +252,27 @@ function onScopeChange(which){
   applyAll();
 }
 
-function renderKPI(){
-  const s=D.summary;
+function renderKPI(prods, scopeLabel){
+  // If no prods passed, use chain-wide summary; else recompute from passed list
+  let total, active, stale, lost, qtyPeak, scopeNote;
+  if(prods){
+    total = prods.length;
+    active = prods.filter(p=>p.status==='ACTIVE').length;
+    stale  = prods.filter(p=>p.status==='STALE').length;
+    lost   = prods.filter(p=>p.status==='LOST').length;
+    qtyPeak= prods.filter(p=>p.status==='LOST').reduce((s,p)=>s+(p.max_qty||0),0);
+    scopeNote = scopeLabel ? ' · '+scopeLabel : '';
+  } else {
+    const s=D.summary;
+    total=s.total_products; active=s.active; stale=s.stale; lost=s.lost; qtyPeak=s.qty_lost_peak;
+    scopeNote='';
+  }
   const cards=[
-    {l:'📦 รวมสินค้าทั้งหมด',v:fmt(s.total_products),sub:'ที่มียอดในประวัติ',c:'#6366f1'},
-    {l:'🟢 Active',v:fmt(s.active),sub:'มียอดขายปี 2026',c:'#16a34a'},
-    {l:'🟡 Stale',v:fmt(s.stale),sub:'2025 ขายอยู่ · 2026 หาย',c:'#f59e0b'},
-    {l:'🔴 Lost',v:fmt(s.lost),sub:'ไม่มียอด 2025+2026',c:'#dc2626'},
-    {l:'⚠️ Qty Peak ที่หาย',v:fmt(s.qty_lost_peak),sub:'sum max_qty ของ LOST',c:'#7c3aed'},
+    {l:'📦 รวมสินค้าทั้งหมด',v:fmt(total),sub:'ที่มียอดในประวัติ'+scopeNote,c:'#6366f1'},
+    {l:'🟢 Active',v:fmt(active),sub:'มียอดขายปี 2026',c:'#16a34a'},
+    {l:'🟡 Stale',v:fmt(stale),sub:'2025 ขายอยู่ · 2026 หาย',c:'#f59e0b'},
+    {l:'🔴 Lost',v:fmt(lost),sub:'ไม่มียอด 2025+2026',c:'#dc2626'},
+    {l:'⚠️ Qty Peak ที่หาย',v:fmt(qtyPeak),sub:'sum max_qty ของ LOST',c:'#7c3aed'},
   ];
   document.getElementById('kpi-row').innerHTML=cards.map(k=>
     `<div class="sc" style="border-color:${k.c}"><div class="sc-lbl">${k.l}</div><div class="sc-val">${k.v}</div><div class="sc-sub">${k.sub}</div></div>`
@@ -353,6 +366,18 @@ function applyAll(){
     return sortDir*((va||0)-(vb||0));
   });
 
+  // KPIs recompute per scope (uses wProds before status/grp/type filters)
+  const scopeLabel = scopeStores ? `ขอบเขต ${scopeStores.size} ร้าน` : '';
+  renderKPI(scopeStores ? wProds : null, scopeLabel);
+
+  // Empty-scope diagnostic
+  if(scopeStores && wProds.length === 0){
+    const sb=D.store_breakdown||{};
+    const sInScope=[...scopeStores];
+    const sWithData=sInScope.filter(s=>sb[s] && Object.keys(sb[s]).length>0);
+    console.warn(`Scope has ${sInScope.length} stores, only ${sWithData.length} have sales data:`, sInScope, 'with data:', sWithData);
+  }
+
   page=0;
   renderTable();
   renderRecom(fStatus);
@@ -395,6 +420,21 @@ function sortBy(col,th){
 function renderTable(){
   const start=page*PAGE_SIZE;
   const slice=filtered.slice(start,start+PAGE_SIZE);
+  // Friendly empty-state hint
+  if(filtered.length===0){
+    const fRM=document.getElementById('f-rm').value;
+    const fDM=document.getElementById('f-dm').value;
+    const fStore=document.getElementById('f-store').value;
+    const hasScope=fRM||fDM||fStore;
+    const tbody=document.getElementById('prod-tbody');
+    const hint = hasScope
+      ? '⚠️ ไม่มีสินค้าตรงเงื่อนไขในขอบเขตนี้ — ลองล้าง filter ประเภท/กลุ่ม/สถานะ หรือเลือกร้านอื่น (บางสาขายังไม่มีข้อมูลใน bld_acc_lake)'
+      : '— ไม่มีรายการตรงเงื่อนไข ลองปรับ filter';
+    tbody.innerHTML=`<tr><td colspan="15" style="text-align:center;padding:20px;color:#94a3b8">${hint}</td></tr>`;
+    document.getElementById('prod-cnt').textContent='0 รายการ';
+    renderPagination();
+    return;
+  }
   const cy=D.current_year||2026;
   const tbody=document.getElementById('prod-tbody');
   tbody.innerHTML=slice.map((p,idx)=>{
