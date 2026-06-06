@@ -21,27 +21,30 @@ $tok = (Get-Content (Join-Path $FOLDER "db_config.json") -Raw | ConvertFrom-Json
 $tmp = Join-Path $env:TEMP ("lostdata_" + (Get-Random))
 $repoUrl = "https://" + $tok + "@github.com/tumsbux/lost-Product.git"
 
-# Helper: run a command and don't let PowerShell freak out about stderr text
 function Invoke-Cmd($exe, [string[]]$cmdArgs) {
     & cmd /c ($exe + ' ' + ($cmdArgs -join ' ') + ' 2>&1') | Write-Host
     return $LASTEXITCODE
 }
 
-Write-Host "Trying clone of tumsbux/lost-Product ..." -ForegroundColor Cyan
+Write-Host "Cloning tumsbux/lost-Product ..." -ForegroundColor Cyan
 $cloneRc = Invoke-Cmd 'git' @('-c','core.autocrlf=false','clone','--depth=1',$repoUrl,"`"$tmp`"")
-
 if ($cloneRc -ne 0) {
-    Write-Host "Clone failed (likely empty repo). Initializing fresh ..." -ForegroundColor Yellow
+    Write-Host "FAIL clone (exit code $cloneRc). If repo is empty, create README on web UI first." -ForegroundColor Red
     if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
-    New-Item -ItemType Directory -Path $tmp | Out-Null
-    Invoke-Cmd 'git' @('-C',"`"$tmp`"",'init','-b','main') | Out-Null
-    Invoke-Cmd 'git' @('-C',"`"$tmp`"",'remote','add','origin',$repoUrl) | Out-Null
-    @"
-# lost-Product
+    exit 1
+}
 
-Generated data for [tumsbux/daily-report](https://github.com/tumsbux/daily-report) Lost Product Analysis dashboard.
+Copy-Item -Force $jsonPath (Join-Path $tmp "lost_product_data.json")
+Invoke-Cmd 'git' @('-C',"`"$tmp`"",'add','lost_product_data.json') | Out-Null
 
-Contains ``lost_product_data.json`` only (regenerated daily from MyPOS).
-Separated from main repo because the file can exceed 50 MB.
+$staged = & cmd /c "git -C `"$tmp`" diff --cached --stat 2>&1"
+if (-not $staged) {
+    Write-Host "No changes vs remote - JSON byte-identical to last push" -ForegroundColor Yellow
+    Remove-Item $tmp -Recurse -Force
+    exit 0
+}
+Write-Host $staged -ForegroundColor DarkGray
 
-- Dashboard: https://tumsb
+$today = Get-Date -Format "yyyy-MM-dd"
+$msg = "data: lost_product_data.json " + $today
+Invoke-Cmd 'git' @('-C',"`"$tmp`"",'-c','user.em
