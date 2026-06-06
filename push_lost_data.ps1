@@ -17,38 +17,37 @@ if (-not (Test-Path $jsonPath)) {
 }
 
 $sz = [math]::Round((Get-Item $jsonPath).Length / 1MB, 1)
-Write-Host "lost_product_data.json size: ${sz} MB" -ForegroundColor Cyan
+Write-Host "lost_product_data.json size: $sz MB" -ForegroundColor Cyan
 if ($sz -gt 99) {
-    Write-Host "WARN: file is over 99 MB — GitHub's hard limit is 100 MB. Consider raising MIN_QTY threshold in build_lost_product_data.py." -ForegroundColor Yellow
+    Write-Host "WARN: file is over 99 MB - GitHub hard limit is 100 MB. Raise MIN_QTY in build_lost_product_data.py." -ForegroundColor Yellow
 }
 
 $tok = (Get-Content (Join-Path $FOLDER "db_config.json") -Raw | ConvertFrom-Json).github_token
-$tmp = "$env:TEMP\lostdata_$(Get-Random)"
+$tmp = Join-Path $env:TEMP ("lostdata_" + (Get-Random))
 
 Write-Host "Cloning tumsbux/lost-Product- ..." -ForegroundColor Cyan
-git -c core.autocrlf=false clone --depth=1 "https://$tok@github.com/tumsbux/lost-Product-.git" $tmp
+$cloneUrl = "https://" + $tok + "@github.com/tumsbux/lost-Product-.git"
+git -c core.autocrlf=false clone --depth=1 $cloneUrl $tmp
 if ($LASTEXITCODE -ne 0) { Write-Host "FAIL clone" -ForegroundColor Red; exit 1 }
 
-Copy-Item -Force $jsonPath "$tmp\lost_product_data.json"
+Copy-Item -Force $jsonPath (Join-Path $tmp "lost_product_data.json")
 git -C $tmp add lost_product_data.json
 
-$diff = git -C $tmp diff --cached --stat
-if (-not $diff) {
-    Write-Host "No changes vs remote — JSON byte-identical to last push" -ForegroundColor Yellow
+$staged = git -C $tmp diff --cached --stat
+if (-not $staged) {
+    Write-Host "No changes vs remote - JSON byte-identical to last push" -ForegroundColor Yellow
     Remove-Item $tmp -Recurse -Force
     exit 0
 }
-Write-Host $diff -ForegroundColor DarkGray
+Write-Host $staged -ForegroundColor DarkGray
 
-git -C $tmp -c user.email="bot@dashboard" -c user.name="Dashboard Bot" `
-    commit -m "data: lost_product_data.json $(Get-Date -Format 'yyyy-MM-dd')"
+$today = Get-Date -Format "yyyy-MM-dd"
+$msg = "data: lost_product_data.json " + $today
+git -C $tmp -c user.email=bot@dashboard -c user.name="Dashboard Bot" commit -m $msg
 
 Write-Host "Pushing ..." -ForegroundColor Cyan
 git -C $tmp push origin main
 if ($LASTEXITCODE -eq 0) {
     Write-Host "OK pushed to https://tumsbux.github.io/lost-Product-/lost_product_data.json" -ForegroundColor Green
 } else {
-    Write-Host "FAIL push" -ForegroundColor Red
-}
-
-Remove-Item $tmp -Recurse -Force
+    Write-Host "FAIL push" -For
