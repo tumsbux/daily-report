@@ -979,3 +979,90 @@ On `tumsbux/lost-Product`: commit `895c6f1` = initial lost_product_data.json (92
 - Phase C: Dead Stock report (no sale >90d + onhand >0)
 - Phase D: Visual Adjustment audit (`ibl_locno='visual'`) — fraud signal
 - Verify all 210 stores in store_breakdown match what user expects (vs 203 dim_branch)
+
+
+### Session 2026-06-06 — lost-Product becomes standalone dashboard repo
+
+**Major restructure:** Moved Lost Product dashboard into its own repo so the URL is cleaner and no cross-origin fetch is needed.
+
+**New architecture:**
+- `tumsbux/daily-report` — sales / fraud / product dashboards (no Lost Product)
+- `tumsbux/lost-Product` — **self-contained Lost Product dashboard** at https://tumsbux.github.io/lost-Product/
+  - `index.html` (40 KB, the dashboard) — Hub button removed since this repo is standalone
+  - `lost_product_data.json` (~97 MB, regenerated daily)
+  - `README.md`
+
+**Repo rename:** `lost-Product-` → `lost-Product` (user dropped trailing dash via GitHub web UI). All code now references the no-dash name.
+
+**Fetch URL changed:** dashboard now uses relative path `./lost_product_data.json` (same-origin, no CORS).
+
+### Key issues hit and resolved this session
+
+1. **PowerShell here-string parse error** — PS 5.1 rejects indented `@"..."@`. Stripped the empty-repo init code path from `push_lost_data.ps1`; clone always succeeds now that repo has content.
+2. **PowerShell + git stderr** — wrapped git via `cmd /c "git ... 2>&1"` because PS treats git's normal stderr as terminating errors under default policy.
+3. **GitHub Pages needed manual rebuild trigger** after rename — adding a README via the GitHub UI (commit `15b6836`) forced Pages to redeploy at the new URL.
+4. **AI analysis buttons added** — 4 client-side heuristic analyses with purple-gradient pill buttons + modal. Uses `window.kpiBase` so analyses respect the user's scope/type/group/years-gone/search filters (excludes status filter — circular).
+5. **Per-filter KPI recompute** — split `applyAll` into two passes: pass 1 builds `kpiBase` (all filters except status) for the KPI cards, pass 2 applies status for the table.
+
+### Daily workflow now (manual)
+```powershell
+cd "F:\co work dashboard"
+py build_lost_product_data.py    # build with pruning (~92 MB)
+.\push_lost_data.ps1              # pushes JSON to lost-Product repo (script handles cmd /c wrapper)
+```
+
+### Daily workflow (auto, GitHub Actions)
+`.github/workflows/daily-update.yml` (commit `a4b3b94`) has 5 cron slots between 07:30-09:30 BKK. Each slot runs:
+1. Rebuild fraud analysis
+2. Build product data
+3. Build lost product data  ← NEW
+4. **Push lost_product_data.json to tumsbux/lost-Product repo via bash equivalent of push_lost_data.ps1** ← NEW
+5. Run dashboard update (pushes sales/fraud/product to daily-report)
+
+The bash push step handles both clone-existing and `git init -b main` for empty repo.
+
+### Lost Product dashboard features (final state)
+
+**Filters:** RM · DM · Store · สถานะ · กลุ่ม · ประเภท · หายไป (years gone) · search box
+**KPIs (5 cards):** Total · ACTIVE · STALE · LOST · Peak qty — all recompute live except status
+**Table columns:** parcode · ชื่อ · กลุ่ม · 2021-2026 qty · ขายปีล่าสุด · หายไป (ปี) · peak qty · สถานะ · lost_score
+**Color rules:** green = had sales · gray "—" = no sales (no concern) · red "0" = had history but stopped (current-year disappearance)
+**Export:** XLSX button uses SheetJS to download filtered rows
+**AI Analysis bar (4 pill buttons, purple gradient):**
+- 🔍 สาเหตุสินค้าหาย — cluster LOST by group/brand/last_year, highlight dominant group
+- 🔄 แนะนำสินค้าทดแทน — pair top 10 LOST with ACTIVE alternatives (same group, ±30% price)
+- 📈 ระบุโอกาส Recovery — high-peak recently-lost candidates + baht recovery estimate
+- 📊 Trend ปีต่อปี — yearly active/new/lost counts + net change
+
+All AI analyses use `window.kpiBase` (post-filter except status). Modal pattern: centered, Escape closes, click-outside closes.
+
+### Commits this session (chronological)
+| Commit | Repo | Topic |
+|---|---|---|
+| `795f973` | daily-report | rename: lost-Product- → lost-Product (drop trailing dash) |
+| `de88899` | daily-report | ui(hub): remove Lost Product nav link + quick-link card |
+| `4681d4b` | daily-report | fix(push_lost_data.ps1): cmd /c wrapper for git stderr |
+| `7bc050f` | daily-report | fix(push_lost_data.ps1): handle empty-repo first push |
+| `0b1d9d3` | daily-report | fix(push_lost_data.ps1): drop backtick continuation |
+| `b68febb` | daily-report | feat: per-scope KPIs + empty-state hint + console diagnostic |
+| `93010a3` | daily-report | feat: KPIs recompute for type/group/years-gone/search |
+| `c7c684f` | daily-report | docs: CLAUDE.md session 2026-06-06 |
+| `a4b3b94` | daily-report | ci: add Lost Product build + cross-repo push to daily-update.yml |
+| `66e82c6` | daily-report | feat: 4 AI Analysis buttons + modal (client-side heuristics) |
+| `f934c3d` | daily-report | fix(push_lost_data.ps1): drop here-string for PS 5.1 |
+| `15b6836` | lost-Product | Add initial README.md (forced Pages rebuild) |
+| `7e10cff` | lost-Product | feat: add index.html (self-contained dashboard) |
+| `c06a3d1` | lost-Product | remove Hub button (standalone in this repo) |
+
+### Critical lessons logged
+1. **GitHub repo rename ≠ Pages auto-rebuild.** After renaming, the Pages site may serve old paths. Adding any new commit (e.g. README) forces Pages to redeploy at the new name.
+2. **PowerShell 5.1 here-strings require column 0.** `@"` and `"@` cannot be indented. Use string concatenation or skip the multi-line init.
+3. **Browser caching is aggressive across renamed repos.** When user reports "Unexpected token '<'" after a rename, suspect cache before suspecting code.
+4. **The `lost-Product-` ghost repo redirects to `lost-Product` automatically.** GitHub keeps the old name redirecting for HTTP/HTTPS but Pages content needs reactivation at the new name.
+
+### Queued for next session
+- Workflow at `.github/workflows/daily-update.yml` should also push **`index.html`** to lost-Product (currently only pushes the JSON). Without this, dashboard updates on daily-report don't propagate to lost-Product.
+- Old `daily-report/lost_product_dashboard.html` is deprecated — can be deleted to reduce confusion (it still works but isn't the canonical URL).
+- Phase B: Days-until-OOS column on product_dashboard
+- Phase C: Dead Stock report (no sale >90d + onhand >0)
+- Phase D: Visual Adjustment audit (`ibl_locno='visual'`) — fraud signal
