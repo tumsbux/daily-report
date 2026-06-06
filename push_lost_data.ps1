@@ -1,10 +1,7 @@
 # push_lost_data.ps1
-# Pushes lost_product_data.json to the separate tumsbux/lost-Product- repo
-# (kept separate to avoid bloating tumsbux/daily-report main repo)
-#
-# Usage:
-#   cd "F:\co work dashboard"
-#   .\push_lost_data.ps1
+# Pushes lost_product_data.json to tumsbux/lost-Product- repo.
+# Handles empty-repo case (first-ever push) by initializing a local git repo
+# and force-pushing main branch.
 
 $ErrorActionPreference = "Stop"
 $FOLDER = "F:\co work dashboard"
@@ -24,30 +21,31 @@ if ($sz -gt 99) {
 
 $tok = (Get-Content (Join-Path $FOLDER "db_config.json") -Raw | ConvertFrom-Json).github_token
 $tmp = Join-Path $env:TEMP ("lostdata_" + (Get-Random))
+$repoUrl = "https://" + $tok + "@github.com/tumsbux/lost-Product-.git"
 
-Write-Host "Cloning tumsbux/lost-Product- ..." -ForegroundColor Cyan
-$cloneUrl = "https://" + $tok + "@github.com/tumsbux/lost-Product-.git"
-git -c core.autocrlf=false clone --depth=1 $cloneUrl $tmp
-if ($LASTEXITCODE -ne 0) { Write-Host "FAIL clone" -ForegroundColor Red; exit 1 }
+# Try clone first
+Write-Host "Trying clone of tumsbux/lost-Product- ..." -ForegroundColor Cyan
+git -c core.autocrlf=false clone --depth=1 $repoUrl $tmp 2>$null
 
-Copy-Item -Force $jsonPath (Join-Path $tmp "lost_product_data.json")
-git -C $tmp add lost_product_data.json
+if ($LASTEXITCODE -ne 0) {
+    # Empty repo - init from scratch
+    Write-Host "Clone failed (likely empty repo). Initializing fresh ..." -ForegroundColor Yellow
+    New-Item -ItemType Directory -Path $tmp | Out-Null
+    git -C $tmp init -b main
+    git -C $tmp remote add origin $repoUrl
 
-$staged = git -C $tmp diff --cached --stat
-if (-not $staged) {
-    Write-Host "No changes vs remote - JSON byte-identical to last push" -ForegroundColor Yellow
-    Remove-Item $tmp -Recurse -Force
-    exit 0
+    # Add a README so the repo isn't just one data file
+    @"
+# lost-Product-
+
+Generated data for [tumsbux/daily-report](https://github.com/tumsbux/daily-report) Lost Product Analysis dashboard.
+
+This repo contains only ``lost_product_data.json`` (regenerated daily from MyPOS).
+Separated from the main repo because the file can exceed 50 MB.
+
+**Dashboard:** https://tumsbux.github.io/daily-report/lost_product_dashboard.html
+**Data URL:**  https://tumsbux.github.io/lost-Product-/lost_product_data.json
+"@ | Out-File -Encoding utf8 (Join-Path $tmp "README.md")
 }
-Write-Host $staged -ForegroundColor DarkGray
 
-$today = Get-Date -Format "yyyy-MM-dd"
-$msg = "data: lost_product_data.json " + $today
-git -C $tmp -c user.email=bot@dashboard -c user.name="Dashboard Bot" commit -m $msg
-
-Write-Host "Pushing ..." -ForegroundColor Cyan
-git -C $tmp push origin main
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "OK pushed to https://tumsbux.github.io/lost-Product-/lost_product_data.json" -ForegroundColor Green
-} else {
-    Write-Host "FAIL push" -For
+Copy-Item -Force $jsonPat
