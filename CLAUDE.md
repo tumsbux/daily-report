@@ -918,3 +918,64 @@ If pruned JSON still > 100MB in future, options:
 - `run_manual_update.ps1` — calls push_lost_data.ps1 after build
 
 **GitHub Pages must be enabled on lost-Product- repo:** Settings → Pages → Source: Deploy from a branch, Branch: main, /(root). User did this 2026-06-05.
+
+
+### Lost Product — final session deliverables (2026-06-05/06, commits up to `93010a3`)
+
+**Architecture finalized:**
+- `tumsbux/daily-report` — code + small JSONs (product_data, fraud_data, HTMLs) → https://tumsbux.github.io/daily-report/
+- `tumsbux/lost-Product-` — **lost_product_data.json only** (92 MB) → https://tumsbux.github.io/lost-Product-/
+
+  Repo name has trailing hyphen + capital P — user created it via web UI. URL is case-preserving. Don't try to rename.
+  Cross-origin fetch from daily-report to lost-Product- works (same `tumsbux.github.io` host).
+
+**Builder pipeline confirmed:**
+1. `query_year()` JOINs `bld_acc_*_lake` to `blh_acc_*_lake` on `sono` to get `blh.sotowhs` (real 3-digit store code matching `dim_branch.code`) and `blh.sodate` (DATETIME, supports `YEAR()`)
+2. Pruning step drops `(whs,iprod)` pairs with total qty < 5 across 6 years + strips trailing zero years from each array — keeps JSON under 100 MB
+3. Output: 210 stores · 2.97M pairs raw → ~1.5M pairs after prune · 92 MB JSON
+
+**Push helper `push_lost_data.ps1`:**
+- Wraps every git call via `cmd /c` so PowerShell `$ErrorActionPreference` doesn't choke on git's normal stderr output ("Cloning into ..." messages)
+- Detects empty-repo case (clone fails) → falls back to `git init -b main` + push with README
+- Auto-invoked from `run_manual_update.ps1` after successful build
+
+**Dashboard UX (commit `93010a3` — final):**
+- Two-pass filter in `applyAll()`:
+  - **Pass 1 `kpiBase`** = scope (RM/DM/Store) + ประเภท (type) + กลุ่ม (group) + หายไป (years-gone) + search
+  - **Pass 2 `filtered`** = `kpiBase` + status — used for the table only
+- `renderKPI(kpiBase, scopeLabel)` recomputes Total/ACTIVE/STALE/LOST/Peak qty from `kpiBase` so KPI cards always reflect the user's filter context. Status filter intentionally ignored (cards ARE the status breakdown).
+- Total card subtitle shows active filters: `🔍 N ร้าน · ประเภท: ... · กลุ่ม: ... · หาย ≥Xปี · ค้นหา: "..."`
+- Empty-table state shows `⚠️ ไม่มีสินค้าตรงเงื่อนไขในขอบเขตนี้ — ลองล้าง filter...` with a console.warn naming which scope stores have no entry in `store_breakdown` (data-coverage diagnostic)
+- Removed from Hub (`index.html`): nav link + quick-link card. Direct URL still works.
+
+**update_dashboard.py push_files (current):**
+`index.html, sales_dashboard_v8.html, fraud_dashboard.html, fraud_analysis.html, fraud_data.json, product_dashboard.html, product_data.json, lost_product_dashboard.html, analytics.js`
+(Note: `lost_product_data.json` is NOT in this list — handled by `push_lost_data.ps1` to separate repo.)
+
+**Critical lessons logged:**
+1. **sono format BL{4-digit-store}-YYMMDD-{seq} is misleading** — the 4 digits before the dash are NOT the store code. Real store = `blh.sotowhs` (3-digit padded). Never extract via SUBSTRING — always JOIN to header.
+2. **Sandbox can't reach api.github.com** (proxy 403) — must create new repos via web UI, then push from sandbox via git (works fine on github.com:443).
+3. **PowerShell strict mode + git** — `$ErrorActionPreference = "Stop"` plus git's normal stderr = false failures. Wrap git in `cmd /c "... 2>&1"` or drop strict mode.
+4. **GitHub Pages 100 MB hard limit per file** — applies to EVERY repo (not just specific ones). Separating into a data repo helps with history bloat but doesn't bypass the 100 MB cap. Pruning logic is permanent.
+5. **GitHub Pages takes ~1-2 min to deploy first push on a new repo.** Settings → Pages will be greyed out ("must add content first") until any commit exists; user must Save with `branch=main, /(root)` after first push if it wasn't auto-enabled.
+
+**Final commits in this session (continuous chain from `9197f85` Phase A onward):**
+| Commit | Topic |
+|---|---|
+| `8131c21` | split lost_product_data.json to separate lost-Product- repo |
+| `25153e6` | docs: separate repo architecture |
+| `0216f00` | perf: prune low-volume pairs + strip trailing zeros |
+| `de88899` | ui(hub): remove Lost Product nav link + quick-link card |
+| `4681d4b` | fix(push_lost_data.ps1): cmd /c wrapper for git stderr |
+| `7bc050f` | fix(push_lost_data.ps1): handle empty-repo first push |
+| `0b1d9d3` | fix(push_lost_data.ps1): drop backtick continuation |
+| `b68febb` | feat(lost_product): per-scope KPIs + empty-state hint + console diagnostic |
+| `93010a3` | feat(lost_product): KPIs recompute for type/group/years-gone/search (not status) |
+
+On `tumsbux/lost-Product-`: commit `895c6f1` = initial lost_product_data.json (92.7 MB)
+
+**Queued for next session (unchanged from earlier):**
+- Phase B: Days-until-OOS column on product_dashboard
+- Phase C: Dead Stock report (no sale >90d + onhand >0)
+- Phase D: Visual Adjustment audit (`ibl_locno='visual'`) — fraud signal
+- Verify all 210 stores in store_breakdown match what user expects (vs 203 dim_branch)
