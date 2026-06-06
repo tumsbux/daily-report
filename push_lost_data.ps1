@@ -1,9 +1,7 @@
 # push_lost_data.ps1
 # Pushes lost_product_data.json to tumsbux/lost-Product- repo.
-# Handles empty-repo case (first-ever push) by initializing a local git repo
-# and force-pushing main branch.
+# Tolerant of git's normal stderr output (PowerShell treats it as error under Stop policy).
 
-$ErrorActionPreference = "Stop"
 $FOLDER = "F:\co work dashboard"
 Set-Location $FOLDER
 
@@ -23,29 +21,27 @@ $tok = (Get-Content (Join-Path $FOLDER "db_config.json") -Raw | ConvertFrom-Json
 $tmp = Join-Path $env:TEMP ("lostdata_" + (Get-Random))
 $repoUrl = "https://" + $tok + "@github.com/tumsbux/lost-Product-.git"
 
-# Try clone first
+# Helper: run a command and don't let PowerShell freak out about stderr text
+function Invoke-Cmd($exe, [string[]]$cmdArgs) {
+    & cmd /c ($exe + ' ' + ($cmdArgs -join ' ') + ' 2>&1') | Write-Host
+    return $LASTEXITCODE
+}
+
 Write-Host "Trying clone of tumsbux/lost-Product- ..." -ForegroundColor Cyan
-git -c core.autocrlf=false clone --depth=1 $repoUrl $tmp 2>$null
+$cloneRc = Invoke-Cmd 'git' @('-c','core.autocrlf=false','clone','--depth=1',$repoUrl,"`"$tmp`"")
 
-if ($LASTEXITCODE -ne 0) {
-    # Empty repo - init from scratch
+if ($cloneRc -ne 0) {
     Write-Host "Clone failed (likely empty repo). Initializing fresh ..." -ForegroundColor Yellow
+    if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
     New-Item -ItemType Directory -Path $tmp | Out-Null
-    git -C $tmp init -b main
-    git -C $tmp remote add origin $repoUrl
-
-    # Add a README so the repo isn't just one data file
+    Invoke-Cmd 'git' @('-C',"`"$tmp`"",'init','-b','main') | Out-Null
+    Invoke-Cmd 'git' @('-C',"`"$tmp`"",'remote','add','origin',$repoUrl) | Out-Null
     @"
 # lost-Product-
 
 Generated data for [tumsbux/daily-report](https://github.com/tumsbux/daily-report) Lost Product Analysis dashboard.
 
-This repo contains only ``lost_product_data.json`` (regenerated daily from MyPOS).
-Separated from the main repo because the file can exceed 50 MB.
+Contains ``lost_product_data.json`` only (regenerated daily from MyPOS).
+Separated from main repo because the file can exceed 50 MB.
 
-**Dashboard:** https://tumsbux.github.io/daily-report/lost_product_dashboard.html
-**Data URL:**  https://tumsbux.github.io/lost-Product-/lost_product_data.json
-"@ | Out-File -Encoding utf8 (Join-Path $tmp "README.md")
-}
-
-Copy-Item -Force $jsonPat
+- Dashboard: https://tumsb
