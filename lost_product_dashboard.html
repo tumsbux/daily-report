@@ -87,6 +87,35 @@ tbody tr:hover{background:#f8f9ff}
   .sum-row .sc:last-child{grid-column:span 2}
   .filter-bar select{min-width:0;flex:1}
 }
+
+/* AI Analysis bar */
+.ai-bar{background:linear-gradient(135deg,#f3e8ff,#fce7f3);padding:8px 18px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #e9d5ff;position:sticky;top:80px;z-index:140}
+.ai-label{font-size:11px;font-weight:800;color:#6b21a8;letter-spacing:.3px;display:inline-flex;align-items:center;gap:4px}
+.ai-btn{border:none;border-radius:18px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;color:#fff;background:linear-gradient(135deg,#a855f7,#6366f1);box-shadow:0 1px 3px rgba(99,102,241,.2);font-family:inherit;display:inline-flex;gap:4px;align-items:center;transition:transform .12s,box-shadow .12s}
+.ai-btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(99,102,241,.4)}
+/* AI Modal */
+.ai-modal{display:none;position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:1000;align-items:center;justify-content:center;padding:20px}
+.ai-modal.open{display:flex}
+.ai-modal-body{background:#fff;border-radius:12px;width:100%;max-width:820px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 25px 50px rgba(0,0,0,.25)}
+.ai-modal-head{padding:14px 20px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:10px;background:linear-gradient(135deg,#f3e8ff,#fce7f3);border-radius:12px 12px 0 0}
+.ai-modal-head h3{flex:1;font-size:15px;color:#6b21a8;font-weight:800}
+.ai-close{background:none;border:none;font-size:18px;cursor:pointer;color:#475569;padding:0 6px}
+.ai-close:hover{color:#dc2626}
+#ai-modal-content{padding:20px;overflow-y:auto;font-size:13px;line-height:1.65;color:#1e293b}
+#ai-modal-content h4{margin-top:14px;margin-bottom:6px;font-size:13px;color:#374151;font-weight:700}
+#ai-modal-content table{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px;min-width:auto}
+#ai-modal-content th{background:#f8fafc;text-align:left;padding:6px 8px;font-weight:700;color:#475569}
+#ai-modal-content td{padding:5px 8px;border-bottom:1px solid #f1f5f9}
+#ai-modal-content ul{padding-left:20px;margin:4px 0}
+.ai-insight{margin-top:14px;padding:10px 12px;background:#fef3c7;border-left:3px solid #f59e0b;border-radius:4px;color:#78350f}
+.ai-insight b{color:#92400e}
+.ai-card-lost{margin-bottom:12px;padding:10px;background:#fef2f2;border-left:3px solid #dc2626;border-radius:4px}
+.ai-recom-blue{margin-top:14px;padding:10px 12px;background:#dbeafe;border-left:3px solid #3b82f6;border-radius:4px;color:#1e3a8a}
+@media(max-width:600px){
+  .ai-bar{padding:6px 10px;gap:5px;top:74px}
+  .ai-btn{padding:5px 10px;font-size:11px}
+  .ai-label{font-size:10px}
+}
 </style>
 </head>
 <body>
@@ -136,6 +165,15 @@ tbody tr:hover{background:#f8f9ff}
   <input class="search-box" id="f-search" placeholder="🔍 ค้นหา parcode / ชื่อ / กลุ่ม / แบรนด์" oninput="applyAll()">
   <button class="xlsx-btn" onclick="exportXLSX()">📥 Export XLSX</button>
   <span class="filter-info" id="filter-info"></span>
+</div>
+
+<div class="ai-bar">
+  <span class="ai-label">✨ AI Analysis:</span>
+  <button class="ai-btn" onclick="aiAnalyze('cause')">🔍 สาเหตุสินค้าหาย</button>
+  <button class="ai-btn" onclick="aiAnalyze('replace')">🔄 แนะนำสินค้าทดแทน</button>
+  <button class="ai-btn" onclick="aiAnalyze('recovery')">📈 ระบุโอกาส Recovery</button>
+  <button class="ai-btn" onclick="aiAnalyze('trend')">📊 Trend ปีต่อปี</button>
+  <span style="margin-left:auto;font-size:11px;color:#7e22ce">วิเคราะห์ตาม filter ปัจจุบัน (ไม่นับ filter สถานะ)</span>
 </div>
 
 <div class="page">
@@ -360,6 +398,7 @@ function applyAll(){
     return true;
   });
   // Pass 2: + status filter for the table
+  window.kpiBase = kpiBase; // expose for AI Analysis
   filtered = fStatus ? kpiBase.filter(p=>p.status===fStatus) : kpiBase;
 
   // Sort
@@ -554,7 +593,131 @@ function exportXLSX(){
   XLSX.writeFile(wb,`lost_products_${today}.xlsx`);
 }
 
+// ── AI Analysis (client-side heuristics) ────────────────────────────────────
+function aiAnalyze(type){
+  const prods = window.kpiBase || D.products || [];
+  const map = {
+    cause: ['🔍 วิเคราะห์สาเหตุสินค้าหาย', analyzeCause],
+    replace: ['🔄 แนะนำสินค้าทดแทน', analyzeReplace],
+    recovery: ['📈 ระบุโอกาส Recovery', analyzeRecovery],
+    trend: ['📊 Trend ปีต่อปี', analyzeTrend],
+  };
+  const [title, fn] = map[type] || ['AI', () => '<p>ไม่รู้จัก</p>'];
+  document.getElementById('ai-modal-title').textContent = title;
+  document.getElementById('ai-modal-content').innerHTML = fn(prods);
+  document.getElementById('ai-modal').classList.add('open');
+  if(typeof Analytics!=='undefined' && Analytics.dashboardNavigated) Analytics.dashboardNavigated('ai_'+type);
+}
+function closeAi(){ document.getElementById('ai-modal').classList.remove('open'); }
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeAi(); });
+
+function analyzeCause(prods){
+  const lost = prods.filter(p => p.status === 'LOST');
+  if(!lost.length) return '<p>ไม่มีสินค้า LOST ในขอบเขตปัจจุบัน — ลองปรับ filter ให้กว้างขึ้น</p>';
+  const grpCount={}, grpQty={};
+  lost.forEach(p=>{const g=p.group||'ไม่ระบุ';grpCount[g]=(grpCount[g]||0)+1;grpQty[g]=(grpQty[g]||0)+(p.max_qty||0);});
+  const topGrps=Object.entries(grpCount).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const brdCount={};
+  lost.forEach(p=>{const b=p.brand||'ไม่ระบุ';brdCount[b]=(brdCount[b]||0)+1;});
+  const topBrds=Object.entries(brdCount).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const yearCount={};
+  lost.forEach(p=>{yearCount[p.last_year]=(yearCount[p.last_year]||0)+1;});
+  const yearList=Object.entries(yearCount).sort();
+  const totPeak=lost.reduce((s,p)=>s+(p.max_qty||0),0);
+  let h=`<p><b>สรุป:</b> มีสินค้า LOST <b>${lost.length.toLocaleString()}</b> รายการ ในขอบเขตที่เลือก · รวม peak qty <b>${totPeak.toLocaleString()}</b> ชิ้น/ปี</p>`;
+  h+=`<h4>🏷️ Top 5 กลุ่มที่สูญเสียสินค้ามากสุด</h4><table><tr><th>กลุ่ม</th><th style="text-align:right">จำนวน SKU</th><th style="text-align:right">Peak qty รวม</th></tr>`;
+  topGrps.forEach(([g,c])=>{h+=`<tr><td>${g}</td><td style="text-align:right">${c.toLocaleString()}</td><td style="text-align:right">${(grpQty[g]||0).toLocaleString()}</td></tr>`;});
+  h+='</table>';
+  h+=`<h4>🏭 Top 5 แบรนด์ที่สูญเสียสินค้ามากสุด</h4><ul>`;
+  topBrds.forEach(([b,c])=>{h+=`<li><b>${b}</b>: ${c.toLocaleString()} SKU</li>`;});
+  h+='</ul>';
+  h+=`<h4>📅 การกระจายปีที่ขายล่าสุด (จุดที่กลายเป็น LOST)</h4><ul>`;
+  yearList.forEach(([y,c])=>{h+=`<li>${y}: <b>${c.toLocaleString()}</b> SKU</li>`;});
+  h+='</ul>';
+  const dom=topGrps[0];
+  if(dom && dom[1]>lost.length*0.3){
+    h+=`<div class="ai-insight"><b>💡 ข้อสังเกต:</b> กลุ่ม "${dom[0]}" คิดเป็น ${Math.round(dom[1]/lost.length*100)}% ของสินค้าที่หาย — น่าตรวจสอบ supplier หลักของกลุ่มนี้ หรือทบทวน category strategy</div>`;
+  }
+  return h;
+}
+
+function analyzeReplace(prods){
+  const lost=prods.filter(p=>p.status==='LOST').sort((a,b)=>(b.max_qty||0)-(a.max_qty||0)).slice(0,10);
+  const active=prods.filter(p=>p.status==='ACTIVE');
+  if(!lost.length) return '<p>ไม่มีสินค้า LOST ในขอบเขตปัจจุบัน</p>';
+  if(!active.length) return '<p>ไม่มีสินค้า ACTIVE ในขอบเขตเดียวกัน — ลองล้าง filter ประเภท/กลุ่ม</p>';
+  let h=`<p>10 อันดับสินค้า LOST ที่สูญเสียมากสุด พร้อมคำแนะนำสินค้าทดแทน (จาก ACTIVE ในกลุ่มเดียวกัน + ราคาใกล้เคียง ±30%):</p>`;
+  lost.forEach((l,i)=>{
+    const pool = l.ipunit3 ? active.filter(a=>a.group===l.group && a.ipunit3>0 && Math.abs(a.ipunit3-l.ipunit3)/l.ipunit3<=0.3) : active.filter(a=>a.group===l.group);
+    const top3 = pool.sort((a,b)=>(b.q2026||0)-(a.q2026||0)).slice(0,3);
+    h+=`<div class="ai-card-lost"><b>#${i+1} หาย:</b> <span style="font-family:monospace">${l.parcode}</span> ${l.name||''}<br/><small>กลุ่ม: ${l.group||'—'} · ราคา ฿${l.ipunit3||'?'} · peak ${(l.max_qty||0).toLocaleString()} ชิ้น/ปี (ปีสุดท้าย ${l.last_year})</small>`;
+    if(top3.length){
+      h+=`<div style="margin-top:6px;padding-top:6px;border-top:1px solid #fecaca">➡️ <b>แนะนำทดแทน:</b><ul>`;
+      top3.forEach(r=>{h+=`<li><span style="font-family:monospace">${r.parcode}</span> ${r.name||''} <small>(฿${r.ipunit3||'?'} · ขาย ${(r.q2026||0).toLocaleString()} ชิ้นในปี 2026)</small></li>`;});
+      h+='</ul></div>';
+    } else {
+      h+='<div style="margin-top:6px;color:#dc2626">⚠️ ไม่พบสินค้าทดแทนในกลุ่ม/ราคาเดียวกัน — ต้องหา supplier ใหม่</div>';
+    }
+    h+='</div>';
+  });
+  return h;
+}
+
+function analyzeRecovery(prods){
+  const lost=prods.filter(p=>p.status==='LOST');
+  if(!lost.length) return '<p>ไม่มีสินค้า LOST ในขอบเขตปัจจุบัน</p>';
+  const sorted=[...lost].map(p=>p.max_qty||0).sort((a,b)=>a-b);
+  const median=sorted[Math.floor(sorted.length/2)];
+  const cand=lost.filter(p=>(p.max_qty||0)>median && p.last_year>=2023).sort((a,b)=>(b.max_qty||0)-(a.max_qty||0)).slice(0,10);
+  if(!cand.length) return '<p>ไม่พบสินค้าที่เข้าเกณฑ์ Recovery (peak > median + หายไม่นาน)</p>';
+  const totPeak=cand.reduce((s,p)=>s+(p.max_qty||0),0);
+  const totRev=cand.reduce((s,p)=>s+(p.max_qty||0)*(p.ipunit3||0),0);
+  let h=`<p>🎯 <b>${cand.length} รายการ</b> น่าทบทวนเพื่อ Recovery (peak qty สูงกว่า median + ขายล่าสุด ≥ 2023)</p>`;
+  h+=`<p>💰 รวม peak qty ที่อาจ recover ได้: <b>${totPeak.toLocaleString()}</b> ชิ้น/ปี</p>`;
+  if(totRev>0) h+=`<p>💵 ประมาณยอดขายที่อาจกลับมา (peak × ราคา): <b>฿${Math.round(totRev).toLocaleString()}</b></p>`;
+  h+=`<table><tr><th>parcode</th><th>ชื่อ</th><th style="text-align:right">peak qty</th><th style="text-align:center">last year</th><th style="text-align:center">หายไป (ปี)</th><th style="text-align:right">ราคา</th></tr>`;
+  cand.forEach(p=>{h+=`<tr><td style="font-family:monospace;font-size:11px">${p.parcode}</td><td>${(p.name||'').substring(0,35)}</td><td style="text-align:right">${(p.max_qty||0).toLocaleString()}</td><td style="text-align:center">${p.last_year}</td><td style="text-align:center">${p.years_gone}</td><td style="text-align:right">฿${p.ipunit3||'?'}</td></tr>`;});
+  h+='</table>';
+  h+=`<div class="ai-recom-blue"><b>💡 แนะนำ:</b> ส่งรายชื่อนี้ให้ทีมจัดซื้อพิจารณา — (1) ติดต่อ supplier เดิม (2) หา supplier ทดแทน (3) ประเมินความต้องการตลาด<br/>Export XLSX ได้จากตารางหลัก (ปุ่ม Export XLSX ด้านบน) เพื่อส่งต่อ</div>`;
+  return h;
+}
+
+function analyzeTrend(prods){
+  if(!prods.length) return '<p>ไม่มีข้อมูลในขอบเขตปัจจุบัน</p>';
+  const years=[2021,2022,2023,2024,2025,2026];
+  const act={}, lost={}, fresh={};
+  years.forEach(y=>{
+    act[y]=prods.filter(p=>(p['q'+y]||0)>0).length;
+    lost[y]=prods.filter(p=>p.last_year===y && p.status!=='ACTIVE').length;
+    fresh[y]=prods.filter(p=>p.first_year===y).length;
+  });
+  let h=`<p>การเคลื่อนไหวของสินค้าในขอบเขตที่เลือก (รวม <b>${prods.length.toLocaleString()}</b> รายการ)</p>`;
+  h+=`<table><tr><th>ปี</th><th style="text-align:right">ขายอยู่</th><th style="text-align:right">เริ่มขาย (ปีแรก)</th><th style="text-align:right">หายไป (ปีสุดท้าย)</th><th style="text-align:right">net change</th></tr>`;
+  years.forEach(y=>{
+    const net=fresh[y]-lost[y];
+    const cls=net>=0?'#16a34a':'#dc2626';
+    h+=`<tr><td><b>${y}</b></td><td style="text-align:right">${act[y].toLocaleString()}</td><td style="text-align:right;color:#16a34a">+${fresh[y].toLocaleString()}</td><td style="text-align:right;color:#dc2626">-${lost[y].toLocaleString()}</td><td style="text-align:right;color:${cls};font-weight:700">${net>=0?'+':''}${net.toLocaleString()}</td></tr>`;
+  });
+  h+='</table>';
+  const peakLossYr=Object.entries(lost).filter(([y,c])=>c>0).sort((a,b)=>b[1]-a[1])[0];
+  if(peakLossYr){
+    h+=`<div class="ai-insight"><b>💡 ข้อสังเกต:</b> ปี ${peakLossYr[0]} เป็นปีที่สูญเสียสินค้ามากที่สุด (<b>${peakLossYr[1].toLocaleString()} SKU</b>) — น่าวิเคราะห์เหตุการณ์ในปีนั้น เช่น supplier เปลี่ยน / category review / market shift</div>`;
+  }
+  return h;
+}
+
+
 init();
 </script>
+<div class="ai-modal" id="ai-modal" onclick="if(event.target.id===&#39;ai-modal&#39;)closeAi()">
+  <div class="ai-modal-body">
+    <div class="ai-modal-head">
+      <h3 id="ai-modal-title">AI Analysis</h3>
+      <button class="ai-close" onclick="closeAi()">✕</button>
+    </div>
+    <div id="ai-modal-content"></div>
+  </div>
+</div>
+
 </body>
 </html>
