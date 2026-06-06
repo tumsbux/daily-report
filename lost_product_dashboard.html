@@ -344,8 +344,9 @@ function applyAll(){
     }).filter(Boolean);
   }
 
-  filtered=wProds.filter(p=>{
-    if(fStatus && p.status!==fStatus) return false;
+  // Pass 1: filter everything EXCEPT status (for KPI cards)
+  // Status is the breakdown the KPI cards show, so applying it would be circular.
+  const kpiBase = wProds.filter(p=>{
     if(fGrp && p.group!==fGrp) return false;
     if(fType && p.type!==fType) return false;
     if(fGone && (p.years_gone||0)<fGone) return false;
@@ -358,6 +359,8 @@ function applyAll(){
     }
     return true;
   });
+  // Pass 2: + status filter for the table
+  filtered = fStatus ? kpiBase.filter(p=>p.status===fStatus) : kpiBase;
 
   // Sort
   filtered.sort((a,b)=>{
@@ -366,9 +369,16 @@ function applyAll(){
     return sortDir*((va||0)-(vb||0));
   });
 
-  // KPIs recompute per scope (uses wProds before status/grp/type filters)
-  const scopeLabel = scopeStores ? `ขอบเขต ${scopeStores.size} ร้าน` : '';
-  renderKPI(scopeStores ? wProds : null, scopeLabel);
+  // KPIs reflect every filter except status (status is what KPIs categorize)
+  const anyFilter = scopeStores || fGrp || fType || fGone || fSearch;
+  const parts = [];
+  if(scopeStores) parts.push(`${scopeStores.size} ร้าน`);
+  if(fType) parts.push(`ประเภท: ${fType}`);
+  if(fGrp)  parts.push(`กลุ่ม: ${fGrp}`);
+  if(fGone) parts.push(`หาย ≥${fGone}ปี`);
+  if(fSearch) parts.push(`ค้นหา: "${fSearch}"`);
+  const scopeLabel = parts.length ? '🔍 '+parts.join(' · ') : '';
+  renderKPI(anyFilter ? kpiBase : null, scopeLabel);
 
   // Empty-scope diagnostic
   if(scopeStores && wProds.length === 0){
