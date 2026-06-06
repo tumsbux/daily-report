@@ -253,7 +253,7 @@ def main():
     # GitHub hard limit is 100MB per file. 6-year × 210 stores × ~30K products is too big.
     # Drop pairs with total qty < 5 across all years (noise / one-off sales)
     # Drop trailing zero years from each array (dashboard reads arr[i]||0)
-    MIN_QTY = 5
+    MIN_QTY = 15   # raised from 5 to keep file < 100MB (option #1)
     removed = 0
     for whs in list(store_breakdown.keys()):
         for ip in list(store_breakdown[whs].keys()):
