@@ -47,6 +47,8 @@ Write-Host "--------------------------------------------------" -ForegroundColor
 py "$FOLDER\build_lost_product_data.py"
 if ($LASTEXITCODE -eq 0) {
     Write-Host "  OK  lost_product_data.json built" -ForegroundColor Green
+    Write-Host "  pushing to separate lost-Product- repo..." -ForegroundColor DarkGray
+    & "$FOLDER\push_lost_data.ps1"
 } else {
     Write-Host "  WARN: lost product build failed (non-fatal)" -ForegroundColor Yellow
 }
