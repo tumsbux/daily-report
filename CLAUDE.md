@@ -876,3 +876,45 @@ HAVING qty > 0
 - `d00131b` data: lost_product_data.json (correct 2025+2026, BUT only 79 stores)
 - `30137bc` docs: CLAUDE.md session summary
 - `86c8150` fix: JOIN bld_acc + blh_acc for real sotowhs + sodate ← **needs JSON rebuild**
+
+
+### Lost Product — split to separate repo (2026-06-05 night, commit `8131c21`)
+
+**Why:** lost_product_data.json after JOIN+per-store is 50-120MB. GitHub hard-rejects files over 100MB. Even if it fits, daily regen would bloat main daily-report repo fast.
+
+**Architecture:**
+- `tumsbux/daily-report` — code + small JSONs (product_data, fraud_data, all HTML) → served at https://tumsbux.github.io/daily-report/
+- `tumsbux/lost-Product-` — **lost_product_data.json only** → served at https://tumsbux.github.io/lost-Product-/
+
+**Note repo naming:** repo is literally `lost-Product-` (capital P, trailing hyphen — that's how user created it via web UI). URL is case-preserving. Don't try to rename — would break the fetch.
+
+**Cross-origin fetch:** Same `tumsbux.github.io` host so no CORS issue. `lost_product_dashboard.html` fetches:
+```js
+const r = await fetch('https://tumsbux.github.io/lost-Product-/lost_product_data.json?v='+Date.now());
+```
+
+**Push workflow on Windows:**
+```powershell
+cd "F:\co work dashboard"
+py build_lost_product_data.py    # build with pruning (MIN_QTY=5 + trailing-zero strip)
+.\push_lost_data.ps1              # pushes to lost-Product- repo
+```
+`run_manual_update.ps1` auto-invokes `push_lost_data.ps1` after build succeeds.
+
+**Pruning rules in builder (still needed even with separate repo — 100MB file limit applies everywhere):**
+- Drop `(whs,iprod)` pairs where total qty across 6 years < 5 (noise)
+- Strip trailing zero years from each `[q21..q26]` array (dashboard reads `arr[i]||0`)
+
+If pruned JSON still > 100MB in future, options:
+1. Raise `MIN_QTY` to 10 in build_lost_product_data.py
+2. Drop store_breakdown entirely for chain-wide ACTIVE products (only LOST/STALE need scope recomputation)
+3. Sparse year dict instead of array: `{"21":5,"24":3}` only nonzero years
+4. Switch to GitHub Releases (2GB limit) — change fetch URL to a release asset
+
+**Files added/changed this commit (`8131c21`):**
+- `lost_product_dashboard.html` — fetch URL changed to absolute (cross-repo)
+- `update_dashboard.py` — `lost_product_data.json` removed from push_files
+- `push_lost_data.ps1` NEW — separate push helper for the data repo
+- `run_manual_update.ps1` — calls push_lost_data.ps1 after build
+
+**GitHub Pages must be enabled on lost-Product- repo:** Settings → Pages → Source: Deploy from a branch, Branch: main, /(root). User did this 2026-06-05.
