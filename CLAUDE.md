@@ -1066,3 +1066,90 @@ All AI analyses use `window.kpiBase` (post-filter except status). Modal pattern:
 - Phase B: Days-until-OOS column on product_dashboard
 - Phase C: Dead Stock report (no sale >90d + onhand >0)
 - Phase D: Visual Adjustment audit (`ibl_locno='visual'`) — fraud signal
+
+
+### Session 2026-06-06 (late) — Size optimization + lost_score documented
+
+**Problem**: lost_product_data.json hit 97 MB — right at GitHub's 100 MB hard limit. At current growth rate (~50 KB/day), file would exceed 100 MB within 30-60 days and daily push would silently fail.
+
+**Solution applied** (commits `2560cc4` then `7321daf`):
+1. Raised `MIN_QTY` from 5 to 15 (commit `2560cc4`)
+2. Added `MIN_AMT = 3000` baht threshold with OR logic (commit `7321daf`)
+
+**Final pruning rule**: drop `(whs, iprod)` pair if **`total_qty < 15 AND total_amt < 3000`**. Equivalent: keep if qty≥15 OR amt≥3000. Catches both high-volume cheap items AND high-value low-volume items.
+
+**SQL change** in `query_year()`:
+```sql
+SELECT blh.sotowhs AS whs, bld.iprod,
+       SUM(bld.soqty) AS qty,
+       SUM(bld.solineamt) AS amt    -- NEW: tracks baht value
+FROM bld_acc_*_lake bld JOIN blh_acc_*_lake blh ON blh.sono = bld.sono
+WHERE bld.solinetype NOT IN ('C','R') AND blh.sotowhs REGEXP '^[0-9]+$'
+GROUP BY blh.sotowhs, bld.iprod
+```
+
+`query_year()` now returns `(tot_qty_by_iprod, {(whs, iprod): (qty, amt)})` instead of just qty.
+
+**Expected size impact**: 97 MB → ~45-55 MB (-40-50%). Buys ~2 years of growth headroom before next ceiling.
+
+### `lost_score` formula (now well-documented)
+
+```python
+if status == 'ACTIVE':           # has 2026 sales
+    lost_score = 0
+elif status == 'STALE':          # has 2025 but not 2026
+    lost_score = max_qty
+else:  # LOST: no 2025 AND no 2026
+    lost_score = years_gone * max_qty
+```
+
+Where `max_qty` = peak annual qty across 6 years, `years_gone = current_year - last_year`.
+
+**Reading**: "How much annual qty are we missing × how long we've been missing it". Sort DESC to rank by recovery priority.
+
+**Example walkthrough** (parcode `8887771939` แผ่นใยขัดพื้น):
+- 2021=5,561 · 2022=**13,562** · 2023=8,478 · 2024=1,080 · 2025=0 · 2026=0
+- max_qty = 13,562 (peak 2022) · last_year = 2024 · years_gone = 2 · status = LOST
+- lost_score = 2 × 13,562 = **27,124** ✓
+
+### `solineamt` column meaning (per probe verification)
+
+In `bld_acc_*_lake` tables:
+- `solineamt` = **line total in baht after line-level discount, before bill-level discount**
+- Approximately `soqty × (sopricunit - sopricdisc)`
+- Sum across 6 years per `(whs, iprod)` pair → total lifetime baht revenue at that store
+- Threshold `≥ ฿3,000 lifetime` filters out trivial one-off items
+
+### Self-hosted MySQL backend evaluated and rejected
+
+**User asked**: can we move data to their own MySQL host?
+**Answer**: technically yes, but **not practical for current scope**:
+- MySQL alone can't serve dashboards (browser can't talk MySQL directly)
+- Would need: web server (nginx) + PHP/Node + CORS + HTTPS cert + maintenance
+- Cheap VPS ($5/mo DigitalOcean) feasible but overkill for daily-refresh dashboard
+- GitHub Pages + pruning gives 2+ years of headroom
+
+**Decision**: stay on GitHub Pages. Revisit if file growth accelerates faster than expected.
+
+### Tomorrow's auto-run sanity check (2026-06-07 07:30-09:30 BKK)
+
+GH Actions workflow `.github/workflows/daily-update.yml` will:
+1. Cron triggers (one of 5 slots between 07:30-09:30 BKK)
+2. Skip-guard checks if today's commit already exists → skip if yes
+3. Build fraud + product + lost product (with new qty/amt OR pruning)
+4. Push lost_product_data.json to `tumsbux/lost-Product` repo via bash equivalent of push_lost_data.ps1
+5. Push other data to `tumsbux/daily-report` repo
+
+**Verify next morning**: visit https://tumsbux.github.io/lost-Product/, check `อัปเดต: 2026-06-07` chip, file size ~45-55 MB in https://github.com/tumsbux/lost-Product
+
+### Commits this late-session
+| Commit | Repo | Topic |
+|---|---|---|
+| `2560cc4` | daily-report | perf: raise MIN_QTY 5 → 15 |
+| `7321daf` | daily-report | perf: add MIN_AMT=3000 OR logic + SUM(solineamt) tracking |
+
+### Queued for next session (unchanged)
+- Phase B: Days-until-OOS column on product_dashboard
+- Phase C: Dead Stock report (no sale >90d + onhand >0)
+- Phase D: Visual Adjustment audit (`ibl_locno='visual'`) fraud signal
+- Watch JSON size at end of June 2026 — if > 70 MB by then, growth is faster than expected and we need option #2 (sparse year encoding) sooner
