@@ -63,7 +63,9 @@ def query_year(conn, bld_table, blh_table, where_year=None):
     tot = dict(zip(df['iprod'].astype(str), df['qty'].astype(float)))
 
     sql_store = f"""
-        SELECT blh.sotowhs AS whs, bld.iprod, SUM(bld.soqty) AS qty
+        SELECT blh.sotowhs AS whs, bld.iprod,
+               SUM(bld.soqty) AS qty,
+               SUM(bld.solineamt) AS amt
         FROM `{bld_table}` bld
         JOIN `{blh_table}` blh ON blh.sono = bld.sono
         WHERE bld.solinetype NOT IN ('C', 'R')
@@ -74,11 +76,12 @@ def query_year(conn, bld_table, blh_table, where_year=None):
     """
     df2 = pd.read_sql(sql_store, conn)
     store = {}
-    for whs, ip, q in zip(df2['whs'].astype(str), df2['iprod'].astype(str), df2['qty'].astype(float)):
+    for whs, ip, q, a in zip(df2['whs'].astype(str), df2['iprod'].astype(str),
+                              df2['qty'].astype(float), df2['amt'].astype(float)):
         try:
             n = int(whs)
             if 1 <= n <= 500:
-                store[(f'{n:03d}', ip)] = q
+                store[(f'{n:03d}', ip)] = (q, a)
         except ValueError:
             pass
     return tot, store
@@ -239,36 +242,45 @@ def main():
     print(f'\nTotal unique parcodes across all years: {len(all_parcodes):,}')
 
     print('Building per-store breakdown ...')
-    store_breakdown = {}
+    store_breakdown = {}      # {whs: {iprod: [q21..q26]}}
+    store_amt_total = {}      # {(whs,iprod): total_amt across all 6 years}
     yidx = {y: i for i, y in enumerate(YEARS)}
     for year, sd in year_store_qty.items():
         idx = yidx[year]
-        for (whs, ip), q in sd.items():
+        for (whs, ip), val in sd.items():
+            # val is (qty, amt) tuple from updated query_year
+            if isinstance(val, tuple):
+                q, a = val
+            else:
+                q, a = val, 0
             arr = store_breakdown.setdefault(whs, {}).setdefault(ip, [0]*len(YEARS))
             arr[idx] = round(q)
+            store_amt_total[(whs, ip)] = store_amt_total.get((whs, ip), 0) + a
     n_pairs = sum(len(p) for p in store_breakdown.values())
-    print(f'  {len(store_breakdown)} stores, {n_pairs:,} (whs,iprod) pairs')
+    print(f'  {len(store_breakdown)} stores, {n_pairs:,} (whs,iprod) pairs (pre-prune)')
 
-    # ── Shrink: prune low-volume pairs + drop trailing zeros (size optimization)
-    # GitHub hard limit is 100MB per file. 6-year × 210 stores × ~30K products is too big.
-    # Drop pairs with total qty < 5 across all years (noise / one-off sales)
+    # ── Shrink: prune low-volume + low-value pairs + drop trailing zeros
+    # Keep pair only if qty >= MIN_QTY OR amt >= MIN_AMT (catch volume movers AND value items)
     # Drop trailing zero years from each array (dashboard reads arr[i]||0)
-    MIN_QTY = 15   # raised from 5 to keep file < 100MB (option #1)
+    MIN_QTY = 15      # min total qty across 6 years
+    MIN_AMT = 3000    # min total baht across 6 years
     removed = 0
     for whs in list(store_breakdown.keys()):
         for ip in list(store_breakdown[whs].keys()):
             arr = store_breakdown[whs][ip]
-            if sum(arr) < MIN_QTY:
+            total_qty = sum(arr)
+            total_amt = store_amt_total.get((whs, ip), 0)
+            # Drop if BOTH below threshold (OR keep logic = NOT(qty<MIN AND amt<MIN))
+            if total_qty < MIN_QTY and total_amt < MIN_AMT:
                 del store_breakdown[whs][ip]
                 removed += 1
             else:
-                # Strip trailing zeros
                 while len(arr) > 1 and arr[-1] == 0:
                     arr.pop()
         if not store_breakdown[whs]:
             del store_breakdown[whs]
     n_after = sum(len(p) for p in store_breakdown.values())
-    print(f'  pruned {removed:,} low-volume pairs (<{MIN_QTY} total qty) + trailing zeros')
+    print(f'  pruned {removed:,} pairs (<{MIN_QTY} qty AND <฿{MIN_AMT:,} amt) + trailing zeros')
     print(f'  final: {len(store_breakdown)} stores, {n_after:,} pairs')
 
     print('Querying dim_branch ...')
