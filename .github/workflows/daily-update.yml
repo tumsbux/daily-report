@@ -95,4 +95,59 @@ jobs:
         if: steps.guard.outputs.skip != 'true'
         continue-on-error: true
         timeout-minutes: 10
-        run: python build_
+        run: python build_product_data_mysql.py --no-push
+
+      - name: Build lost product data
+        if: steps.guard.outputs.skip != 'true'
+        continue-on-error: true
+        timeout-minutes: 15
+        run: python build_lost_product_data.py
+
+      - name: Push lost_product_data.json to tumsbux/lost-Product- repo
+        if: steps.guard.outputs.skip != 'true'
+        continue-on-error: true
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          if [ ! -f lost_product_data.json ]; then
+            echo "no lost_product_data.json — skipping"
+            exit 0
+          fi
+          SZ=$(du -m lost_product_data.json | cut -f1)
+          echo "lost_product_data.json size: ${SZ} MB"
+          if [ "$SZ" -gt 99 ]; then
+            echo "WARN: file over 99 MB — GitHub hard limit is 100 MB"
+          fi
+          TMP=$(mktemp -d)
+          REPO_URL="https://x-access-token:${GH_PAT}@github.com/tumsbux/lost-Product-.git"
+          # Try clone; if empty repo, init fresh
+          if git -c core.autocrlf=false clone --depth=1 "$REPO_URL" "$TMP" 2>&1; then
+            echo "cloned existing repo"
+          else
+            echo "clone failed — initializing fresh"
+            rm -rf "$TMP"
+            mkdir -p "$TMP"
+            git -C "$TMP" init -b main
+            git -C "$TMP" remote add origin "$REPO_URL"
+            echo "# lost-Product-" > "$TMP/README.md"
+            echo "Generated data for tumsbux/daily-report Lost Product dashboard." >> "$TMP/README.md"
+          fi
+          cp lost_product_data.json "$TMP/lost_product_data.json"
+          git -C "$TMP" add lost_product_data.json README.md 2>/dev/null || true
+          if git -C "$TMP" diff --cached --quiet; then
+            echo "no changes vs remote — skipping push"
+          else
+            git -C "$TMP" -c user.email=bot@dashboard -c user.name="Dashboard Bot" \
+              commit -m "auto: lost_product_data.json $(TZ=Asia/Bangkok date +%Y-%m-%d)"
+            git -C "$TMP" push -u origin main
+            echo "OK pushed"
+          fi
+          rm -rf "$TMP"
+
+      - name: Run dashboard update
+        if: steps.guard.outputs.skip != 'true'
+        run: python update_dashboard.py
+
+      - name: Clean up credentials
+        if: always()
+        run: rm -f db_config.json
