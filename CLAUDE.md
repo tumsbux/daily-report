@@ -826,3 +826,53 @@ JSON output: 54MB
 - Phase B: Days-until-OOS column on product_dashboard
 - Phase C: Dead Stock report (no sale >90d + onhand >0)
 - Phase D: Visual Adjustment audit (`ibl_locno='visual'`) — fraud signal
+
+
+### Lost Product follow-up — JOIN bld_acc + blh_acc (2026-06-05 late night)
+
+**Bug found:** Initial builder extracted store code from `sono` via `SUBSTRING(sono,3,4)` getting `'0011'` for sono `'BL0011-...'`. But `dim_branch.code` uses 3-digit format (`'001'`). The 4th digit in sono is actually a POS terminal ID, not part of the store code. Result: only 79 of 203 stores appeared in `store_breakdown`, and filtering by store 036 returned 0 products.
+
+**Fix (commit `86c8150`):** Rewrote `query_year()` to JOIN `bld_acc_*_lake` ↔ `blh_acc_*_lake` on `sono`. The header table has the proper columns:
+
+| `blh_acc_*_lake` column | Type | Use |
+|---|---|---|
+| `sotowhs` | varchar (3-digit padded `'001'`–`'500'`) | Real store code — matches `dim_branch.code` directly |
+| `sodate` | DATETIME | Use `YEAR(blh.sodate)` for filtering, no substring magic |
+| `sono` | varchar | JOIN key to bld_acc detail rows |
+
+**Schema change in builder:**
+```python
+YEAR_TABLES = {
+    2021: ('bld_acc_2021_lake', 'blh_acc_2021_lake'),
+    2022: ('bld_acc_2022_lake', 'blh_acc_2022_lake'),
+    2023: ('bld_acc_2023_lake', 'blh_acc_2023_lake'),
+    2024: ('bld_acc_2024_lake', 'blh_acc_2024_lake'),
+}
+CURRENT_TABLES = ('bld_acc_lake', 'blh_acc_lake')  # 2025+2026
+```
+
+New SQL pattern (for both totals and per-store breakdown):
+```sql
+SELECT blh.sotowhs AS whs, bld.iprod, SUM(bld.soqty) AS qty
+FROM bld_acc_2021_lake bld
+JOIN blh_acc_2021_lake blh ON blh.sono = bld.sono
+WHERE bld.solinetype NOT IN ('C','R')
+  AND blh.sotowhs REGEXP '^[0-9]+$'
+  -- For current table: AND YEAR(blh.sodate) = 2025  (or 2026)
+GROUP BY whs, iprod
+HAVING qty > 0
+```
+
+**Lesson updated:** sono substring extraction was fragile — always JOIN to header for store/date if available. The `bld_acc` line-item tables alone don't carry store or date. Probe-confirmed schema on 2026-06-05.
+
+**Status:** Builder pushed in `86c8150`. **TODO Windows:** rerun `py build_lost_product_data.py` + push regenerated JSON. After rerun, store_breakdown should contain ~200 stores (up from 79), and store-filter on dashboard will return real LOST products per store.
+
+### Final commit list this session (2026-06-05 night)
+- `d4b48d6` feat: initial Lost Product dashboard
+- `5bd7926` fix: use iprod (not parcode) + sono substring for year filter
+- `a0c6b35` feat: RM/DM/Store filters + per-store year breakdown
+- `a432930` fix: restore truncated main() call
+- `880e805` fix: correct sono substrings + dim_branch column
+- `d00131b` data: lost_product_data.json (correct 2025+2026, BUT only 79 stores)
+- `30137bc` docs: CLAUDE.md session summary
+- `86c8150` fix: JOIN bld_acc + blh_acc for real sotowhs + sodate ← **needs JSON rebuild**
