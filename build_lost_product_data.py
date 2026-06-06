@@ -249,6 +249,28 @@ def main():
     n_pairs = sum(len(p) for p in store_breakdown.values())
     print(f'  {len(store_breakdown)} stores, {n_pairs:,} (whs,iprod) pairs')
 
+    # ── Shrink: prune low-volume pairs + drop trailing zeros (size optimization)
+    # GitHub hard limit is 100MB per file. 6-year × 210 stores × ~30K products is too big.
+    # Drop pairs with total qty < 5 across all years (noise / one-off sales)
+    # Drop trailing zero years from each array (dashboard reads arr[i]||0)
+    MIN_QTY = 5
+    removed = 0
+    for whs in list(store_breakdown.keys()):
+        for ip in list(store_breakdown[whs].keys()):
+            arr = store_breakdown[whs][ip]
+            if sum(arr) < MIN_QTY:
+                del store_breakdown[whs][ip]
+                removed += 1
+            else:
+                # Strip trailing zeros
+                while len(arr) > 1 and arr[-1] == 0:
+                    arr.pop()
+        if not store_breakdown[whs]:
+            del store_breakdown[whs]
+    n_after = sum(len(p) for p in store_breakdown.values())
+    print(f'  pruned {removed:,} low-volume pairs (<{MIN_QTY} total qty) + trailing zeros')
+    print(f'  final: {len(store_breakdown)} stores, {n_after:,} pairs')
+
     print('Querying dim_branch ...')
     branch_info = query_branch_info(conn)
     print(f'  {len(branch_info)} stores with branch metadata')
