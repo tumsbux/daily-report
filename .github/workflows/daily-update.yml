@@ -103,7 +103,7 @@ jobs:
         timeout-minutes: 15
         run: python build_lost_product_data.py
 
-      - name: Push lost_product_data.json to tumsbux/lost-Product- repo
+      - name: Push lost_product_data.json to tumsbux/lost-Product repo
         if: steps.guard.outputs.skip != 'true'
         continue-on-error: true
         env:
@@ -119,7 +119,7 @@ jobs:
             echo "WARN: file over 99 MB — GitHub hard limit is 100 MB"
           fi
           TMP=$(mktemp -d)
-          REPO_URL="https://x-access-token:${GH_PAT}@github.com/tumsbux/lost-Product-.git"
+          REPO_URL="https://x-access-token:${GH_PAT}@github.com/tumsbux/lost-Product.git"
           # Try clone; if empty repo, init fresh
           if git -c core.autocrlf=false clone --depth=1 "$REPO_URL" "$TMP" 2>&1; then
             echo "cloned existing repo"
@@ -129,7 +129,7 @@ jobs:
             mkdir -p "$TMP"
             git -C "$TMP" init -b main
             git -C "$TMP" remote add origin "$REPO_URL"
-            echo "# lost-Product-" > "$TMP/README.md"
+            echo "# lost-Product" > "$TMP/README.md"
             echo "Generated data for tumsbux/daily-report Lost Product dashboard." >> "$TMP/README.md"
           fi
           cp lost_product_data.json "$TMP/lost_product_data.json"

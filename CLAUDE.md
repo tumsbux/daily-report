@@ -884,20 +884,20 @@ HAVING qty > 0
 
 **Architecture:**
 - `tumsbux/daily-report` — code + small JSONs (product_data, fraud_data, all HTML) → served at https://tumsbux.github.io/daily-report/
-- `tumsbux/lost-Product-` — **lost_product_data.json only** → served at https://tumsbux.github.io/lost-Product-/
+- `tumsbux/lost-Product` — **lost_product_data.json only** → served at https://tumsbux.github.io/lost-Product/
 
-**Note repo naming:** repo is literally `lost-Product-` (capital P, trailing hyphen — that's how user created it via web UI). URL is case-preserving. Don't try to rename — would break the fetch.
+**Note repo naming:** repo is literally `lost-Product` (capital P, trailing hyphen — that's how user created it via web UI). URL is case-preserving. Don't try to rename — would break the fetch.
 
 **Cross-origin fetch:** Same `tumsbux.github.io` host so no CORS issue. `lost_product_dashboard.html` fetches:
 ```js
-const r = await fetch('https://tumsbux.github.io/lost-Product-/lost_product_data.json?v='+Date.now());
+const r = await fetch('https://tumsbux.github.io/lost-Product/lost_product_data.json?v='+Date.now());
 ```
 
 **Push workflow on Windows:**
 ```powershell
 cd "F:\co work dashboard"
 py build_lost_product_data.py    # build with pruning (MIN_QTY=5 + trailing-zero strip)
-.\push_lost_data.ps1              # pushes to lost-Product- repo
+.\push_lost_data.ps1              # pushes to lost-Product repo
 ```
 `run_manual_update.ps1` auto-invokes `push_lost_data.ps1` after build succeeds.
 
@@ -917,17 +917,17 @@ If pruned JSON still > 100MB in future, options:
 - `push_lost_data.ps1` NEW — separate push helper for the data repo
 - `run_manual_update.ps1` — calls push_lost_data.ps1 after build
 
-**GitHub Pages must be enabled on lost-Product- repo:** Settings → Pages → Source: Deploy from a branch, Branch: main, /(root). User did this 2026-06-05.
+**GitHub Pages must be enabled on lost-Product repo:** Settings → Pages → Source: Deploy from a branch, Branch: main, /(root). User did this 2026-06-05.
 
 
 ### Lost Product — final session deliverables (2026-06-05/06, commits up to `93010a3`)
 
 **Architecture finalized:**
 - `tumsbux/daily-report` — code + small JSONs (product_data, fraud_data, HTMLs) → https://tumsbux.github.io/daily-report/
-- `tumsbux/lost-Product-` — **lost_product_data.json only** (92 MB) → https://tumsbux.github.io/lost-Product-/
+- `tumsbux/lost-Product` — **lost_product_data.json only** (92 MB) → https://tumsbux.github.io/lost-Product/
 
   Repo name has trailing hyphen + capital P — user created it via web UI. URL is case-preserving. Don't try to rename.
-  Cross-origin fetch from daily-report to lost-Product- works (same `tumsbux.github.io` host).
+  Cross-origin fetch from daily-report to lost-Product works (same `tumsbux.github.io` host).
 
 **Builder pipeline confirmed:**
 1. `query_year()` JOINs `bld_acc_*_lake` to `blh_acc_*_lake` on `sono` to get `blh.sotowhs` (real 3-digit store code matching `dim_branch.code`) and `blh.sodate` (DATETIME, supports `YEAR()`)
@@ -962,7 +962,7 @@ If pruned JSON still > 100MB in future, options:
 **Final commits in this session (continuous chain from `9197f85` Phase A onward):**
 | Commit | Topic |
 |---|---|
-| `8131c21` | split lost_product_data.json to separate lost-Product- repo |
+| `8131c21` | split lost_product_data.json to separate lost-Product repo |
 | `25153e6` | docs: separate repo architecture |
 | `0216f00` | perf: prune low-volume pairs + strip trailing zeros |
 | `de88899` | ui(hub): remove Lost Product nav link + quick-link card |
@@ -972,7 +972,7 @@ If pruned JSON still > 100MB in future, options:
 | `b68febb` | feat(lost_product): per-scope KPIs + empty-state hint + console diagnostic |
 | `93010a3` | feat(lost_product): KPIs recompute for type/group/years-gone/search (not status) |
 
-On `tumsbux/lost-Product-`: commit `895c6f1` = initial lost_product_data.json (92.7 MB)
+On `tumsbux/lost-Product`: commit `895c6f1` = initial lost_product_data.json (92.7 MB)
 
 **Queued for next session (unchanged from earlier):**
 - Phase B: Days-until-OOS column on product_dashboard

@@ -1,5 +1,5 @@
 # push_lost_data.ps1
-# Pushes lost_product_data.json to tumsbux/lost-Product- repo.
+# Pushes lost_product_data.json to tumsbux/lost-Product repo.
 # Tolerant of git's normal stderr output (PowerShell treats it as error under Stop policy).
 
 $FOLDER = "F:\co work dashboard"
@@ -19,7 +19,7 @@ if ($sz -gt 99) {
 
 $tok = (Get-Content (Join-Path $FOLDER "db_config.json") -Raw | ConvertFrom-Json).github_token
 $tmp = Join-Path $env:TEMP ("lostdata_" + (Get-Random))
-$repoUrl = "https://" + $tok + "@github.com/tumsbux/lost-Product-.git"
+$repoUrl = "https://" + $tok + "@github.com/tumsbux/lost-Product.git"
 
 # Helper: run a command and don't let PowerShell freak out about stderr text
 function Invoke-Cmd($exe, [string[]]$cmdArgs) {
@@ -27,7 +27,7 @@ function Invoke-Cmd($exe, [string[]]$cmdArgs) {
     return $LASTEXITCODE
 }
 
-Write-Host "Trying clone of tumsbux/lost-Product- ..." -ForegroundColor Cyan
+Write-Host "Trying clone of tumsbux/lost-Product ..." -ForegroundColor Cyan
 $cloneRc = Invoke-Cmd 'git' @('-c','core.autocrlf=false','clone','--depth=1',$repoUrl,"`"$tmp`"")
 
 if ($cloneRc -ne 0) {
@@ -37,7 +37,7 @@ if ($cloneRc -ne 0) {
     Invoke-Cmd 'git' @('-C',"`"$tmp`"",'init','-b','main') | Out-Null
     Invoke-Cmd 'git' @('-C',"`"$tmp`"",'remote','add','origin',$repoUrl) | Out-Null
     @"
-# lost-Product-
+# lost-Product
 
 Generated data for [tumsbux/daily-report](https://github.com/tumsbux/daily-report) Lost Product Analysis dashboard.
 

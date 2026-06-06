@@ -187,7 +187,7 @@ const fmt=n=>(n==null||isNaN(n))?'—':Math.round(n).toLocaleString();
 
 async function init(){
   try{
-    const r=await fetch('https://tumsbux.github.io/lost-Product-/lost_product_data.json?v='+Date.now());
+    const r=await fetch('https://tumsbux.github.io/lost-Product/lost_product_data.json?v='+Date.now());
     D=await r.json();
   }catch(e){
     document.body.innerHTML='<div style="padding:30px;color:#dc2626">ERROR loading lost_product_data.json: '+e.message+'</div>';
