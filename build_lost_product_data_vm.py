@@ -30,21 +30,21 @@ def _state_file(year):
 
 
 def _load_state():
-    """Return (year_qty, year_store_qty) loaded from state files (for resume)."""
+    """Return year_qty loaded from state files (for resume)."""
     os.makedirs(STATE_DIR, exist_ok=True)
-    yq, ys = {}, {}
+    yq = {}
     for y in YEARS:
         f = _state_file(y)
         if os.path.exists(f):
             try:
                 with open(f, 'rb') as fh:
-                    tot, store = pickle.load(fh)
+                    tot, _ = pickle.load(fh)
                 yq[y] = tot
-                ys[y] = store
                 print(f'[state] resume: loaded year {y} ({len(tot):,} iprods)', flush=True)
             except Exception as e:
                 print(f'[state] WARN: failed to load {f}: {e}', flush=True)
-    return yq, ys
+    return yq
+
 
 
 def _save_year_state(year, tot, store):
@@ -87,18 +87,24 @@ def query_year(conn, bld_table, blh_table, where_year=None):
             f"AND blh.sodate >= '{where_year}-01-01' "
             f"AND blh.sodate <  '{where_year+1}-01-01'"
         )
+        sql_tot = f"""
+            SELECT bld.iprod, SUM(bld.soqty) AS qty
+            FROM `{bld_table}` bld
+            JOIN `{blh_table}` blh ON blh.sono = bld.sono
+            WHERE bld.solinetype NOT IN ('C', 'R')
+              {year_filter}
+            GROUP BY bld.iprod
+            HAVING qty > 0
+        """
     else:
-        year_filter = ""
+        sql_tot = f"""
+            SELECT bld.iprod, SUM(bld.soqty) AS qty
+            FROM `{bld_table}` bld
+            WHERE bld.solinetype NOT IN ('C', 'R')
+            GROUP BY bld.iprod
+            HAVING qty > 0
+        """
 
-    sql_tot = f"""
-        SELECT bld.iprod, SUM(bld.soqty) AS qty
-        FROM `{bld_table}` bld
-        JOIN `{blh_table}` blh ON blh.sono = bld.sono
-        WHERE bld.solinetype NOT IN ('C', 'R')
-          {year_filter}
-        GROUP BY bld.iprod
-        HAVING qty > 0
-    """
     tot = {}
     cur = conn.cursor(buffered=False)
     cur.execute(sql_tot)
@@ -109,6 +115,14 @@ def query_year(conn, bld_table, blh_table, where_year=None):
         for ip, qty in rows:
             tot[str(ip)] = float(qty)
     cur.close()
+
+    if where_year is not None:
+        year_filter = (
+            f"AND blh.sodate >= '{where_year}-01-01' "
+            f"AND blh.sodate <  '{where_year+1}-01-01'"
+        )
+    else:
+        year_filter = ""
 
     sql_store = f"""
         SELECT blh.sotowhs AS whs, bld.iprod,
@@ -138,6 +152,7 @@ def query_year(conn, bld_table, blh_table, where_year=None):
                 pass
     cur.close()
     return tot, store
+
 
 
 # ── STEP 2: Name lookup (dim_product + dim_item_barcode bridge) ──────────────
@@ -261,7 +276,7 @@ def main():
     print('=' * 60, flush=True)
 
     # Resume from previous run if state files exist
-    year_qty, year_store_qty = _load_state()
+    year_qty = _load_state()
 
     # Build per-year jobs for years NOT yet cached
     jobs = []
@@ -281,16 +296,15 @@ def main():
         c.close()
         _save_year_state(yr, tot, store)  # PERSIST IMMEDIATELY
         print(f'[{yr}] done | {len(tot):,} iprods | {len(store):,} (whs,iprod) | qty={sum(tot.values()):,.0f}', flush=True)
-        return yr, tot, store
+        return yr, tot
 
     if jobs:
-        print(f'Launching {len(jobs)} parallel year queries ({len(year_qty)} cached) ...', flush=True)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(jobs)) as ex:
-            futures = [ex.submit(_run_one, j) for j in jobs]
-            for fut in concurrent.futures.as_completed(futures):
-                yr, tot, store = fut.result()
-                year_qty[yr] = tot
-                year_store_qty[yr] = store
+        print(f'Launching {len(jobs)} sequential year queries ({len(year_qty)} cached) ...', flush=True)
+        for job in jobs:
+            yr, tot = _run_one(job)
+            year_qty[yr] = tot
+            # Delete references to reclaim RAM immediately
+            del tot
     else:
         print('All 6 years cached — skipping query phase', flush=True)
 
@@ -314,16 +328,28 @@ def main():
     store_breakdown = {}
     store_amt_total = {}
     yidx = {y: i for i, y in enumerate(YEARS)}
-    for year, sd in year_store_qty.items():
-        idx = yidx[year]
-        for (whs, ip), val in sd.items():
-            if isinstance(val, tuple):
-                q, a = val
-            else:
-                q, a = val, 0
-            arr = store_breakdown.setdefault(whs, {}).setdefault(ip, [0]*len(YEARS))
-            arr[idx] = round(q)
-            store_amt_total[(whs, ip)] = store_amt_total.get((whs, ip), 0) + a
+    for year in YEARS:
+        f = _state_file(year)
+        if os.path.exists(f):
+            print(f'  Loading & aggregating year {year} ...', flush=True)
+            try:
+                with open(f, 'rb') as fh:
+                    _, sd = pickle.load(fh)
+                
+                idx = yidx[year]
+                for (whs, ip), val in sd.items():
+                    if isinstance(val, tuple):
+                        q, a = val
+                    else:
+                        q, a = val, 0
+                    arr = store_breakdown.setdefault(whs, {}).setdefault(ip, [0]*len(YEARS))
+                    arr[idx] = round(q)
+                    store_amt_total[(whs, ip)] = store_amt_total.get((whs, ip), 0) + a
+                
+                # Delete sd immediately to reclaim RAM
+                del sd
+            except Exception as e:
+                print(f'  ERROR loading/aggregating year {year}: {e}', flush=True)
     n_pairs = sum(len(p) for p in store_breakdown.values())
     print(f'  {len(store_breakdown)} stores, {n_pairs:,} (whs,iprod) pairs (pre-prune)', flush=True)
 
