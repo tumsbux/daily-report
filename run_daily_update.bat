@@ -60,4 +60,31 @@ if %errorlevel% neq 0 (
 echo [%time%] Rebuilding fraud data from MySQL...
 %PYTHON% rebuild_fraud_analysis.py --no-push
 if %errorlevel% neq 0 (
-    echo ERROR: rebuild_fraud
+    echo ERROR: rebuild_fraud_analysis.py failed
+    exit /b 1
+)
+
+:: [3] Update sales dashboard + push to GitHub
+echo [%time%] Updating sales dashboard...
+%PYTHON% update_dashboard.py
+if %errorlevel% neq 0 (
+    echo ERROR: update_dashboard.py failed
+    exit /b 1
+)
+
+:: [4] Inject fraud data into fraud_dashboard.html + push
+echo [%time%] Injecting fraud data and pushing...
+%PYTHON% inject_fraud_only.py
+if %errorlevel% neq 0 (
+    echo WARNING: inject_fraud_only.py failed
+)
+
+:: [5] Rebuild lost product data (VM variant) -> lost_product_data.json
+echo [%time%] Rebuilding lost product data (VM variant)...
+%PYTHON% build_lost_product_data_vm.py
+if %errorlevel% neq 0 (
+    echo WARNING: build_lost_product_data_vm.py failed
+)
+
+echo [%time%] Done! All dashboards updated.
+exit /b 0
