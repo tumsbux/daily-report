@@ -5,7 +5,7 @@ Source: data-lake.bld_acc_*_lake (5 tables: 2021, 2022, 2023, 2024, current)
 Output: lost_product_data.json with full year-by-year qty grid + status + lost_score.
 """
 import json, os, sys, warnings
-from datetime import date
+from datetime import date, timedelta
 import mysql.connector
 import pandas as pd
 
@@ -339,7 +339,7 @@ def main():
     qty_lost_last_year = sum(p['max_qty'] for p in products if p['status'] == 'LOST')
 
     output = {
-        'generated':       date.today().isoformat(),
+        'generated':       (date.today() - timedelta(days=1)).isoformat(),  # data lake = today-1
         'years':           YEARS,
         'current_year':    CURRENT_YEAR,
         'summary': {

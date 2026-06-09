@@ -971,7 +971,6 @@ try:
     push_files = ['index.html', 'sales_dashboard_v8.html', 'fraud_dashboard.html',
                   'fraud_analysis.html', 'fraud_data.json',
                   'product_dashboard.html', 'product_data.json',
-                  'lost_product_dashboard.html',  # JSON now in separate lost-Product- repo
                   'analytics.js']
     for fname in push_files:
         src = os.path.join(FOLDER, fname)

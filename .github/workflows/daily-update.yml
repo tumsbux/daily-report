@@ -103,7 +103,7 @@ jobs:
         timeout-minutes: 15
         run: python build_lost_product_data.py
 
-      - name: Push lost_product_data.json to tumsbux/lost-Product repo
+      - name: Push lost-Product dashboard and data to tumsbux/lost-Product repo
         if: steps.guard.outputs.skip != 'true'
         continue-on-error: true
         env:
@@ -133,12 +133,14 @@ jobs:
             echo "Generated data for tumsbux/daily-report Lost Product dashboard." >> "$TMP/README.md"
           fi
           cp lost_product_data.json "$TMP/lost_product_data.json"
-          git -C "$TMP" add lost_product_data.json README.md 2>/dev/null || true
+          cp index_for_lost_product.html "$TMP/index.html"
+          cp analytics.js "$TMP/analytics.js"
+          git -C "$TMP" add lost_product_data.json index.html analytics.js README.md 2>/dev/null || true
           if git -C "$TMP" diff --cached --quiet; then
             echo "no changes vs remote — skipping push"
           else
             git -C "$TMP" -c user.email=bot@dashboard -c user.name="Dashboard Bot" \
-              commit -m "auto: lost_product_data.json $(TZ=Asia/Bangkok date +%Y-%m-%d)"
+              commit -m "auto: lost-Product dashboard and data update $(TZ=Asia/Bangkok date +%Y-%m-%d)"
             git -C "$TMP" push -u origin main
             echo "OK pushed"
           fi
