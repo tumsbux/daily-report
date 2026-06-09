@@ -565,7 +565,7 @@ pct_tgt = '%d%%' % round(S.get('total_pct_target') or 0)
 gp_str = '%.2f%%' % S.get('total_gp_pct', 0)
 proj_yoy_val = S.get('total_proj_yoy') or 0
 yoy_str = ('+' if proj_yoy_val >= 0 else '') + ('%.1f%%' % proj_yoy_val)
-txn_d = '%d' % daily_txn
+txn_d = format(daily_txn, ',')
 
 def upd_hk(html, val, label):
     return re.sub(

@@ -1,6 +1,7 @@
 # sync_files.py
 import urllib.request
 import os
+import time
 
 FOLDER = os.path.dirname(os.path.abspath(__file__))
 
@@ -15,12 +16,15 @@ FILES = {
 
 def sync():
     print("Starting sync from GitHub raw content...", flush=True)
+    ts = int(time.time())
     for name, url in FILES.items():
         dest = os.path.join(FOLDER, name)
-        print(f"Downloading {url} -> {dest}...", end=" ", flush=True)
+        # Append query parameter to bypass CDN cache
+        nocache_url = f"{url}?t={ts}"
+        print(f"Downloading {nocache_url} -> {dest}...", end=" ", flush=True)
         try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            # Timeout set to 180 seconds to accommodate 75MB data file download
+            req = urllib.request.Request(nocache_url, headers={'User-Agent': 'Mozilla/5.0'})
+            # Timeout set to 180 seconds to accommodate large downloads
             with urllib.request.urlopen(req, timeout=180) as response:
                 content = response.read()
             with open(dest, "wb") as f:
