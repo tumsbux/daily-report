@@ -418,6 +418,15 @@ def main():
     with open(OUT_JSON, 'w', encoding='utf-8') as f:
         json.dump(output, f, ensure_ascii=False, separators=(',', ':'))
 
+    # Also save to f:\lost-Product\lost_product_data.json for VM localhost server
+    try:
+        alt_path = r"f:\lost-Product\lost_product_data.json"
+        with open(alt_path, 'w', encoding='utf-8') as fAlt:
+            json.dump(output, fAlt, ensure_ascii=False, separators=(',', ':'))
+        print(f'[OUT] Also saved copy to: {alt_path}', flush=True)
+    except Exception as e:
+        print(f'WARN: failed to save copy to f:\\lost-Product: {e}', flush=True)
+
     _clear_state()  # cleanup pickle cache after successful write
 
     sz = os.path.getsize(OUT_JSON) // 1024
