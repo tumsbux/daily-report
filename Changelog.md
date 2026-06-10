@@ -3,14 +3,16 @@
 > งานที่ทำเสร็จ — เรียงจากใหม่ → เก่า
 > Format: [Keep a Changelog](https://keepachangelog.com/)
 
-## [2026-06-10] Phase IR-A: Lost Product Parquet Caching & Memory Optimization
+## [2026-06-10] Phase IR Caching Architecture & Sunday Full-Refresh
 
 ### Added
-- Implemented **Phase IR-A (Incremental Refresh for Lost Product)** using Parquet historical cache.
-- Created `scripts/build_lost_cache_2021_2024.py` script that connects to MySQL and streams closed historical years (2021, 2022, 2023, 2024, 2025) to Parquet cache files (`cache/lost_qty_2021_2025.parquet` and `cache/lost_store_2021_2025.parquet`) using PyArrow streaming writer. Caching 2025 avoids daily scans of ~7 million rows in active database tables.
-- Added `--full-refresh` flag support in both build scripts to rebuild the cache.
-- Added `scripts/build_lost_cache_2021_2024.py` to `push_py_to_github.py` list of files to upload.
-- Added `pyarrow` dependency to GitHub Actions workflow `.github/workflows/daily-update.yml` to support Parquet cache reading on runners.
+- **Phase IR-A (Lost Product)**: Pre-compiled historical years (2021-2025) into Parquet caches (`cache/lost_qty_2021_2025.parquet` and `cache/lost_store_2021_2025.parquet`), reducing execution time from 3 minutes to under 30 seconds.
+- **Phase IR-B (Product MTD)**: Implemented Parquet daily aggregates caching in `cache/product_mtd_{YYYY-MM}.parquet`, dynamic YoY baseline loading, and double-precision schemas to eliminate database load and float rounding drift.
+- **Phase IR-C (Sales Daily Snapshot)**: Added daily JSON caching (`cache/sales_daily_{year}-{month}.json`) and summary totals tracking (`cache/sales_monthly_tot.json`) in `update_dashboard.py` to optimize daily sales dashboard building.
+- **Phase IR-D (Fraud Snapshot & Risk Score)**: Implemented returns incremental caching (freezing M-3 returns into `cache/fraud_closed_{year}-{month}.json` and querying from M-2 onwards). Optimized risk scoring to load MTD sales/costs from Phase IR-C sales daily cache, completely bypassing the heavy `fact_sales` table scan.
+- **Sunday Full-Refresh**: Added timezone-aware Sunday check to GHA daily workflow `.github/workflows/daily-update.yml` to automatically trigger `--full-refresh` on all scripts weekly.
+- **Parquet Safe Write**: Created `safe_write_parquet` helper in `lib/safe_write.py` with schema validation and verification checks.
+- **Parity Verification**: Built `check_parity.py` comparison script and validated all three daily pipelines to ensure exact parity with no data drift.
 
 ### Fixed
 - **Memory Optimization**: Replaced high-overhead dictionary structures zipping `(whs, iprod)` tuples with direct zipping and streaming into `store_breakdown` arrays (`[q21..q26, total_amt]`) inside zipping loops.

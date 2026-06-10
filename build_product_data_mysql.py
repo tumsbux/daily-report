@@ -22,6 +22,244 @@ FOLDER         = os.path.dirname(os.path.abspath(__file__))
 OUT_JSON       = os.path.join(FOLDER, 'product_data.json')
 DB_CONFIG_FILE = os.path.join(FOLDER, 'db_config.json')
 PUSH           = True  # overridden by argparse in main()
+FULL_REFRESH   = False
+
+from lib.safe_write import safe_write_parquet, safe_write_json
+import pyarrow as pa
+import pyarrow.parquet as pq
+from datetime import datetime
+
+RULE_HASH = "v2_sotowhs_1_500_solinetype_not_C_R"
+
+def get_product_cache(cfg, year, month, days_elapsed, full_refresh=False):
+    cache_dir = os.path.join(FOLDER, 'cache')
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, f'product_mtd_{year}-{month:02d}.parquet')
+    
+    rebuild = full_refresh or not os.path.exists(cache_path)
+    if not rebuild:
+        try:
+            meta = pq.read_metadata(cache_path)
+            sch_meta = meta.schema.to_arrow_schema().metadata or {}
+            c_v = sch_meta.get(b'v', b'').decode('utf-8')
+            c_hash = sch_meta.get(b'rule_hash', b'').decode('utf-8')
+            if c_v != '2' or c_hash != RULE_HASH:
+                print(f"  Cache mismatch (v={c_v}, hash={c_hash}) -> auto full-refresh")
+                rebuild = True
+        except Exception as e:
+            print(f"  Cache read error ({e}) -> auto full-refresh")
+            rebuild = True
+            
+    schema = pa.schema([
+        ('whs', pa.string()),
+        ('iprod', pa.string()),
+        ('day', pa.int16()),
+        ('sales', pa.float64()),
+        ('qty', pa.float64()),
+        ('cost', pa.float64()),
+    ])
+    
+    custom_metadata = {
+        'v': '2',
+        'built_by': 'antigravity-gemini-3-flash',
+        'rule_hash': RULE_HASH,
+        'timestamp': datetime.now().isoformat()
+    }
+    
+    conn = _conn(cfg)
+    try:
+        if rebuild:
+            print(f"  [CACHE] Full refresh for {year}-{month:02d} up to day {days_elapsed}...")
+            start_date = f'{year}-{month:02d}-01'
+            end_date = f'{year}-{month:02d}-{days_elapsed:02d}'
+            sql = """
+                SELECT LPAD(sotowhs, 3, '0') AS whs,
+                       iprod,
+                       DAY(sodate) AS day,
+                       SUM(net_sales_amt) AS sales,
+                       SUM(net_qty) AS qty,
+                       SUM(COALESCE(total_cost, 0)) AS cost
+                FROM fact_sales
+                WHERE solinetype NOT IN ('C', 'R')
+                  AND sotowhs REGEXP '^[0-9]+$'
+                  AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
+                  AND sodate BETWEEN %s AND %s
+                GROUP BY sotowhs, iprod, DAY(sodate)
+            """
+            cur = conn.cursor(dictionary=True)
+            cur.execute(sql, (start_date, end_date))
+            rows = cur.fetchall()
+            cur.close()
+            df = pd.DataFrame(rows)
+            if df.empty:
+                df = pd.DataFrame(columns=['whs', 'iprod', 'day', 'sales', 'qty', 'cost'])
+                df['day'] = df['day'].astype('int16')
+                df['sales'] = df['sales'].astype('float64')
+                df['qty'] = df['qty'].astype('float64')
+                df['cost'] = df['cost'].astype('float64')
+            else:
+                df['whs'] = df['whs'].astype('string')
+                df['iprod'] = df['iprod'].astype('string')
+                df['day'] = df['day'].astype('int16')
+                df['sales'] = df['sales'].astype('float64')
+                df['qty'] = df['qty'].astype('float64')
+                df['cost'] = df['cost'].astype('float64')
+            
+            safe_write_parquet(cache_path, df, schema, custom_metadata)
+            return df
+        else:
+            start_day = max(1, days_elapsed - 6)
+            print(f"  [CACHE] Incremental refresh for {year}-{month:02d} days {start_day}..{days_elapsed}...")
+            start_date = f'{year}-{month:02d}-{start_day:02d}'
+            end_date = f'{year}-{month:02d}-{days_elapsed:02d}'
+            sql = """
+                SELECT LPAD(sotowhs, 3, '0') AS whs,
+                       iprod,
+                       DAY(sodate) AS day,
+                       SUM(net_sales_amt) AS sales,
+                       SUM(net_qty) AS qty,
+                       SUM(COALESCE(total_cost, 0)) AS cost
+                FROM fact_sales
+                WHERE solinetype NOT IN ('C', 'R')
+                  AND sotowhs REGEXP '^[0-9]+$'
+                  AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
+                  AND sodate BETWEEN %s AND %s
+                GROUP BY sotowhs, iprod, DAY(sodate)
+            """
+            cur = conn.cursor(dictionary=True)
+            cur.execute(sql, (start_date, end_date))
+            rows = cur.fetchall()
+            cur.close()
+            new_df = pd.DataFrame(rows)
+            if not new_df.empty:
+                new_df['whs'] = new_df['whs'].astype('string')
+                new_df['iprod'] = new_df['iprod'].astype('string')
+                new_df['day'] = new_df['day'].astype('int16')
+                new_df['sales'] = new_df['sales'].astype('float64')
+                new_df['qty'] = new_df['qty'].astype('float64')
+                new_df['cost'] = new_df['cost'].astype('float64')
+            else:
+                new_df = pd.DataFrame(columns=['whs', 'iprod', 'day', 'sales', 'qty', 'cost'])
+                new_df['day'] = new_df['day'].astype('int16')
+                new_df['sales'] = new_df['sales'].astype('float64')
+                new_df['qty'] = new_df['qty'].astype('float64')
+                new_df['cost'] = new_df['cost'].astype('float64')
+                
+            df_old = pd.read_parquet(cache_path)
+            df_filtered = df_old[~((df_old['day'] >= start_day) & (df_old['day'] <= days_elapsed))]
+            df_merged = pd.concat([df_filtered, new_df], ignore_index=True)
+            safe_write_parquet(cache_path, df_merged, schema, custom_metadata)
+            return df_merged
+    finally:
+        conn.close()
+
+def get_linetype_sales_cache(cfg, year, month, days_elapsed, full_refresh=False):
+    cache_dir = os.path.join(FOLDER, 'cache')
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, f'linetype_sales_{year}-{month:02d}.json')
+    
+    rebuild = full_refresh or not os.path.exists(cache_path)
+    if not rebuild:
+        try:
+            with open(cache_path, encoding='utf-8') as f:
+                cache_data = json.load(f)
+            c_meta = cache_data.get('_meta', {})
+            if c_meta.get('v') != 2 or c_meta.get('rule_hash') != RULE_HASH:
+                print(f"  Linetype cache mismatch -> auto full-refresh")
+                rebuild = True
+        except Exception:
+            rebuild = True
+            
+    conn = _conn(cfg)
+    try:
+        if rebuild:
+            print(f"  [LINETYPE] Full refresh for {year}-{month:02d} up to day {days_elapsed}...")
+            start_date = f'{year}-{month:02d}-01'
+            end_date = f'{year}-{month:02d}-{days_elapsed:02d}'
+            sql = """
+                SELECT IFNULL(solinetype, 'unknown') AS solinetype,
+                       DAY(sodate) AS day,
+                       ROUND(SUM(net_sales_amt)) AS sales,
+                       ROUND(SUM(net_qty)) AS qty,
+                       COUNT(DISTINCT sono) AS bills
+                FROM fact_sales
+                WHERE solinetype NOT IN ('C', 'R')
+                  AND sotowhs REGEXP '^[0-9]+$'
+                  AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
+                  AND sodate BETWEEN %s AND %s
+                GROUP BY solinetype, DAY(sodate)
+            """
+            cur = conn.cursor(dictionary=True)
+            cur.execute(sql, (start_date, end_date))
+            rows = cur.fetchall()
+            cur.close()
+            
+            days_data = {}
+            for r in rows:
+                day_str = str(r['day'])
+                if day_str not in days_data:
+                    days_data[day_str] = {}
+                days_data[day_str][r['solinetype']] = {
+                    'sales': int(r['sales'] or 0),
+                    'qty': int(r['qty'] or 0),
+                    'bills': int(r['bills'] or 0)
+                }
+                
+            cache_data = {
+                '_meta': {
+                    'v': 2,
+                    'built_by': 'antigravity-gemini-3-flash',
+                    'rule_hash': RULE_HASH,
+                    'timestamp': datetime.now().isoformat()
+                },
+                'days': days_data
+            }
+            safe_write_json(cache_path, cache_data)
+        else:
+            start_day = max(1, days_elapsed - 6)
+            print(f"  [LINETYPE] Incremental refresh for {year}-{month:02d} days {start_day}..{days_elapsed}...")
+            start_date = f'{year}-{month:02d}-{start_day:02d}'
+            end_date = f'{year}-{month:02d}-{days_elapsed:02d}'
+            sql = """
+                SELECT IFNULL(solinetype, 'unknown') AS solinetype,
+                       DAY(sodate) AS day,
+                       ROUND(SUM(net_sales_amt)) AS sales,
+                       ROUND(SUM(net_qty)) AS qty,
+                       COUNT(DISTINCT sono) AS bills
+                FROM fact_sales
+                WHERE solinetype NOT IN ('C', 'R')
+                  AND sotowhs REGEXP '^[0-9]+$'
+                  AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
+                  AND sodate BETWEEN %s AND %s
+                GROUP BY solinetype, DAY(sodate)
+            """
+            cur = conn.cursor(dictionary=True)
+            cur.execute(sql, (start_date, end_date))
+            rows = cur.fetchall()
+            cur.close()
+            
+            with open(cache_path, encoding='utf-8') as f:
+                cache_data = json.load(f)
+                
+            for d in range(start_day, days_elapsed + 1):
+                cache_data['days'].pop(str(d), None)
+                
+            for r in rows:
+                day_str = str(r['day'])
+                if day_str not in cache_data['days']:
+                    cache_data['days'][day_str] = {}
+                cache_data['days'][day_str][r['solinetype']] = {
+                    'sales': int(r['sales'] or 0),
+                    'qty': int(r['qty'] or 0),
+                    'bills': int(r['bills'] or 0)
+                }
+            cache_data['_meta']['timestamp'] = datetime.now().isoformat()
+            safe_write_json(cache_path, cache_data)
+            
+        return cache_data['days']
+    finally:
+        conn.close()
+
 
 # Auto-detect current month from today (fixed 2026-06-05: previously hardcoded)
 _today = date.today()
@@ -61,47 +299,29 @@ def _load_branch_info():
 
 # ── STEP 1: Product sales aggregation ────────────────────────────────────────
 def query_product_sales(conn, days_elapsed):
-    """
-    FAST: aggregates fact_sales by iprod only (no dim JOINs in the main query).
-    Then resolves names/groups in a separate small query.
-    """
-    end_date26 = f'{YEAR26}-{MONTH:02d}-{days_elapsed:02d}'
-    end_date25 = f'{YEAR25}-{MONTH:02d}-{DAYS_25:02d}'
-
-    # 1a. Fast aggregation — no JOINs to dim tables
-    sql_agg = f"""
-        SELECT
-            iprod,
-            SUM(CASE WHEN sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
-                     THEN net_sales_amt ELSE 0 END)           AS s26,
-            SUM(CASE WHEN sodate BETWEEN '{YEAR25}-{MONTH:02d}-01' AND '{end_date25}'
-                     THEN net_sales_amt ELSE 0 END)           AS s25,
-            SUM(CASE WHEN sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
-                     THEN COALESCE(total_cost, 0) ELSE 0 END) AS cost26,
-            SUM(CASE WHEN sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
-                     THEN net_qty ELSE 0 END)                 AS q26,
-            SUM(CASE WHEN sodate BETWEEN '{YEAR25}-{MONTH:02d}-01' AND '{end_date25}'
-                     THEN net_qty ELSE 0 END)                 AS q25
-        FROM fact_sales
-        WHERE solinetype NOT IN ('C', 'R')
-          AND sotowhs REGEXP '^[0-9]+$'
-          AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
-          AND (
-              (sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}')
-              OR (sodate BETWEEN '{YEAR25}-{MONTH:02d}-01' AND '{end_date25}')
-          )
-        GROUP BY iprod
-        HAVING s26 > 0
-        ORDER BY s26 DESC
-    """
-    df = pd.read_sql(sql_agg, conn)
-    for col in ['s26','s25','cost26','q26','q25']:
-        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-
-    # 1b. Resolve names: query dim_product + dim_item_barcode for all found iprods
+    cfg = _load_cfg()
+    df_curr = get_product_cache(cfg, YEAR26, MONTH, days_elapsed, full_refresh=FULL_REFRESH)
+    df_prev = get_product_cache(cfg, YEAR25, MONTH, DAYS_25, full_refresh=FULL_REFRESH)
+    
+    df_curr_f = df_curr[df_curr['day'] <= days_elapsed]
+    
+    agg_curr = df_curr_f.groupby('iprod').agg(
+        s26=('sales', 'sum'),
+        cost26=('cost', 'sum'),
+        q26=('qty', 'sum')
+    ).reset_index()
+    
+    agg_prev = df_prev.groupby('iprod').agg(
+        s25=('sales', 'sum'),
+        q25=('qty', 'sum')
+    ).reset_index()
+    
+    df = pd.merge(agg_curr, agg_prev, on='iprod', how='outer').fillna(0)
+    df = df[df['s26'] > 0].sort_values('s26', ascending=False).reset_index(drop=True)
+    
     iprod_list = df['iprod'].tolist()
-    dim_map = _query_dim_product(conn, iprod_list)  # {iprod: {name,brand,grp,type,grp_code}}
-
+    dim_map = _query_dim_product(conn, iprod_list)
+    
     df['name']      = df['iprod'].map(lambda x: dim_map.get(x, {}).get('name', x))
     df['brand']     = df['iprod'].map(lambda x: dim_map.get(x, {}).get('brand', ''))
     df['grp']       = df['iprod'].map(lambda x: dim_map.get(x, {}).get('grp', 'ไม่ระบุ'))
@@ -109,6 +329,7 @@ def query_product_sales(conn, days_elapsed):
     df['grp_code']  = df['iprod'].map(lambda x: dim_map.get(x, {}).get('grp_code', ''))
     df['ipunit3']   = df['iprod'].map(lambda x: dim_map.get(x, {}).get('ipunit3', 0))
     return df
+
 
 
 def _dim_product_columns(conn):
@@ -229,111 +450,61 @@ def query_barcodes(conn, iprod_list):
 
 # ── STEP 2b: May 2025 total per store (for store-level YoY baseline) ─────────
 def query_store_sales_may25(conn):
-    """Returns {whs_padded: s25_total} — May 2025 net_sales_amt per store.
-    Used to fix store-level YoY in product dashboard (p.s25 is all-stores, not per-store)."""
-    end_date25 = f'{YEAR25}-{MONTH:02d}-{DAYS_25:02d}'
-    sql = f"""
-        SELECT LPAD(sotowhs, 3, '0') AS whs,
-               ROUND(SUM(net_sales_amt)) AS s25
-        FROM fact_sales
-        WHERE sodate BETWEEN '{YEAR25}-{MONTH:02d}-01' AND '{end_date25}'
-          AND solinetype NOT IN ('C', 'R')
-          AND sotowhs REGEXP '^[0-9]+$'
-          AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
-        GROUP BY sotowhs
-    """
-    cur = conn.cursor(dictionary=True)
-    cur.execute(sql)
-    rows = cur.fetchall()
-    cur.close()
-    return {r['whs']: int(r['s25'] or 0) for r in rows}
+    cfg = _load_cfg()
+    df_prev = get_product_cache(cfg, YEAR25, MONTH, DAYS_25, full_refresh=FULL_REFRESH)
+    df_grouped = df_prev.groupby('whs')['sales'].sum().reset_index()
+    return {r['whs']: int(round(r['sales'])) for _, r in df_grouped.iterrows()}
 
 
 # ── STEP 2c: May 2026 total per store (true total — fixes HAVING threshold gap) ─
 def query_store_sales_may26(conn, days_elapsed):
-    """Returns {whs_padded: s26_total} — true May 2026 net_sales_amt per store.
-    Fixes product dashboard header showing lower total due to HAVING s26>=500 threshold."""
-    end_date = f'{YEAR26}-{MONTH:02d}-{days_elapsed:02d}'
-    sql = f"""
-        SELECT LPAD(sotowhs, 3, '0') AS whs,
-               ROUND(SUM(net_sales_amt)) AS s26
-        FROM fact_sales
-        WHERE sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date}'
-          AND solinetype NOT IN ('C', 'R')
-          AND sotowhs REGEXP '^[0-9]+$'
-          AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
-        GROUP BY sotowhs
-    """
-    cur = conn.cursor(dictionary=True)
-    cur.execute(sql)
-    rows = cur.fetchall()
-    cur.close()
-    return {r['whs']: int(r['s26'] or 0) for r in rows}
+    cfg = _load_cfg()
+    df_curr = get_product_cache(cfg, YEAR26, MONTH, days_elapsed, full_refresh=FULL_REFRESH)
+    df_filtered = df_curr[df_curr['day'] <= days_elapsed]
+    df_grouped = df_filtered.groupby('whs')['sales'].sum().reset_index()
+    return {r['whs']: int(round(r['sales'])) for _, r in df_grouped.iterrows()}
 
 
 # ── STEP 2d: Sales breakdown by solinetype ────────────────────────────────────
 def query_sales_by_linetype(conn, days_elapsed):
-    """Returns [{solinetype, sales, qty, bills}] for all stores 1-500."""
-    end_date26 = f'{YEAR26}-{MONTH:02d}-{days_elapsed:02d}'
-    sql = f"""
-        SELECT
-            IFNULL(solinetype, 'unknown') AS solinetype,
-            ROUND(SUM(net_sales_amt)) AS sales,
-            ROUND(SUM(net_qty))       AS qty,
-            COUNT(DISTINCT sono)      AS bills
-        FROM fact_sales
-        WHERE sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
-          AND solinetype NOT IN ('C', 'R')
-          AND sotowhs REGEXP '^[0-9]+$'
-          AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
-        GROUP BY solinetype
-        ORDER BY sales DESC
-    """
-    cur = conn.cursor(dictionary=True)
-    cur.execute(sql)
-    rows = cur.fetchall()
-    cur.close()
-    return [{'type': r['solinetype'], 'sales': int(r['sales'] or 0),
-             'qty': int(r['qty'] or 0), 'bills': int(r['bills'] or 0)} for r in rows]
+    cfg = _load_cfg()
+    days_data = get_linetype_sales_cache(cfg, YEAR26, MONTH, days_elapsed, full_refresh=FULL_REFRESH)
+    
+    totals = defaultdict(lambda: {'sales': 0, 'qty': 0, 'bills': 0})
+    for d in range(1, days_elapsed + 1):
+        day_str = str(d)
+        if day_str in days_data:
+            for linetype, vals in days_data[day_str].items():
+                totals[linetype]['sales'] += vals['sales']
+                totals[linetype]['qty'] += vals['qty']
+                totals[linetype]['bills'] += vals['bills']
+                
+    result = []
+    for linetype, v in sorted(totals.items(), key=lambda x: x[1]['sales'], reverse=True):
+        result.append({
+            'type': linetype,
+            'sales': int(v['sales']),
+            'qty': int(v['qty']),
+            'bills': int(v['bills'])
+        })
+    return result
 
 
 # ── STEP 3: Store-indexed breakdown — ALL products ────────────────────────────
 def query_store_breakdown(conn, days_elapsed):
-    """
-    Returns {store_code: {iprod: [s26, q26]}} for ALL products sold this month.
-    Store-indexed (not product-indexed) so JS can filter by any store/DM/RM
-    and see all products at that scope.
-    Threshold: s26 > 0 — include every product that had ANY sales (no 500-baht cutoff).
-    Note (2026-06-05): removed `HAVING s26 >= 500` cutoff per user request.
-    Small stores now show all SKUs they actually sold. JSON size may grow 2-3x.
-    """
-    end_date26 = f'{YEAR26}-{MONTH:02d}-{days_elapsed:02d}'
-    sql = f"""
-        SELECT
-            LPAD(fs.sotowhs, 3, '0')  AS whs,
-            fs.iprod,
-            ROUND(SUM(fs.net_sales_amt)) AS s26,
-            ROUND(SUM(fs.net_qty))       AS q26
-        FROM fact_sales fs
-        WHERE fs.solinetype NOT IN ('C', 'R')
-          AND {STORE_FILTER}
-          AND fs.sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
-        GROUP BY whs, fs.iprod
-        HAVING s26 > 0
-        ORDER BY whs, s26 DESC
-    """
-    cur = conn.cursor(dictionary=True)
-    cur.execute(sql)
-    rows = cur.fetchall()
-    cur.close()
-    # {whs: {iprod: [s26, q26]}}
+    cfg = _load_cfg()
+    df_curr = get_product_cache(cfg, YEAR26, MONTH, days_elapsed, full_refresh=FULL_REFRESH)
+    df_filtered = df_curr[df_curr['day'] <= days_elapsed]
+    df_grouped = df_filtered.groupby(['whs', 'iprod']).agg(s26=('sales', 'sum'), q26=('qty', 'sum')).reset_index()
+    df_grouped = df_grouped[df_grouped['s26'] > 0]
+    
     result = defaultdict(dict)
-    for r in rows:
+    for _, r in df_grouped.iterrows():
         result[r['whs']][r['iprod']] = [
-            int(r['s26'] or 0),
-            int(r['q26'] or 0),
+            int(round(r['s26'])),
+            int(round(r['q26']))
         ]
-    print(f'      {len(result)} stores, {sum(len(v) for v in result.values()):,} product-store entries')
+    print(f'      {len(result)} stores, {sum(len(v) for v in result.values()):,} product-store entries (from cache)')
     return dict(result)
 
 
@@ -549,9 +720,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--day', type=int, default=None)
     parser.add_argument('--no-push', action='store_true')
+    parser.add_argument('--full-refresh', action='store_true')
     args = parser.parse_args()
-    global PUSH
+    global PUSH, FULL_REFRESH
     PUSH = not args.no_push
+    FULL_REFRESH = args.full_refresh
 
     cfg = _load_cfg()
     if not cfg:

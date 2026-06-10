@@ -6,7 +6,7 @@ update_dashboard.py -- Daily Sales Dashboard Updater
 
 import csv, json, re, os, glob, sys, argparse, subprocess, shutil, tempfile, uuid
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime
 
 # CONFIG
 FOLDER         = os.path.dirname(os.path.abspath(__file__))
@@ -28,6 +28,179 @@ _TH_MONTHS = ['','มกราคม','กุมภาพันธ์','มี�
 _TH_MONTHS_SHORT = ['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.',
                     'ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
 MONTH_NAME_TH  = _TH_MONTHS[_today_for_month.month] + ' ' + YEAR
+
+DB_CONFIG_FILE = os.path.join(FOLDER, 'db_config.json')
+FULL_REFRESH = False
+RULE_HASH = "v2_sotowhs_1_500_solinetype_not_C_R"
+
+def get_sales_daily_cache(cfg, year, month, days_elapsed, full_refresh=False):
+    cache_dir = os.path.join(FOLDER, 'cache')
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, f'sales_daily_{year}-{month}.json')
+    
+    rebuild = full_refresh or not os.path.exists(cache_path)
+    if not rebuild:
+        try:
+            with open(cache_path, encoding='utf-8') as f:
+                cache_data = json.load(f)
+            c_meta = cache_data.get('_meta', {})
+            if c_meta.get('v') != 2 or c_meta.get('rule_hash') != RULE_HASH:
+                print(f"  Sales cache mismatch -> auto full-refresh")
+                rebuild = True
+        except Exception:
+            rebuild = True
+            
+    import mysql.connector
+    if rebuild:
+        print(f"  [SALES CACHE] Full refresh for {year}-{month} up to day {days_elapsed}...")
+        conn = mysql.connector.connect(
+            host=cfg['host'], port=cfg.get('port', 3306),
+            user=cfg['user'], password=cfg['password'],
+            database=cfg.get('database', 'data-lake'),
+            connection_timeout=60, charset='utf8mb4'
+        )
+        try:
+            start_date = f'{year}-{month}-01'
+            end_date = f'{year}-{month}-{days_elapsed:02d}'
+            sql = """
+                SELECT sotowhs AS whs,
+                       DAY(sodate) AS day,
+                       SUM(net_sales_amt)          AS sales_amt,
+                       SUM(COALESCE(total_cost,0)) AS cost_amt,
+                       COUNT(DISTINCT sono)        AS txn_count
+                FROM fact_sales
+                WHERE sodate BETWEEN %s AND %s
+                  AND solinetype NOT IN ('C', 'R')
+                  AND sotowhs REGEXP '^[0-9]+$'
+                  AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
+                GROUP BY sotowhs, DAY(sodate)
+            """
+            cur = conn.cursor(dictionary=True)
+            cur.execute(sql, (start_date, end_date))
+            rows = cur.fetchall()
+            cur.close()
+            
+            stores_data = defaultdict(dict)
+            for r in rows:
+                raw_whs = str(r['whs']).strip()
+                day_str = str(r['day'])
+                stores_data[raw_whs][day_str] = {
+                    'sales': float(r['sales_amt'] or 0),
+                    'cost': float(r['cost_amt'] or 0),
+                    'txn': int(r['txn_count'] or 0)
+                }
+                
+            cache_data = {
+                '_meta': {
+                    'v': 2,
+                    'built_by': 'antigravity-gemini-3-flash',
+                    'rule_hash': RULE_HASH,
+                    'timestamp': datetime.now().isoformat()
+                },
+                'stores': dict(stores_data)
+            }
+            from lib.safe_write import safe_write_json
+            safe_write_json(cache_path, cache_data)
+        finally:
+            conn.close()
+    else:
+        start_day = max(1, days_elapsed - 6)
+        print(f"  [SALES CACHE] Incremental refresh for {year}-{month} days {start_day}..{days_elapsed}...")
+        conn = mysql.connector.connect(
+            host=cfg['host'], port=cfg.get('port', 3306),
+            user=cfg['user'], password=cfg['password'],
+            database=cfg.get('database', 'data-lake'),
+            connection_timeout=60, charset='utf8mb4'
+        )
+        try:
+            start_date = f'{year}-{month}-{start_day:02d}'
+            end_date = f'{year}-{month}-{days_elapsed:02d}'
+            sql = """
+                SELECT sotowhs AS whs,
+                       DAY(sodate) AS day,
+                       SUM(net_sales_amt)          AS sales_amt,
+                       SUM(COALESCE(total_cost,0)) AS cost_amt,
+                       COUNT(DISTINCT sono)        AS txn_count
+                FROM fact_sales
+                WHERE sodate BETWEEN %s AND %s
+                  AND solinetype NOT IN ('C', 'R')
+                  AND sotowhs REGEXP '^[0-9]+$'
+                  AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
+                GROUP BY sotowhs, DAY(sodate)
+            """
+            cur = conn.cursor(dictionary=True)
+            cur.execute(sql, (start_date, end_date))
+            rows = cur.fetchall()
+            cur.close()
+            
+            with open(cache_path, encoding='utf-8') as f:
+                cache_data = json.load(f)
+                
+            stores_data = cache_data.setdefault('stores', {})
+            for s_code, d_map in list(stores_data.items()):
+                for d in range(start_day, days_elapsed + 1):
+                    d_map.pop(str(d), None)
+                    
+            for r in rows:
+                raw_whs = str(r['whs']).strip()
+                day_str = str(r['day'])
+                stores_data.setdefault(raw_whs, {})[day_str] = {
+                    'sales': float(r['sales_amt'] or 0),
+                    'cost': float(r['cost_amt'] or 0),
+                    'txn': int(r['txn_count'] or 0)
+                }
+            cache_data['_meta']['timestamp'] = datetime.now().isoformat()
+            from lib.safe_write import safe_write_json
+            safe_write_json(cache_path, cache_data)
+        finally:
+            conn.close()
+            
+    result = {}
+    for whs, d_map in cache_data.get('stores', {}).items():
+        sales_sum = 0.0
+        cost_sum = 0.0
+        txn_sum = 0
+        for d in range(1, days_elapsed + 1):
+            day_str = str(d)
+            if day_str in d_map:
+                sales_sum += d_map[day_str].get('sales', 0.0)
+                cost_sum += d_map[day_str].get('cost', 0.0)
+                txn_sum += d_map[day_str].get('txn', 0)
+        entry = {
+            'sales': sales_sum,
+            'cost': cost_sum,
+            'txn': txn_sum
+        }
+        result[whs] = entry
+        try:
+            result[str(int(whs))] = entry
+        except Exception:
+            pass
+        try:
+            result[whs.zfill(3)] = entry
+        except Exception:
+            pass
+            
+    return result
+
+def update_monthly_totals_cache(D, current_month_key, current_month_total):
+    cache_path = os.path.join(FOLDER, 'cache', 'sales_monthly_tot.json')
+    cache_data = {'m25_tot': {}, 'm26_tot': {}}
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, encoding='utf-8') as f:
+                cache_data = json.load(f)
+        except Exception:
+            pass
+    for k, v in D['summary'].get('m26_tot', {}).items():
+        if k != current_month_key and k not in cache_data.setdefault('m26_tot', {}):
+            cache_data['m26_tot'][k] = v
+    for k, v in D['summary'].get('m25_tot', {}).items():
+        if k not in cache_data.setdefault('m25_tot', {}):
+            cache_data['m25_tot'][k] = v
+    from lib.safe_write import safe_write_json
+    safe_write_json(cache_path, cache_data)
+    return cache_data
 
 DB_CONFIG_FILE = os.path.join(FOLDER, 'db_config.json')
 REPO_DIR       = os.path.join(tempfile.gettempdir(), f'dlr-{uuid.uuid4().hex[:8]}')
@@ -79,7 +252,10 @@ def _load_db_config():
 # ARGUMENTS
 parser = argparse.ArgumentParser()
 parser.add_argument('--day', type=int, default=None)
+parser.add_argument('--full-refresh', action='store_true')
 args = parser.parse_args()
+
+FULL_REFRESH = args.full_refresh
 
 today = date.today()
 if args.day:
@@ -161,23 +337,15 @@ for row in _whsdd_rows:
     # whsddpact may lag 1-2 days; fall back to whsddpnetamt so recent days are recognised as finalized
     act = float(row.get('whsddpact') or row.get('whsddpnetamt') or 0)
     txn = int(float(row.get('whsddtotdoc') or 0))
-    store_tar_monthly[no] += tar
-    if day <= DAYS_ELAPSED:
-        store_tar_mtd[no] += tar
-        day_totals[day]   += act
-        if act > 0:
-            store_target_days[no][day] = act
-            store_txn_mtd[no]         += txn
-
-# Supplement store_txn_mtd from fact_sales (whsdd has no txn count column)
+ # Supplement store_txn_mtd and MTD sales from caches
 if _db_cfg:
     try:
-        _txn_map = _query_txn_mtd(_db_cfg, YEAR, MONTH)
-        for _whs, _cnt in _txn_map.items():
-            store_txn_mtd[_whs] = _cnt
-        print('    MySQL fact_sales txn: %d stores loaded' % len(_txn_map))
+        _fact_sales_mtd = get_sales_daily_cache(_db_cfg, YEAR, MONTH, DAYS_ELAPSED, full_refresh=FULL_REFRESH)
+        for _whs, _entry in _fact_sales_mtd.items():
+            store_txn_mtd[_whs] = _entry['txn']
+        print('    fact_sales MTD cache loaded successfully: %d stores' % len(_fact_sales_mtd))
     except Exception as _te:
-        print('    WARNING: txn query failed: %s' % _te)
+        print('    WARNING: sales cache load failed: %s' % _te)
 
 finalized_days   = sorted(d for d in range(1, DAYS_ELAPSED + 1) if day_totals[d] > 0)
 unfinalized_days = sorted(d for d in range(1, DAYS_ELAPSED + 1) if d not in finalized_days)
@@ -194,42 +362,45 @@ else:
 
 store_target_sales = {no: sum(store_target_days[no].values()) for no in store_target_days}
 
-# STEP 1b: Query fact_sales directly (authoritative source — matches mobile app)
+# STEP 1b: Retrieve fact_sales MTD details from cache
 print('\n[1b] Querying fact_sales MTD (days 1-%d) for exact sales amounts ...' % DAYS_ELAPSED)
-_fact_sales_mtd = {}   # {store_code: {sales, cost, txn}}  — primary source
-_fact_max_day   = 0    # actual max day found in fact_sales
+_fact_max_day   = DAYS_ELAPSED
 if _db_cfg:
     try:
-        _fact_sales_mtd, _fact_max_day = _query_fact_sales_mtd(_db_cfg, YEAR, MONTH, DAYS_ELAPSED)
-        # Count unique stores only (dict has 2-3 keys per store for code format matching)
+        if not _fact_sales_mtd:
+            _fact_sales_mtd = get_sales_daily_cache(_db_cfg, YEAR, MONTH, DAYS_ELAPSED, full_refresh=FULL_REFRESH)
         _unique_fs = {id(v): v for v in _fact_sales_mtd.values()}
         _fs_total  = sum(v['sales'] for v in _unique_fs.values())
         _fs_stores = len(_unique_fs)
         print('    fact_sales: %d stores | ฿%s MTD gross | max day: %d' % (
             _fs_stores, format(int(_fs_total), ','), _fact_max_day))
     except Exception as _fse:
-        print('    WARNING: fact_sales query failed: %s -- will use whsddpact fallback' % _fse)
+        print('    WARNING: fact_sales cache load failed: %s -- will use whsddpact fallback' % _fse)
 else:
     print('    No DB config -- skipping fact_sales query')
 
-# FACT_DAYS = actual days with data in fact_sales (used as denominator for rates).
-# DAYS_ELAPSED is the query window and displayed day number.
-# fact_sales lags ~3 days, so FACT_DAYS < DAYS_ELAPSED is normal.
 FACT_DAYS = _fact_max_day if _fact_max_day > 0 else DAYS_ELAPSED
 if FACT_DAYS != DAYS_ELAPSED:
     print('    ⚠ fact_sales covers days 1-%d (not 1-%d) — using %d for rate/projection' % (
         FACT_DAYS, DAYS_ELAPSED, FACT_DAYS))
 
-# Query previous-year same-month from fact_sales — authoritative YoY baseline (replaces whsddpact 2025)
+# Query previous-year same-month from sales cache (YoY baseline)
 _fact_sales_25 = {}
 if _db_cfg:
     try:
-        _fact_sales_25 = _query_fact_sales_may25(_db_cfg)
+        prev_y = int(YEAR) - 1
+        _last_day25 = _cal.monthrange(prev_y, int(MONTH))[1]
+        _fact_sales_25_raw = get_sales_daily_cache(_db_cfg, str(prev_y), MONTH, _last_day25, full_refresh=FULL_REFRESH)
+        for _whs, _entry in _fact_sales_25_raw.items():
+            _fact_sales_25[_whs] = {
+                's25': _entry['sales'],
+                'txn25': _entry['txn']
+            }
         _fs25_total = sum(v['s25'] for v in _fact_sales_25.values())
-        print('    fact_sales %s/%s: %d stores | ฿%s (YoY baseline)' % (
-            str(int(YEAR) - 1), MONTH, len(_fact_sales_25), format(int(_fs25_total), ',')))
+        print('    fact_sales %s/%s: %d stores | ฿%s (YoY baseline from cache)' % (
+            str(prev_y), MONTH, len(_fact_sales_25), format(int(_fs25_total), ',')))
     except Exception as _f25e:
-        print('    WARNING: fact_sales YoY baseline query failed: %s -- keeping existing s25_may' % _f25e)
+        print('    WARNING: YoY baseline cache load failed: %s -- keeping existing s25_may' % _f25e)
 
 # STEP 2: factXX.txt
 print('\n[2/7] Reading factXX.txt for unfinalized days ...')
@@ -526,6 +697,18 @@ D['summary']['m26_tot'][MONTH_KEY] = sm
 _prev_yr_key_t = '%d-%s' % (int(YEAR) - 1, MONTH)
 if 'm25_tot' not in D['summary'] or not isinstance(D['summary'].get('m25_tot'), dict): D['summary']['m25_tot'] = {}
 D['summary']['m25_tot'][_prev_yr_key_t] = s25
+
+# Read and update past months' trend totals cache
+try:
+    monthly_cache = update_monthly_totals_cache(D, MONTH_KEY, sm)
+    for k, v in monthly_cache.get('m26_tot', {}).items():
+        if k != MONTH_KEY:
+            D['summary']['m26_tot'][k] = v
+    for k, v in monthly_cache.get('m25_tot', {}).items():
+        D['summary']['m25_tot'][k] = v
+    print("    Sales monthly trend cache loaded and updated")
+except Exception as _me:
+    print("    WARNING: sales monthly trend cache error: %s" % _me)
 
 # Save sales_dashboard_v8.html
 new_json = json.dumps(D, ensure_ascii=False)

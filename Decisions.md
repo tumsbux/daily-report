@@ -249,6 +249,28 @@ Lost Product dashboard ETL queries 6 years of transaction history. Static histor
 
 ---
 
+## [2026-06-10] Phase IR-B, IR-C, and IR-D Caching Architecture
+
+**Status:** Accepted
+
+**Context:**
+The rest of the daily ETL scripts (Product MTD, Sales Daily Snapshot, and Fraud Risk scoring) still query large tables like `fact_sales` and `fact_returns` for full month or multi-month intervals. This triggers full table scans on MySQL, causing the daily pipeline to take over 2 minutes and pushing memory usage close to the VM's 2GB ceiling.
+
+**Decision:**
+1. **Phase IR-B (Product MTD)**: Implement `cache/product_mtd_{YYYY-MM}.parquet` file keyed on `(whs, iprod, day)` to store daily aggregates. Daily run queries `fact_sales` only for the last 7 days (`D-7..D-1`), upserts them into the cache, and aggregates MTD from the cache. Prior year same month baseline is queried once, frozen, and loaded from cache.
+2. **Phase IR-C (Sales Daily Snapshot)**: Implement `cache/sales_daily_{YYYY-MM}.json` to store daily store sales `{store: {day: {sales, cost, txn}}}`. Daily run queries `D-7..D-1` of `fact_sales` and `whsdd` actuals to patch the cache. Past months' trend totals are read from `cache/sales_monthly_tot.json`.
+3. **Phase IR-D (Fraud Returns)**: Freeze `M-3` historical returns as `cache/fraud_closed_{YYYY-MM}.json`. Daily run only queries returns starting from `M-2` start and merges with frozen history. For risk scoring, read current month's MTD sales and cost from Phase IR-C sales daily cache, completely bypassing the heavy `fact_sales` query.
+4. **Sundays Full-Refresh**: Auto-detect Sunday (Bangkok time) in the GitHub Actions runner, and execute daily scripts with `--full-refresh` flag to fully rebuild caches.
+5. **Safeguards**: Add `safe_write_parquet()` in `lib/safe_write.py` with schema validation and re-read checks. Cache files include version `v: 2` and rule hash in headers; any mismatch triggers automatic full-refresh.
+
+**Consequences:**
+- ✅ All daily dashboard ETL runs will finish in under 30 seconds.
+- ✅ Memory overhead on the VM remains extremely low (well below 2GB).
+- ✅ Eliminates redundant queries to database tables.
+- ✅ Transparent Sunday reconciliation window handles late POS adjustments automatically.
+
+---
+
 ## 📚 Superseded
 
 - ~~`solinetype = 'N'` filter~~ (pre-2026-05-31) → `solinetype NOT IN ('C','R')` to match mobile app
@@ -259,3 +281,4 @@ Lost Product dashboard ETL queries 6 years of transaction history. Static histor
 ---
 
 _Last updated: 2026-06-10_
+

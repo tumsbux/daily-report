@@ -76,6 +76,7 @@
 - [x] Phase 3b refactor (–209 lines, verified zero drift)
 - [x] Documentation split (CLAUDE.md 73KB → 8 files)
 - [x] Phase IR-A: Lost Product Caching via Parquet
+- [x] Phase IR-B, IR-C, and IR-D Caching Architecture & Sunday Full-Refresh
 - [ ] Phase 3c + 3d (continued refactor)
 
 ### Q3 2026

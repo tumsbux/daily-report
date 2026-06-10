@@ -20,6 +20,7 @@ from datetime import datetime, date
 # ── PATHS ─────────────────────────────────────────────────────────────────────
 FOLDER = os.path.dirname(os.path.abspath(__file__))
 PUSH   = '--no-push' not in sys.argv
+FULL_REFRESH = '--full-refresh' in sys.argv
 
 # Primary source: MySQL (MYPOS2018_CENTER + data-lake)
 # fact_returns, dim_branch, dim_item_barcode, dim_product, fact_sales, xun → all from MySQL
@@ -80,15 +81,53 @@ def _mysql_conn(cfg):
         charset='utf8mb4'
     )
 
-def _query_returns_full(cfg, months_back=4):
-    """
-    Single JOIN: fact_returns + dim_branch + dim_item_barcode + dim_product.
-    Returns enriched DataFrame — store_name, dm, rm, parcode, idesc pre-filled.
-    Primary amount column: line_amount_inc_vat (aliased to 'amount').
-    """
+def _load_sales_mtd_from_cache(max_mo):
+    cache_path = os.path.join(FOLDER, 'cache', f'sales_daily_{max_mo}.json')
+    if not os.path.exists(cache_path):
+        return None
+    try:
+        with open(cache_path, encoding='utf-8') as f:
+            cache_data = json.load(f)
+        
+        sales_map = {}
+        cost_map = {}
+        
+        stores = cache_data.get('stores', {})
+        for raw_whs, day_map in stores.items():
+            whs = str(raw_whs).zfill(3)
+            sales_sum = sum(day_data.get('sales', 0.0) for day_data in day_map.values())
+            cost_sum = sum(day_data.get('cost', 0.0) for day_data in day_map.values())
+            sales_map[whs] = sales_sum
+            cost_map[whs] = cost_sum
+            
+        print(f"  Loaded MTD sales/costs from daily sales cache {cache_path} ({len(sales_map)} stores)")
+        return sales_map, cost_map
+    except Exception as e:
+        print(f"  WARNING: Failed to load daily sales cache for fraud scoring: {e}")
+        return None
+
+def _get_frozen_returns(cfg, m3_str, full_refresh=False):
+    cache_dir = os.path.join(FOLDER, 'cache')
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, f'fraud_closed_{m3_str}.json')
+    
+    if not full_refresh and os.path.exists(cache_path):
+        try:
+            with open(cache_path, encoding='utf-8') as f:
+                data = json.load(f)
+            meta = data.get('_meta', {})
+            if meta.get('v') == 2:
+                print(f"  [FRAUD CACHE] Loaded frozen returns for {m3_str} from cache ({len(data['returns'])} rows)")
+                return pd.DataFrame(data['returns'])
+        except Exception as e:
+            print(f"  [FRAUD CACHE] Failed to load cache for {m3_str}: {e}")
+            
+    print(f"  [FRAUD CACHE] Cache not found for {m3_str}. Querying database to freeze...")
+    start_date = f"{m3_str}-01"
     from dateutil.relativedelta import relativedelta
-    start = (date.today().replace(day=1)
-             - relativedelta(months=months_back - 1)).strftime('%Y-%m-01')
+    m3_dt = datetime.strptime(m3_str, "%Y-%m").date()
+    end_date = (m3_dt + relativedelta(months=1)).strftime('%Y-%m-01')
+    
     sql = f"""
         SELECT
             fr.rtno,
@@ -122,14 +161,147 @@ def _query_returns_full(cfg, months_back=4):
         LEFT JOIN dim_product dp
                ON COALESCE(dib.parcode, fr.iprod) = dp.iprod
         WHERE fr.rtstatus = 'U'
-          AND fr.return_date >= '{start}'
+          AND fr.return_date >= '{start_date}'
+          AND fr.return_date < '{end_date}'
           AND fr.warehouse_code NOT IN ('901', '999')
     """
     conn = _mysql_conn(cfg)
     df = pd.read_sql(sql, conn)
     conn.close()
+    
+    df_serialized = df.copy()
+    for col in df_serialized.columns:
+        if df_serialized[col].dtype == 'object' or hasattr(df_serialized[col], 'dt'):
+            df_serialized[col] = df_serialized[col].astype(str)
+            
+    cache_data = {
+        '_meta': {
+            'v': 2,
+            'built_by': 'antigravity-gemini-3-flash',
+            'timestamp': datetime.now().isoformat()
+        },
+        'returns': df_serialized.to_dict(orient='records')
+    }
+    
+    from lib.safe_write import safe_write_json
+    safe_write_json(cache_path, cache_data)
+    print(f"  [FRAUD CACHE] Successfully froze {m3_str} returns to cache ({len(df)} rows)")
+    return df
+
+def _query_returns_full(cfg, months_back=4, full_refresh=False):
+    """
+    Single JOIN: fact_returns + dim_branch + dim_item_barcode + dim_product.
+    Returns enriched DataFrame — store_name, dm, rm, parcode, idesc pre-filled.
+    Uses Phase IR-D caching: freezes M-3 and queries M-2 onwards.
+    """
+    from dateutil.relativedelta import relativedelta
+    
+    if months_back != 4:
+        start = (date.today().replace(day=1)
+                 - relativedelta(months=months_back - 1)).strftime('%Y-%m-01')
+        sql = f"""
+            SELECT
+                fr.rtno,
+                fr.rtsono,
+                fr.rtserlno,
+                fr.iprod,
+                COALESCE(dib.parcode, fr.iprod)  AS parcode,
+                COALESCE(dp.idesc,    '')         AS idesc,
+                fr.return_date,
+                fr.cstcode,
+                fr.rtstatus,
+                fr.warehouse_code,
+                LPAD(fr.warehouse_code, 3, '0')  AS whs,
+                fr.return_qty,
+                fr.unit_price,
+                fr.line_amount_inc_vat           AS amount,
+                fr.allocated_net_amount,
+                fr.rtuname,
+                fr.rttime,
+                fr.rtrcode,
+                fr.rtrdesc,
+                COALESCE(db.name,      '?')      AS store_name,
+                COALESCE(db.dm,        '?')      AS dm,
+                COALESCE(db.rm,        '?')      AS rm,
+                COALESCE(db.prvn_name, '')       AS prvn_name
+            FROM fact_returns fr
+            LEFT JOIN dim_branch db
+                   ON LPAD(fr.warehouse_code, 3, '0') = db.code
+            LEFT JOIN dim_item_barcode dib
+                   ON fr.iprod = dib.barcode AND dib.baractive = 'Y'
+            LEFT JOIN dim_product dp
+                   ON COALESCE(dib.parcode, fr.iprod) = dp.iprod
+            WHERE fr.rtstatus = 'U'
+              AND fr.return_date >= '{start}'
+              AND fr.warehouse_code NOT IN ('901', '999')
+        """
+        conn = _mysql_conn(cfg)
+        df = pd.read_sql(sql, conn)
+        conn.close()
+        bills = df['rtsono'].nunique()
+        print(f'  MySQL returns (uncached): {len(df):,} rows | {bills:,} bills | from {start}')
+        return df
+        
+    m3_date = date.today().replace(day=1) - relativedelta(months=3)
+    m3_str = m3_date.strftime('%Y-%m')
+    
+    df_frozen = _get_frozen_returns(cfg, m3_str, full_refresh=full_refresh)
+    
+    m2_date = date.today().replace(day=1) - relativedelta(months=2)
+    start_hot = m2_date.strftime('%Y-%m-01')
+    
+    sql_hot = f"""
+        SELECT
+            fr.rtno,
+            fr.rtsono,
+            fr.rtserlno,
+            fr.iprod,
+            COALESCE(dib.parcode, fr.iprod)  AS parcode,
+            COALESCE(dp.idesc,    '')         AS idesc,
+            fr.return_date,
+            fr.cstcode,
+            fr.rtstatus,
+            fr.warehouse_code,
+            LPAD(fr.warehouse_code, 3, '0')  AS whs,
+            fr.return_qty,
+            fr.unit_price,
+            fr.line_amount_inc_vat           AS amount,
+            fr.allocated_net_amount,
+            fr.rtuname,
+            fr.rttime,
+            fr.rtrcode,
+            fr.rtrdesc,
+            COALESCE(db.name,      '?')      AS store_name,
+            COALESCE(db.dm,        '?')      AS dm,
+            COALESCE(db.rm,        '?')      AS rm,
+            COALESCE(db.prvn_name, '')       AS prvn_name
+        FROM fact_returns fr
+        LEFT JOIN dim_branch db
+               ON LPAD(fr.warehouse_code, 3, '0') = db.code
+        LEFT JOIN dim_item_barcode dib
+               ON fr.iprod = dib.barcode AND dib.baractive = 'Y'
+        LEFT JOIN dim_product dp
+               ON COALESCE(dib.parcode, fr.iprod) = dp.iprod
+        WHERE fr.rtstatus = 'U'
+          AND fr.return_date >= '{start_hot}'
+          AND fr.warehouse_code NOT IN ('901', '999')
+    """
+    
+    print(f"  [FRAUD CACHE] Querying hot returns starting from {start_hot}...")
+    conn = _mysql_conn(cfg)
+    df_hot = pd.read_sql(sql_hot, conn)
+    conn.close()
+    
+    df = pd.concat([df_frozen, df_hot], ignore_index=True)
+    
+    for col in ['amount', 'return_qty', 'unit_price', 'allocated_net_amount']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            
+    df['return_date'] = df['return_date'].astype(str)
+            
     bills = df['rtsono'].nunique()
-    print(f'  MySQL returns: {len(df):,} rows | {bills:,} bills | from {start}')
+    print(f'  MySQL returns (frozen+hot): {len(df):,} rows | {bills:,} bills | cache month: {m3_str} | hot start: {start_hot}')
     return df
 
 def _query_whsdd_sales_cost(cfg, year_month):
@@ -303,7 +475,7 @@ def load_returns(umap, branches=None):
     # ── MySQL path ────────────────────────────────────────────────────────────
     if cfg:
         try:
-            df = _query_returns_full(cfg)
+            df = _query_returns_full(cfg, full_refresh=FULL_REFRESH)
         except Exception as e:
             print(f'  MySQL error: {e}')
             df = None
@@ -394,8 +566,13 @@ def compute_store_risk(df, branches_or_cfg=None):
     sales_map = {}
     cost_map  = {}
 
+    # Try cache first (Phase IR-D optimization)
+    cached_sales = _load_sales_mtd_from_cache(max_mo)
+    if cached_sales:
+        sales_map, cost_map = cached_sales
+
     # Primary: data-lake.fact_sales
-    if cfg:
+    if not sales_map and cfg:
         try:
             sales_map, cost_map = _query_sales_mtd(cfg)
         except Exception as e:
