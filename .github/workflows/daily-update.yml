@@ -58,7 +58,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.guard.outputs.skip != 'true'
-        run: pip install mysql-connector-python pandas openpyxl
+        run: pip install mysql-connector-python pandas openpyxl pyarrow
 
       - name: Create db_config.json from secrets
         if: steps.guard.outputs.skip != 'true'

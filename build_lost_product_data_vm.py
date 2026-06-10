@@ -3,10 +3,11 @@ VM/streaming variant: replaces pandas pd.read_sql with mysql.connector cursor.fe
 loop so peak RAM is ~50MB instead of multi-GB. Output is byte-for-byte identical to
 the original build_lost_product_data.py.
 """
-import json, os, sys, pickle
+import json, os, sys, pickle, gc
 import concurrent.futures
 from datetime import date, timedelta
 import mysql.connector
+import pandas as pd
 
 FOLDER   = os.path.dirname(os.path.abspath(__file__))
 OUT_JSON = os.path.join(FOLDER, 'lost_product_data.json')
@@ -48,6 +49,7 @@ def _load_state():
 
 
 def _save_year_state(year, tot, store):
+    os.makedirs(STATE_DIR, exist_ok=True)
     with open(_state_file(year), 'wb') as fh:
         pickle.dump((tot, store), fh)
 
@@ -275,44 +277,110 @@ def main():
     print(f'  Lost Product Builder (streaming) — years {YEARS[0]}..{YEARS[-1]}', flush=True)
     print('=' * 60, flush=True)
 
-    # Resume from previous run if state files exist
-    year_qty = _load_state()
+    # Check for --full-refresh flag or missing cache
+    FULL_REFRESH = '--full-refresh' in sys.argv
+    qty_cache_path = os.path.join(FOLDER, 'cache', 'lost_qty_2021_2025.parquet')
+    store_cache_path = os.path.join(FOLDER, 'cache', 'lost_store_2021_2025.parquet')
+    
+    if FULL_REFRESH or not os.path.exists(qty_cache_path) or not os.path.exists(store_cache_path):
+        print("Historical cache missing or --full-refresh requested. Building cache...", flush=True)
+        import subprocess
+        script_path = os.path.join(FOLDER, 'scripts', 'build_lost_cache_2021_2024.py')
+        subprocess.run([sys.executable, script_path], check=True)
 
-    # Build per-year jobs for years NOT yet cached
+    # 1. Load 2021-2025 from Parquet cache
+    print("Loading 2021-2025 historical cache...", flush=True)
+    df_qty_cache = pd.read_parquet(qty_cache_path)
+    df_store_cache = pd.read_parquet(store_cache_path)
+    
+    year_qty = {}                 # {year: {iprod: qty}}
+    store_breakdown = {}          # {whs: {iprod: [q21..q26, amt]}}
+    yidx = {y: i for i, y in enumerate(YEARS)}
+    
+    for yr in [2021, 2022, 2023, 2024, 2025]:
+        sub_qty = df_qty_cache[df_qty_cache['year'] == yr]
+        year_qty[yr] = dict(zip(sub_qty['iprod'].astype(str), sub_qty['qty'].astype(float)))
+        
+        idx = yidx[yr]
+        sub_store = df_store_cache[df_store_cache['year'] == yr]
+        for whs, ip, q, a in zip(sub_store['whs'].astype(str), sub_store['iprod'].astype(str),
+                                  sub_store['qty'].astype(float), sub_store['amt'].astype(float)):
+            arr = store_breakdown.setdefault(whs, {}).setdefault(ip, [0]*(len(YEARS) + 1))
+            arr[idx] = round(q)
+            arr[-1] += a
+            
+        print(f"  [{yr}] Loaded from cache: {len(year_qty[yr]):,} iprods | {len(sub_store):,} store rows", flush=True)
+
+    # Reclaim DataFrame RAM immediately
+    del df_qty_cache, df_store_cache
+    gc.collect()
+
+    # 2. Load resume state for CURRENT_YEAR if available
+    for yr in [CURRENT_YEAR]:
+        f = _state_file(yr)
+        if os.path.exists(f):
+            print(f"[state] resume: loading year {yr} from state file...", flush=True)
+            try:
+                with open(f, 'rb') as fh:
+                    tot, sd = pickle.load(fh)
+                year_qty[yr] = tot
+                
+                # Merge into store_breakdown
+                idx = yidx[yr]
+                for (whs, ip), val in sd.items():
+                    if isinstance(val, tuple):
+                        q, a = val
+                    else:
+                        q, a = val, 0
+                    arr = store_breakdown.setdefault(whs, {}).setdefault(ip, [0]*(len(YEARS) + 1))
+                    arr[idx] = round(q)
+                    arr[-1] += a
+                    
+                print(f"[state] resume: loaded year {yr} ({len(tot):,} iprods)", flush=True)
+            except Exception as e:
+                print(f"[state] WARN: failed to load {f}: {e}", flush=True)
+
+    # 3. Build jobs only for active tables (only CURRENT_YEAR) that are NOT yet in year_qty
     jobs = []
-    for year, (bld, blh) in YEAR_TABLES.items():
-        if year not in year_qty:
-            jobs.append((year, bld, blh, None))
     bld_cur, blh_cur = CURRENT_TABLES
-    for year in [2025, CURRENT_YEAR]:
+    for year in [CURRENT_YEAR]:
         if year not in year_qty:
             jobs.append((year, bld_cur, blh_cur, year))
 
-    def _run_one(job):
-        yr, bld, blh, wyr = job
-        c = _conn(cfg)
-        print(f'[{yr}] start ({bld})', flush=True)
-        tot, store = query_year(c, bld, blh, where_year=wyr)
-        c.close()
-        _save_year_state(yr, tot, store)  # PERSIST IMMEDIATELY
-        print(f'[{yr}] done | {len(tot):,} iprods | {len(store):,} (whs,iprod) | qty={sum(tot.values()):,.0f}', flush=True)
-        return yr, tot
-
     if jobs:
-        print(f'Launching {len(jobs)} sequential year queries ({len(year_qty)} cached) ...', flush=True)
+        print(f'Launching {len(jobs)} active year queries ...', flush=True)
         for job in jobs:
-            yr, tot = _run_one(job)
+            yr, bld, blh, wyr = job
+            c = _conn(cfg)
+            print(f'[{yr}] start ({bld})', flush=True)
+            tot, sd = query_year(c, bld, blh, where_year=wyr)
+            c.close()
+            
+            # Save state immediately for crash recovery
+            _save_year_state(yr, tot, sd)
+            
             year_qty[yr] = tot
-            # Delete references to reclaim RAM immediately
-            del tot
+            
+            # Merge into store_breakdown
+            idx = yidx[yr]
+            for (whs, ip), val in sd.items():
+                if isinstance(val, tuple):
+                    q, a = val
+                else:
+                    q, a = val, 0
+                arr = store_breakdown.setdefault(whs, {}).setdefault(ip, [0]*(len(YEARS) + 1))
+                arr[idx] = round(q)
+                arr[-1] += a
+                
+            print(f'[{yr}] done | {len(tot):,} iprods | {len(sd):,} store rows | qty={sum(tot.values()):,.0f}', flush=True)
+            del tot, sd
     else:
-        print('All 6 years cached — skipping query phase', flush=True)
+        print('Active years (2025, 2026) already cached/resumed', flush=True)
 
-    # Verify all years collected; if not, exit (next run will resume)
+    # Verify all years collected; if not, exit
     missing = [y for y in YEARS if y not in year_qty]
     if missing:
         print(f'\n[partial] missing years: {missing}', flush=True)
-        print(f'[partial] re-run script to resume — state cached for {sorted(year_qty.keys())}', flush=True)
         sys.exit(2)
 
     # Close the main connection since each thread used its own
@@ -324,32 +392,6 @@ def main():
         all_parcodes.update(yq.keys())
     print(f'\nTotal unique parcodes across all years: {len(all_parcodes):,}', flush=True)
 
-    print('Building per-store breakdown ...', flush=True)
-    store_breakdown = {}
-    store_amt_total = {}
-    yidx = {y: i for i, y in enumerate(YEARS)}
-    for year in YEARS:
-        f = _state_file(year)
-        if os.path.exists(f):
-            print(f'  Loading & aggregating year {year} ...', flush=True)
-            try:
-                with open(f, 'rb') as fh:
-                    _, sd = pickle.load(fh)
-                
-                idx = yidx[year]
-                for (whs, ip), val in sd.items():
-                    if isinstance(val, tuple):
-                        q, a = val
-                    else:
-                        q, a = val, 0
-                    arr = store_breakdown.setdefault(whs, {}).setdefault(ip, [0]*len(YEARS))
-                    arr[idx] = round(q)
-                    store_amt_total[(whs, ip)] = store_amt_total.get((whs, ip), 0) + a
-                
-                # Delete sd immediately to reclaim RAM
-                del sd
-            except Exception as e:
-                print(f'  ERROR loading/aggregating year {year}: {e}', flush=True)
     n_pairs = sum(len(p) for p in store_breakdown.values())
     print(f'  {len(store_breakdown)} stores, {n_pairs:,} (whs,iprod) pairs (pre-prune)', flush=True)
 
@@ -359,12 +401,13 @@ def main():
     for whs in list(store_breakdown.keys()):
         for ip in list(store_breakdown[whs].keys()):
             arr = store_breakdown[whs][ip]
-            total_qty = sum(arr)
-            total_amt = store_amt_total.get((whs, ip), 0)
+            total_qty = sum(arr[:len(YEARS)])
+            total_amt = arr[-1]
             if total_qty < MIN_QTY and total_amt < MIN_AMT:
                 del store_breakdown[whs][ip]
                 removed += 1
             else:
+                arr.pop()  # Remove total_amt element
                 while len(arr) > 1 and arr[-1] == 0:
                     arr.pop()
         if not store_breakdown[whs]:
