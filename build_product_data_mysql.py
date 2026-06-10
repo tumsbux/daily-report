@@ -13,7 +13,7 @@ Usage:
     py build_product_data_mysql.py --no-push   # build only
 """
 
-import os, json, sys
+import os, json, sys, calendar
 import pandas as pd
 from datetime import date
 from collections import defaultdict
@@ -27,6 +27,8 @@ PUSH           = True  # overridden by argparse in main()
 _today = date.today()
 YEAR26, MONTH = _today.year, _today.month
 YEAR25        = YEAR26 - 1
+_, DAYS_26 = calendar.monthrange(YEAR26, MONTH)
+_, DAYS_25 = calendar.monthrange(YEAR25, MONTH)
 
 # ── store filter: numeric code ≤ 500, exclude warehouse codes ─────────────────
 STORE_FILTER = """
@@ -64,6 +66,7 @@ def query_product_sales(conn, days_elapsed):
     Then resolves names/groups in a separate small query.
     """
     end_date26 = f'{YEAR26}-{MONTH:02d}-{days_elapsed:02d}'
+    end_date25 = f'{YEAR25}-{MONTH:02d}-{DAYS_25:02d}'
 
     # 1a. Fast aggregation — no JOINs to dim tables
     sql_agg = f"""
@@ -71,13 +74,13 @@ def query_product_sales(conn, days_elapsed):
             iprod,
             SUM(CASE WHEN sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
                      THEN net_sales_amt ELSE 0 END)           AS s26,
-            SUM(CASE WHEN YEAR(sodate)={YEAR25} AND MONTH(sodate)={MONTH}
+            SUM(CASE WHEN sodate BETWEEN '{YEAR25}-{MONTH:02d}-01' AND '{end_date25}'
                      THEN net_sales_amt ELSE 0 END)           AS s25,
             SUM(CASE WHEN sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
                      THEN COALESCE(total_cost, 0) ELSE 0 END) AS cost26,
             SUM(CASE WHEN sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
                      THEN net_qty ELSE 0 END)                 AS q26,
-            SUM(CASE WHEN YEAR(sodate)={YEAR25} AND MONTH(sodate)={MONTH}
+            SUM(CASE WHEN sodate BETWEEN '{YEAR25}-{MONTH:02d}-01' AND '{end_date25}'
                      THEN net_qty ELSE 0 END)                 AS q25
         FROM fact_sales
         WHERE solinetype NOT IN ('C', 'R')
@@ -85,7 +88,7 @@ def query_product_sales(conn, days_elapsed):
           AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
           AND (
               (sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}')
-              OR (YEAR(sodate)={YEAR25} AND MONTH(sodate)={MONTH})
+              OR (sodate BETWEEN '{YEAR25}-{MONTH:02d}-01' AND '{end_date25}')
           )
         GROUP BY iprod
         HAVING s26 > 0
@@ -228,11 +231,12 @@ def query_barcodes(conn, iprod_list):
 def query_store_sales_may25(conn):
     """Returns {whs_padded: s25_total} — May 2025 net_sales_amt per store.
     Used to fix store-level YoY in product dashboard (p.s25 is all-stores, not per-store)."""
+    end_date25 = f'{YEAR25}-{MONTH:02d}-{DAYS_25:02d}'
     sql = f"""
         SELECT LPAD(sotowhs, 3, '0') AS whs,
                ROUND(SUM(net_sales_amt)) AS s25
         FROM fact_sales
-        WHERE YEAR(sodate) = {YEAR25} AND MONTH(sodate) = {MONTH}
+        WHERE sodate BETWEEN '{YEAR25}-{MONTH:02d}-01' AND '{end_date25}'
           AND solinetype NOT IN ('C', 'R')
           AND sotowhs REGEXP '^[0-9]+$'
           AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
@@ -270,6 +274,7 @@ def query_store_sales_may26(conn, days_elapsed):
 # ── STEP 2d: Sales breakdown by solinetype ────────────────────────────────────
 def query_sales_by_linetype(conn, days_elapsed):
     """Returns [{solinetype, sales, qty, bills}] for all stores 1-500."""
+    end_date26 = f'{YEAR26}-{MONTH:02d}-{days_elapsed:02d}'
     sql = f"""
         SELECT
             IFNULL(solinetype, 'unknown') AS solinetype,
@@ -277,8 +282,7 @@ def query_sales_by_linetype(conn, days_elapsed):
             ROUND(SUM(net_qty))       AS qty,
             COUNT(DISTINCT sono)      AS bills
         FROM fact_sales
-        WHERE YEAR(sodate) = {YEAR26} AND MONTH(sodate) = {MONTH}
-          AND DAY(sodate) <= {days_elapsed}
+        WHERE sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
           AND solinetype NOT IN ('C', 'R')
           AND sotowhs REGEXP '^[0-9]+$'
           AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
@@ -524,11 +528,12 @@ def push_github(cfg):
 # ── Auto-detect max available day in fact_sales ───────────────────────────────
 def detect_max_day(conn):
     """Query fact_sales for the latest day with data in the current month/year."""
+    end_date26 = f'{YEAR26}-{MONTH:02d}-{DAYS_26:02d}'
     cur = conn.cursor()
     cur.execute(f"""
         SELECT MAX(DAY(sodate))
         FROM fact_sales
-        WHERE YEAR(sodate) = {YEAR26} AND MONTH(sodate) = {MONTH}
+        WHERE sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
           AND solinetype NOT IN ('C', 'R')
           AND sotowhs REGEXP '^[0-9]+$'
           AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500

@@ -98,13 +98,14 @@ else:
                 database=_db_cfg_early.get('database', 'data-lake'),
                 connection_timeout=30, charset='utf8mb4')
             _cur = _c.cursor()
+            _end_date26 = f"{YEAR}-{MONTH}-{DAYS_IN_MONTH:02d}"
             _cur.execute("""
                 SELECT MAX(DAY(sodate)) FROM fact_sales
-                WHERE YEAR(sodate)=%s AND MONTH(sodate)=%s
+                WHERE sodate BETWEEN %s AND %s
                   AND solinetype NOT IN ('C','R')
                   AND sotowhs REGEXP '^[0-9]+$'
                   AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
-            """, (int(YEAR), int(MONTH)))
+            """, (f"{YEAR}-{MONTH}-01", _end_date26))
             _row = _cur.fetchone()
             _cur.close(); _c.close()
             if _row and _row[0]: _auto_day = int(_row[0])
