@@ -341,7 +341,7 @@ fetch(DATA_URL+'?v='+Date.now())
   .catch(()=>{Analytics.dataLoadFailed('fetch_failed');document.body.innerHTML+='<p style="color:red;padding:20px">โหลดข้อมูลล้มเหลว — ตรวจสอบ product_data.json</p>';});
 
 function init(){
-  document.getElementById('nav-month').textContent=D.month26||'';
+  document.getElementById('nav-month').textContent=(D.month26||'')+(D.days_elapsed?' · วัน 1–'+D.days_elapsed+'/'+(D.days_in_month||30):'');
   document.getElementById('nav-sku').textContent=(D.products||[]).length.toLocaleString()+' SKU';
   document.getElementById('nav-date').textContent='อัปเดต: '+(D.generated||'');
   // Dynamic month labels (2026-06-05) — keeps card/modal in sync with current month
@@ -610,13 +610,13 @@ function renderSummary(prods){
   const sYoy=s25?(s26/s25-1)*100:null;
   const qYoy=q25?(q26/q25-1)*100:null;
   document.getElementById('s-sales').textContent=fmtM(s26);
-  document.getElementById('s-sales-yoy').innerHTML=s25?`${_MTH_LABEL_25_SHORT}: ${fmtM(s25)} ${yoyBadge(sYoy)}`:'';
+  document.getElementById('s-sales-yoy').innerHTML=s25?`${_MTH_LABEL_25_SHORT} (1–${D.days_elapsed||''}): ${fmtM(s25)} ${yoyBadge(sYoy)}`:'';
   document.getElementById('s-gp').textContent=fmtM(gp26);
   document.getElementById('s-gp-pct').textContent='GP% = '+gpPct.toFixed(1)+'%';
   document.getElementById('s-cost').textContent=fmtM(c26);
   document.getElementById('s-cost-pct').textContent='Cost% = '+cPct.toFixed(1)+'%';
   document.getElementById('s-qty').textContent=fmt(q26);
-  document.getElementById('s-qty-yoy').innerHTML=q25?`${_MTH_LABEL_25_SHORT}: ${fmt(q25)} ${yoyBadge(qYoy)}`:'';
+  document.getElementById('s-qty-yoy').innerHTML=q25?`${_MTH_LABEL_25_SHORT} (1–${D.days_elapsed||''}): ${fmt(q25)} ${yoyBadge(qYoy)}`:'';
   document.getElementById('s-sku').textContent=prods.length.toLocaleString();
   document.getElementById('s-sku-sub').textContent=`จาก ${(D.products||[]).length.toLocaleString()} SKU ทั้งหมด`;
 }

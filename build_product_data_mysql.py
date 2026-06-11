@@ -304,6 +304,9 @@ def query_product_sales(conn, days_elapsed):
     df_prev = get_product_cache(cfg, YEAR25, MONTH, DAYS_25, full_refresh=FULL_REFRESH)
     
     df_curr_f = df_curr[df_curr['day'] <= days_elapsed]
+    # Same-period YoY (2026-06-11): compare days 1-N of prev year, not full month
+    # (cache still holds full prev month — filter at aggregation only)
+    df_prev_f = df_prev[df_prev['day'] <= days_elapsed]
     
     agg_curr = df_curr_f.groupby('iprod').agg(
         s26=('sales', 'sum'),
@@ -311,7 +314,7 @@ def query_product_sales(conn, days_elapsed):
         q26=('qty', 'sum')
     ).reset_index()
     
-    agg_prev = df_prev.groupby('iprod').agg(
+    agg_prev = df_prev_f.groupby('iprod').agg(
         s25=('sales', 'sum'),
         q25=('qty', 'sum')
     ).reset_index()
@@ -449,9 +452,11 @@ def query_barcodes(conn, iprod_list):
 
 
 # ── STEP 2b: May 2025 total per store (for store-level YoY baseline) ─────────
-def query_store_sales_may25(conn):
+def query_store_sales_may25(conn, days_elapsed):
     cfg = _load_cfg()
     df_prev = get_product_cache(cfg, YEAR25, MONTH, DAYS_25, full_refresh=FULL_REFRESH)
+    # Same-period YoY (2026-06-11): days 1-N only
+    df_prev = df_prev[df_prev['day'] <= days_elapsed]
     df_grouped = df_prev.groupby('whs')['sales'].sum().reset_index()
     return {r['whs']: int(round(r['sales'])) for _, r in df_grouped.iterrows()}
 
@@ -649,6 +654,7 @@ def build_json(df, barcode_map, item_map, store_breakdown, branch_info, days_ela
     return {
         'generated':    today.isoformat(),
         'days_elapsed': days_elapsed,
+        'days_in_month': DAYS_26,
         'month26':      f'{YEAR26}-{MONTH:02d}',
         'month25':      f'{YEAR25}-{MONTH:02d}',
         'products':     products,
@@ -760,7 +766,7 @@ def main():
     store_bd = query_store_breakdown(conn, days_elapsed)
 
     print('      Loading May 2025 per-store baseline ...')
-    store_s25 = query_store_sales_may25(conn)
+    store_s25 = query_store_sales_may25(conn, days_elapsed)
     print('      %d stores with May25 data' % len(store_s25))
 
     print('      Loading May 2026 per-store true total ...')
