@@ -684,8 +684,8 @@ def push_github(cfg):
     env = {**os.environ,
            'GIT_AUTHOR_NAME':    'Dashboard Bot', 'GIT_AUTHOR_EMAIL':    'bot@dashboard',
            'GIT_COMMITTER_NAME': 'Dashboard Bot', 'GIT_COMMITTER_EMAIL': 'bot@dashboard'}
-    subprocess.run(['git', 'clone', f'https://{token}@github.com/{repo}.git', REPO_DIR],
-                   capture_output=True, timeout=60)
+    subprocess.run(['git', 'clone', '--depth', '1', f'https://{token}@github.com/{repo}.git', REPO_DIR],
+                   capture_output=True, timeout=300)  # shallow clone — full history timed out at 60s (2026-06-11)
     shutil.copy2(OUT_JSON, os.path.join(REPO_DIR, 'product_data.json'))
     subprocess.run(['git', '-C', REPO_DIR, 'add', 'product_data.json'],
                    capture_output=True, env=env)
