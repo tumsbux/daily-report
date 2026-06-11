@@ -11,7 +11,9 @@ FILES = {
     "fraud_dashboard.html": "https://raw.githubusercontent.com/tumsbux/daily-report/main/fraud_dashboard.html",
     "index_for_lost_product.html": "https://raw.githubusercontent.com/tumsbux/daily-report/main/index_for_lost_product.html",
     "lost_product_data.json": "https://raw.githubusercontent.com/tumsbux/lost-Product/main/lost_product_data.json",
-    "analytics.js": "https://raw.githubusercontent.com/tumsbux/daily-report/main/analytics.js"
+    "analytics.js": "https://raw.githubusercontent.com/tumsbux/daily-report/main/analytics.js",
+    "product_dashboard.html": "https://raw.githubusercontent.com/tumsbux/daily-report/main/product_dashboard.html",
+    "product_data.json": "https://raw.githubusercontent.com/tumsbux/daily-report/main/product_data.json"
 }
 
 def sync():
