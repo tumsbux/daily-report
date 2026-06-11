@@ -509,7 +509,7 @@ def load_returns(umap, branches=None):
     if 'amount' not in df.columns:
         df['amount'] = 0.0
 
-    df['return_date'] = pd.to_datetime(df['return_date'], errors='coerce')
+    df['return_date'] = pd.to_datetime(df['return_date'], errors='coerce', format='mixed')
     df['month'] = df['return_date'].dt.strftime('%Y-%m')
     df['day']   = df['return_date'].dt.day
 

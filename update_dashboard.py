@@ -936,7 +936,7 @@ _returnall_path = os.path.join(FOLDER, 'returnall.txt')
 try:
     import pandas as _rpd
     _ra = _rpd.read_csv(_returnall_path, sep='\t', dtype=str, usecols=['return_date'])
-    _ra['_d'] = _rpd.to_datetime(_ra['return_date'], errors='coerce')
+    _ra['_d'] = _rpd.to_datetime(_ra['return_date'], errors='coerce', format='mixed')
     _ra_may = _ra[_ra['_d'].dt.strftime('%Y-%m') == '%s-%s' % (YEAR, MONTH)]
     _days_in_returnall = set(_ra_may['_d'].dt.day.dropna().astype(int).tolist())
     _appended = []
@@ -1074,63 +1074,30 @@ if os.path.exists(FRAUD_FILE) and os.path.exists(FRAUD_JSON):
         }
         _new_D_json = json.dumps(_new_D, ensure_ascii=False, separators=(',', ':'))
 
-        with open(FRAUD_FILE, encoding='utf-8') as _ff:
-            _fhtml = _ff.read()
-
-        # If fraud_dashboard.html is truncated, regenerate from template
+        # Always regenerate fraud_dashboard.html from template if it exists
         _FRAUD_TMPL = os.path.join(FOLDER, 'fraud_analysis_template.html')
-        _fraud_done = False
-        if '</html>' not in _fhtml and os.path.exists(_FRAUD_TMPL):
-            print('  NOTE: fraud_dashboard.html truncated — regenerating from template')
+        if os.path.exists(_FRAUD_TMPL):
+            print('  Regenerating fraud_dashboard.html from template...')
             with open(_FRAUD_TMPL, encoding='utf-8') as _ft:
                 _fhtml = _ft.read()
             _fhtml = _fhtml.replace('PLACEHOLDER_DATA', _new_D_json)
-            _fraud_badge = '%d %s %d · วัน 1–%d' % (DAYS_ELAPSED, THAI_MON, YEAR_BE, DAYS_IN_MONTH)
+            
+            # Format the nav-date badge (e.g., "10 มิ.ย. 2569 · วัน 1-10 มิ.ย.")
+            # We dynamically match the max day in the returned data for the current month
+            _days_list = _new_D.get('data', {}).get(_new_D.get('months', [''])[-1], {}).get('day', [])
+            _max_day = max([int(x.get('day', 0)) for x in _days_list]) if _days_list else DAYS_ELAPSED
+            
+            _fraud_badge = '%d %s %d · วัน 1–%d %s' % (DAYS_ELAPSED, THAI_MON, YEAR_BE, _max_day, THAI_MON)
             _fraud_re = r'(?:\d{4}-\d{2}-\d{2}|\d+\s+\S+\s+\d{4})\s+·\s+วัน\s+1[–\-]\d+(?:\s+\S+)?'
             _fhtml = re.sub(_fraud_re, _fraud_badge, _fhtml)
+            
             with open(FRAUD_FILE, 'w', encoding='utf-8') as _ff:
                 _ff.write(_fhtml)
-            print('  fraud_dashboard.html regenerated from template + data injected')
-            _fraud_done = True
-
-        if not _fraud_done:
-            # Replace embedded const D = {...};  (normal brace-match path)
-            _d_search = _fhtml.find('const D={')
-            if _d_search < 0: _d_search = _fhtml.find('const D = {')
-            _d_start = _fhtml.index('{', _d_search)
-            _depth = 0; _i = _d_start
-            while _i < len(_fhtml):
-                if _fhtml[_i] == '{':  _depth += 1
-                elif _fhtml[_i] == '}':
-                    _depth -= 1
-                    if _depth == 0: _d_end = _i + 1; break
-                _i += 1
-            _fhtml = _fhtml[:_d_start] + _new_D_json + _fhtml[_d_end:]
-
-            # Update ML month-label lookup → dynamic (replaces old hardcoded version)
-            _new_ml = ("const TH_MO_S=['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.',"
-                       "'ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];\n"
-                       "const ML=Object.fromEntries((D.months||[]).map(k=>{const[y,m]=k.split('-');return[k,TH_MO_S[+m]];}));")
-            _fhtml = re.sub(r"const ML=\{[^}]+\};", _new_ml, _fhtml)
-
-            # Update nav-date badge (matches both ISO and Thai date formats)
-            _fraud_badge = '%d %s %d · วัน 1–%d' % (DAYS_ELAPSED, THAI_MON, YEAR_BE, DAYS_IN_MONTH)
-            _fraud_re = r'(?:\d{4}-\d{2}-\d{2}|\d+\s+\S+\s+\d{4})\s+·\s+วัน\s+1[–\-]\d+(?:\s+\S+)?'
-            _fhtml = re.sub(_fraud_re, _fraud_badge, _fhtml)
-
-            with open(FRAUD_FILE, 'w', encoding='utf-8') as _ff:
-                _ff.write(_fhtml)
-            print('  fraud_dashboard.html data injected + nav-date -> day 1-%d/%d' % (DAYS_ELAPSED, DAYS_IN_MONTH))
+            print('  fraud_dashboard.html data injected + nav-date -> day 1-%d %s' % (_max_day, THAI_MON))
+        else:
+            print('  WARNING: fraud_analysis_template.html not found!')
     except Exception as _e:
         print('  WARNING fraud_dashboard.html data inject failed: %s' % _e)
-        # Fallback: at least update the date badge
-        try:
-            with open(FRAUD_FILE, encoding='utf-8') as _ff: _fhtml = _ff.read()
-            _fraud_badge = '%d %s %d · วัน 1–%d' % (DAYS_ELAPSED, THAI_MON, YEAR_BE, DAYS_IN_MONTH)
-            _fraud_re = r'(?:\d{4}-\d{2}-\d{2}|\d+\s+\S+\s+\d{4})\s+·\s+วัน\s+1[–\-]\d+(?:\s+\S+)?'
-            _fhtml = re.sub(_fraud_re, _fraud_badge, _fhtml)
-            with open(FRAUD_FILE, 'w', encoding='utf-8') as _ff: _ff.write(_fhtml)
-        except: pass
 
 # STEP 7: Push to GitHub Pages
 print('[7/7] Pushing to GitHub Pages ...')
