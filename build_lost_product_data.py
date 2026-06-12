@@ -3,6 +3,9 @@ Identifies LOST products (no 2025+2026 sales) and STALE (no 2026 sales).
 
 Source: data-lake.bld_acc_*_lake (5 tables: 2021, 2022, 2023, 2024, current)
 Output: lost_product_data.json with full year-by-year qty grid + status + lost_score.
+Format: compact schema v2 (_meta.schema=2) — global `codes` barcode table,
+products as array-of-arrays + products_header, store_breakdown keyed by code
+index. See Decisions.md ADR [2026-06-11]. Decoded by index.html decodeData().
 """
 import json, os, sys, warnings
 from datetime import date, timedelta
@@ -366,7 +369,46 @@ def main():
     n_lost   = sum(1 for p in products if p['status'] == 'LOST')
     qty_lost_last_year = sum(p['max_qty'] for p in products if p['status'] == 'LOST')
 
+    # ── Compact encoding (schema v2) — ADR [2026-06-11] ─────────────────────
+    # Global code table: every barcode/iprod string stored ONCE in `codes`,
+    # referenced by int index everywhere (products + store_breakdown keys).
+    # Products emitted as array-of-arrays + single `products_header` row.
+    # BREAKING vs v1 — decoded one-time by decodeData() in index.html.
+    code_set = set()
+    for p in products:
+        code_set.add(p['parcode'])
+        code_set.add(p['iprod'])
+    for _prods in store_breakdown.values():
+        code_set.update(_prods.keys())
+    codes = sorted(code_set)
+    cidx = {c: i for i, c in enumerate(codes)}
+    print(f'  codes table: {len(codes):,} unique barcodes/iprods')
+
+    STATUS_CODES = ['ACTIVE', 'STALE', 'LOST']
+    PRODUCTS_HEADER = [
+        'parcode', 'iprod', 'name', 'brand', 'group', 'type', 'ipunit3',
+        'q2021', 'q2022', 'q2023', 'q2024', 'q2025', 'q2026',
+        'first_year', 'last_year', 'years_active', 'years_gone',
+        'total_qty', 'max_qty', 'status', 'lost_score',
+    ]
+    prod_rows = []
+    for p in products:
+        row = [cidx[p['parcode']], cidx[p['iprod']]]
+        row += [p[k] for k in PRODUCTS_HEADER[2:19]]   # name .. max_qty
+        row += [STATUS_CODES.index(p['status']), p['lost_score']]
+        prod_rows.append(row)
+
+    sb_compact = {
+        whs: {str(cidx[ip]): arr for ip, arr in _prods.items()}
+        for whs, _prods in store_breakdown.items()
+    }
+
     output = {
+        '_meta': {
+            'schema':       2,
+            'built_by':     'claude-fable-5',
+            'status_codes': STATUS_CODES,
+        },
         'generated':       (date.today() - timedelta(days=1)).isoformat(),  # data lake = today-1
         'years':           YEARS,
         'current_year':    CURRENT_YEAR,
@@ -377,8 +419,10 @@ def main():
             'lost':           n_lost,
             'qty_lost_peak':  qty_lost_last_year,
         },
-        'products':        products,
-        'store_breakdown': store_breakdown,
+        'codes':           codes,
+        'products_header': PRODUCTS_HEADER,
+        'products':        prod_rows,
+        'store_breakdown': sb_compact,
         'store_info':      branch_info,
     }
 
