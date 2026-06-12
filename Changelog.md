@@ -3,6 +3,42 @@
 > งานที่ทำเสร็จ — เรียงจากใหม่ → เก่า
 > Format: [Keep a Changelog](https://keepachangelog.com/)
 
+## [2026-06-12] Lost Product × Onhand Excel report (one-off, user request)
+
+### Added
+- **`build_lost_onhand_xlsx.py`** — รวม LOST+STALE products (chain-level) × onhand ต่อร้านจาก query MYWMS ibl สด (สูตร Phase A: `locno='stock' AND shelfno='shelfno'`, join `iprod = ibl_parcode`, stream tuple cursor กัน MemoryError) → **1 ไฟล์ต่อสถานะ** `lost_onhand_YYYY-MM-DD_<STATUS>.xlsx` (query ibl ครั้งเดียว แยกตอนเขียน) แต่ละไฟล์ 3 sheets: Detail (เฉพาะ onhand > 0, เรียงมูลค่า) / ByProduct / ByStore — flags: default LOST+STALE, `--all` +ACTIVE, `--lost` LOST เดี่ยว — Excel เขียนแบบ streaming (`write_only`, ~100K แถว/นาที RAM ต่ำ; รุ่นแรกโหมดปกติ RAM บวม 97K แถวค้างที่ wb.save — แก้ 2026-06-15) — รันจริง 2026-06-15: 97,475 แถว มูลค่ารวม ฿68.5M
+- อ่าน `lost_product_data.json` ได้ทั้ง schema v2 (decode) และ v1 เก่า — ✅ tested ใน sandbox ด้วย mock data (decode, join/filter, xlsx rollups, v1 passthrough)
+- รันบน Windows: `py build_lost_onhand_xlsx.py` (ต้องมี db_config.json — script ค้นหา 3 path เอง) — ไม่แตะ daily pipeline
+
+### Changed (2026-06-12 PM)
+- หัวคอลัมน์ xlsx (Detail + ByProduct) เปลี่ยน `parcode | iprod` → **`barcode | parcode`** ให้ตรง schema DB — internal keys คงเดิม ไม่กระทบ logic — รันจริง `--all`: LOST 79,033 / STALE 18,433 / ACTIVE 502,640 rows, มูลค่ารวม ฿407.8M (ดู Gotchas "Field naming trap")
+
+### Known issue (flagged)
+- ⚠️ **`build_grouped_with_barcodes.py` (script เก่า) อ่าน products แบบ v1** — **จะพังแล้วจริงตอนนี้** (JSON บน repo เป็น v2 ตั้งแต่ 2026-06-12 PM) — ถ้ายังใช้อยู่ต้องเพิ่ม decode แบบเดียวกับ `build_lost_onhand_xlsx.py::load_lost_data()`
+
+---
+
+## [2026-06-12] Compact JSON encoding schema v2 (lost_product_data.json)
+
+### Changed
+- **`build_lost_product_data.py`** — emit compact format v2 (ADR `[2026-06-11]`): global `codes` table (66,245 unique barcodes/iprods, สตริงเก็บครั้งเดียว), `store_breakdown` inner keys → int index, `products` → array-of-arrays + `products_header` row เดียว, status → int (`_meta.status_codes`)
+- **`index.html` + `index_for_lost_product.html`** (byte-identical, md5 ตรงกัน) — เพิ่ม `decodeData()`: one-time decode หลัง fetch กลับเป็น shape v1 ใน memory → filters / scope aggregation / XLSX export ไม่ต้องแก้; v1 JSON เก่า pass-through ได้ (รองรับช่วง transition); schema อื่น throw error ชัดเจน
+- `_meta` ใน JSON: `{schema: 2, built_by, status_codes}` per collab rules
+
+### Verified (sandbox)
+- ✅ `py_compile` builder + `node --check` JS + ไฟล์ลงท้าย `</html>` + ไม่มี null bytes
+- ✅ Round-trip test ด้วย code จริง (encode block จาก builder + `decodeData` จาก index.html): deep-equal ทั้ง 7 sections + v1 passthrough + กรณี parcode≠iprod (barcode bridge) + Thai strings
+- ✅ Re-encode JSON จริง: **77.9 → 51.9 MB (−33%)** — sb 47.0→35.0, products 30.8→15.9, codes +1.0
+- ⚠️ ต่ำกว่า estimate ADR (~43 MB) เพราะ (1) data โตจาก 74.2→77.9 MB ระหว่างรอ approve (2) ADR ประเมิน products หลัง encode ต่ำไป — payload ที่เหลือคือชื่อสินค้าภาษาไทย บีบด้วย index ไม่ได้ — ยังต่ำกว่า threshold 70 MB ชัดเจน
+
+### Deployed (✅ 2026-06-12 PM)
+- ✅ Windows rebuild ผ่าน: **49.5 MB** (data วันที่ 12, ต่ำกว่าที่วัด 51.9 เพราะคนละวัน) + `_meta.schema: 2` + dashboard render ผ่าน (localhost:8000 — JSON fetch 200, console error ที่เห็นเป็น Chrome extension noise)
+- ✅ Pushed สองคอมมิต: **daily-report `858db387`** (builder + `index_for_lost_product.html` commit เดียว ผ่าน `push_v2_schema.py` ตัวใหม่ — Git Data API แบบเลือกไฟล์ได้ ไม่ force-push) + **lost-Product `fdeacd1`** (JSON v2 + index.html + analytics.js ผ่าน `push_lost_data.ps1`) — verify raw บน GitHub แล้วทั้งคู่
+- 🔓 **Antigravity ปลดล็อก lost-product builder/frontend ได้**
+- 📝 หมายเหตุ: `F:\co work dashboard\` ไม่ใช่ git clone — push ของ repo นี้ทำผ่าน GitHub API scripts เท่านั้น (`push_py_to_github.py` / `push_v2_schema.py` / `push_lost_data.ps1`)
+
+---
+
 ## [2026-06-11 PM] onhand=0 fix + JSON size investigation + IR audit
 
 ### Fixed
@@ -265,4 +301,4 @@
 
 ---
 
-_Last updated: 2026-06-08_
+_Last updated: 2026-06-12_

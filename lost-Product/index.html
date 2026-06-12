@@ -223,10 +223,42 @@ const PAGE_SIZE=50;
 const YEARS=[2021,2022,2023,2024,2025,2026];
 const fmt=n=>(n==null||isNaN(n))?'—':Math.round(n).toLocaleString();
 
+// ── Compact JSON decode (schema v2) — ADR [2026-06-11] ─────────────────────────────
+// v2 format: global `codes` table (int index → barcode string), products as
+// array-of-arrays + `products_header`, store_breakdown inner keys = code index,
+// status as int via _meta.status_codes. One-time decode back to the v1
+// in-memory shape so filters / table / XLSX export stay untouched.
+function decodeData(raw){
+  const sv=raw&&raw._meta&&raw._meta.schema;
+  if(!sv) return raw; // legacy v1 (plain objects, barcode keys) — pass through
+  if(sv!==2) throw new Error('Unsupported data schema v'+sv+' (dashboard รองรับ v2)');
+  const codes=raw.codes||[];
+  const STATUS=(raw._meta.status_codes)||['ACTIVE','STALE','LOST'];
+  const hdr=raw.products_header||[];
+  const products=(raw.products||[]).map(row=>{
+    const p={};
+    for(let i=0;i<hdr.length;i++) p[hdr[i]]=row[i];
+    p.parcode=codes[p.parcode];
+    p.iprod=codes[p.iprod];
+    if(typeof p.status==='number') p.status=STATUS[p.status];
+    return p;
+  });
+  const sb={};
+  const rawSb=raw.store_breakdown||{};
+  for(const whs in rawSb){
+    const srcP=rawSb[whs], o={};
+    for(const ci in srcP) o[codes[+ci]]=srcP[ci];
+    sb[whs]=o;
+  }
+  const out=Object.assign({},raw,{products:products,store_breakdown:sb});
+  delete out.codes; delete out.products_header;
+  return out;
+}
+
 async function init(){
   try{
     const r=await fetch('./lost_product_data.json?v='+Date.now());
-    D=await r.json();
+    D=decodeData(await r.json());
   }catch(e){
     document.body.innerHTML='<div style="padding:30px;color:#dc2626">ERROR loading lost_product_data.json: '+e.message+'</div>';
     return;

@@ -23,11 +23,9 @@
   3. [ ] **Repo bloat** — parquet cache push รายวัน โต GB/ปี → เสนอแนวแก้ (ไม่ commit parquet / orphan branch / etc.) — size: S
   - 🚫 ห้ามทั้ง 2 agents ขยาย IR เพิ่มจนกว่า 3 ข้อเคลียร์ — ADR Decisions.md `[2026-06-10]` updated
 
-- [ ] 🚧 **Compact JSON encoding — user อนุมัติแล้ว (2026-06-11 PM), Claude implement** *(claimed by: Claude)*
-  - แผน: ADR `[2026-06-11] Compact JSON encoding` — barcode index + array-form products, 74.2 → ~43 MB
-  - Breaking format: แก้ `build_lost_product_data.py` + `index.html` (lost-Product) + XLSX export ใน commit เดียว + `_meta.schema` version
-  - 🚫 **Antigravity ห้าม touch lost-product builder/frontend จนกว่างานนี้เสร็จ**
-  - size: M
+- [ ] ⚠️ **`build_grouped_with_barcodes.py` อ่าน JSON v1 — พังแล้วตอนนี้** (JSON เป็น v2 ตั้งแต่ 2026-06-12 PM) — ถ้า user ยังใช้ script นี้ ให้เพิ่ม decode แบบ `build_lost_onhand_xlsx.py::load_lost_data()` — size: XS
+
+> ✅ **Compact JSON v2 — deployed + pushed 2026-06-12 PM** (daily-report `858db387` + lost-Product `fdeacd1`) → ย้ายไป Changelog แล้ว — **Antigravity ปลดล็อก lost-product builder/frontend**
 
 ---
 
@@ -106,4 +104,4 @@
 
 ---
 
-_Last updated: 2026-06-11 (PM)_
+_Last updated: 2026-06-12 (PM)_

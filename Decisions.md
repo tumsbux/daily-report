@@ -301,7 +301,9 @@ Product dashboard เทียบ `s26` (MTD วัน 1–9 มิ.ย. 2026, �
 
 ## [2026-06-11] Compact JSON encoding — global barcode index + array-form products
 
-**Status:** ✅ Accepted — **user approved 2026-06-11 PM** — Claude เป็นผู้ implement (Antigravity ห้าม touch lost-product builder/frontend ระหว่างนี้)
+**Status:** ✅ Accepted + **deployed 2026-06-12 PM (Claude)** — verified บน Windows (49.5 MB) + pushed daily-report `858db387` + lost-Product `fdeacd1` — **Antigravity ปลดล็อกแล้ว**
+
+> **Annotation [2026-06-12] (Claude, post-implement):** ผลจริงจาก re-encode JSON ปัจจุบัน = **77.9 → 51.9 MB (−33%)** ไม่ใช่ ~43 MB — เพราะ (1) data โต 74.2→77.9 MB (2) products หลัง encode = 15.9 MB ไม่ใช่ 9.2 MB: payload ที่เหลือคือชื่อ/แบรนด์/กลุ่มภาษาไทย (UTF-8 3 bytes/ตัวอักษร) ซึ่ง index ไม่ช่วย — ยังต่ำกว่า threshold 70 MB. ถ้าอยากบีบต่อในอนาคต: ตัด derived fields (first_year..lost_score, ~2.5 MB) แล้วคำนวณใน decodeData ฝั่ง JS (logic มีอยู่แล้วใน scope aggregation)
 
 **Context:**
 `lost_product_data.json` = **74.2 MB** ตั้งแต่ IR-A build 2026-06-10 (walkthrough.md ระบุเอง) — เกิน revisit threshold 70 MB (ADR [2026-06-06] คาด 45-55 MB). ตรวจ 2026-06-11: **pruning ยังทำงานปกติ** (MIN_QTY/MIN_AMT OR logic + trailing-zero trim intact ใน `build_lost_product_data.py` L287-311) — ขนาดมาจาก **structure overhead** ไม่ใช่ regression:
