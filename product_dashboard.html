@@ -284,7 +284,7 @@ tbody tr:hover{background:#f8f9ff}
           <th class="r" onclick="sortProd(7,this)">กำไรขั้นต้น <span class="sa"></span></th>
           <th class="r" onclick="sortProd(8,this)">%GP <span class="sa"></span></th>
           <th class="r" onclick="sortProd(9,this)">เฉลี่ย/วัน <span class="sa"></span></th>
-          <th class="r" onclick="sortProd(10,this)">เฉลี่ย/สัปดาห์ <span class="sa"></span></th>
+          <th class="r" onclick="sortProd(10,this)">เฉลี่ยชิ้น/วัน <span class="sa"></span></th>
           <th class="r" onclick="sortProd(11,this)">Onhand <span class="sa"></span></th>
           <th class="r" onclick="sortProd(12,this)">ipunit3 <span class="sa"></span></th>
           <th class="r" onclick="sortProd(13,this)">Dif Ly QTY <span class="sa"></span></th>
@@ -693,8 +693,8 @@ function pSortVal(p,col,days){
     case 6:  return p.cost26!=null?p.cost26:Math.round(p.s26-p.gp26);
     case 7:  return p.gp26||0;
     case 8:  return p.gp_pct||0;
-    case 9:  return (p.q26||0)/d;
-    case 10: return (p.q26||0)/(d/7);
+    case 9:  return (p.s26||0)/d;
+    case 10: return (p.q26||0)/d;
     case 11: return p.onhand||0;
     case 12: return p.ipunit3||0;
     case 13: return (p.q26||0)-(p.q25||0);

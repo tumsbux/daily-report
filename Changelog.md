@@ -3,6 +3,18 @@
 > งานที่ทำเสร็จ — เรียงจากใหม่ → เก่า
 > Format: [Keep a Changelog](https://keepachangelog.com/)
 
+## [2026-06-12 PM8] Product dashboard — label เฉลี่ยชิ้น/วัน + sort bug (Claude)
+
+### Fixed
+- `product_dashboard.html`: label คอลัมน์ "เฉลี่ย/สัปดาห์" → **"เฉลี่ยชิ้น/วัน"** — ค่าที่ render คือ `q26/days_elapsed` (ชิ้น/วัน) มาตลอด แค่ label ผิด (user ขอเพิ่มคอลัมน์ชิ้น/วัน → พบว่ามีอยู่แล้ว เลยแก้ label แทน ตาราง 15 คอลัมน์เท่าเดิม)
+- **Sort bug 2 จุด**: คอลัมน์ "เฉลี่ย/วัน" โชว์บาท/วัน (`s26/d`) แต่ sort ใช้ชิ้น/วัน → แก้ `pSortVal` case 9 เป็น `s26/d` + case 10 `q26/(d/7)` → `q26/d` ให้ตรงค่าที่โชว์
+- Edit ผ่าน Python via bash (HTML 40KB ตามกฎ Gotchas) — verified: 3 substitutions / ลงท้าย `</html>` / no null bytes
+
+### Added
+- `push_files_api.py` — generic selective push ขึ้น main ผ่าน Git Data API (`py push_files_api.py <files> -m "msg"`) — retry 5xx + block db_config.json/cache — ใช้แทนการสร้าง script push เฉพาะกิจรายครั้ง
+
+---
+
 ## [2026-06-12 PM6] Repo bloat — cache ย้ายไป orphan branch `cache` (ADR approved + implemented, Claude)
 
 ### Added
@@ -14,10 +26,14 @@
   - `setup_cache_branch.py` (one-time, Git Data API): seed orphan branch จาก cache/ local + ลบ cache/* ออกจาก main + commit .gitignore
   - `push_cache_migration.py` (one-time): push เฉพาะไฟล์ migration + docs — **ไม่ใช้ `push_py_to_github.py`** เพราะ list มี dashboard HTML รายวัน จะ push build เก่าทับของ GHA (Gotchas "push ทับด้วยไฟล์เก่า")
 - Sandbox verified: YAML parse 14 steps ✓ / py_compile ✓ / no null bytes ✓ (sandbox ยิง api.github.com ไม่ได้ — push ต้องรันบน Windows)
-- ⏳ **รอ user รันบน Windows ตามลำดับ:** (1) `py push_cache_migration.py` (2) `py setup_cache_branch.py` — แล้วเช็ค GHA รุ่งขึ้น
 
-### Verified (pre-run)
-- `build_grouped_with_barcodes.py` — pre-verify ผ่าน MySQL MCP: JSON `iprod` = `dim_item_barcode.parcode` ตรงทุก sample (รวมเคส barcode bridge เช่น `0800700000537`→`6996850481066`), coverage 145/150 baractive='Y' (96.7%, fallback ครอบที่เหลือ) — เหลือรันจริงกับ JSON v2 (local `F:\lost-Product` ยังเป็น v1 77.9MB ต้อง copy v2 51.9MB จาก co work dashboard มาก่อน)
+### Deployed (✅ 2026-06-12 PM7, user รันบน Windows)
+- main **`d57451ee`** (workflow + update_dashboard + .gitignore + docs ผ่าน `push_cache_migration.py`) → branch **`cache`** seeded **`b42be68c`** (11 ไฟล์ รวม superseded 2021_2024 parquet ที่ค้างใน local) → main cleaned **`dd6fb478`** (ลบ cache 8 ไฟล์ + commit .gitignore)
+- หมายเหตุ: blob upload parquet ใหญ่ (29-32MB) เจอ GitHub 502 — เพิ่ม retry 5xx/timeout ใน `setup_cache_branch.py` (4 attempts, backoff) แล้วผ่าน
+- ⏳ เหลือ verify GHA รุ่งขึ้น: step "Restore cache from orphan cache branch" + "Push cache to orphan cache branch" เขียวทั้งคู่ → ปลดล็อกขยาย IR
+
+### Verified
+- `build_grouped_with_barcodes.py` — ✅ **จบ:** pre-verify ผ่าน MySQL MCP (join key `iprod` = `dim_item_barcode.parcode` ตรงทุก sample รวม bridge case, coverage 145/150) + **รันจริงบน Windows ผ่านทั้ง 2 schema**: v1 passthrough และ v2 decoded — ตัวเลข parity เป๊ะทุก count (65,812 products / 74,747 barcode rows / ACTIVE 117,019 / STALE 39,698 / LOST 65,714 / DISCONTINUED 1,109) + `lost_product_grouped_with_barcodes.xlsx` saved
 
 ### Docs
 - Sync docs lost-Product → co work dashboard (ฝั่ง co work ค้างเก่า ขาด update 06-12 PM2/PM5 ทั้ง Decisions/Roadmap/Changelog/CLAUDE/Gotchas/How_To)
