@@ -251,7 +251,15 @@ Lost Product dashboard ETL queries 6 years of transaction history. Static histor
 
 ## [2026-06-10] Phase IR-B, IR-C, and IR-D Caching Architecture
 
-**Status:** Accepted
+**Status:** ✅ Accepted with conditions — **user approved 2026-06-11 PM** (หลัง Claude code review เต็มทั้ง 3 scripts)
+
+> **Annotation [2026-06-11]:** ADR นี้ Antigravity ใส่สถานะ "Accepted" เอง **โดย user ยังไม่ได้อนุมัติ** — ขัด collab rule Claude review แล้วพบคุณภาพ code ดี (rule_hash/v:2/built_by ครบ, safe_write จริง, fallback chain เดิมอยู่ครบ, upsert ถูกต้อง, Sunday full-refresh ใน GHA) → user ตัดสินใจ **accept แบบมีเงื่อนไข 3 ข้อ** (ดู Roadmap Now):
+>
+> 1. **Fraud cache lag 1 วัน** — fraud (pipeline step 1) อ่าน `sales_daily` cache ที่ update_dashboard (step 5) เขียนเมื่อวาน → ต้อง document หรือแก้ลำดับ
+> 2. **Verify onhand patch** — IR-B memory pressure เป็น suspect ของ onhand=0 (patched 2026-06-11, รอรันบน Windows)
+> 3. **Repo bloat** — parquet cache 4-10 MB push ขึ้น repo รายวัน → โตหลัก GB/ปี ต้องหาทางแก้ (เช่น ไม่ commit parquet)
+>
+> ห้ามทั้ง 2 agents ขยาย IR เพิ่มจนกว่าเงื่อนไข 3 ข้อจะเคลียร์
 
 **Context:**
 The rest of the daily ETL scripts (Product MTD, Sales Daily Snapshot, and Fraud Risk scoring) still query large tables like `fact_sales` and `fact_returns` for full month or multi-month intervals. This triggers full table scans on MySQL, causing the daily pipeline to take over 2 minutes and pushing memory usage close to the VM's 2GB ceiling.
@@ -268,6 +276,54 @@ The rest of the daily ETL scripts (Product MTD, Sales Daily Snapshot, and Fraud 
 - ✅ Memory overhead on the VM remains extremely low (well below 2GB).
 - ✅ Eliminates redundant queries to database tables.
 - ✅ Transparent Sunday reconciliation window handles late POS adjustments automatically.
+
+---
+
+## [2026-06-11] Product dashboard YOY → same-period MTD baseline
+
+**Status:** ✅ Accepted + implemented 2026-06-11 (user approved)
+
+**Context:**
+Product dashboard เทียบ `s26` (MTD วัน 1–9 มิ.ย. 2026, จาก fact_sales auto-detect ที่ lag ~1-2 วัน) กับ `s25` (full June 2025, 30 วัน) → YOY **-59.6%** misleading ทุก SKU/ทุกประเภท ทั้งที่ per-day จริงคือ +34.6%. ผู้ใช้เข้าใจผิดว่า data วัน 1-10 มิ.ย. หาย (เคสจริง 2026-06-11). Math check: ดู Gotchas.md [2026-06-11]
+
+**Decision:**
+1. `build_product_data_mysql.py` — filter prev-year cache `df_prev[df_prev['day'] <= days_elapsed]` ใน `query_product_sales` + `query_store_sales_may25` (Parquet cache ของ Antigravity ยังเก็บ full month — filter ตอน aggregate เท่านั้น, ไม่กระทบ cache structure, ไม่ต้อง full-refresh)
+2. `build_json` — เพิ่ม `days_in_month`
+3. `product_dashboard.html` — nav chip "· วัน 1–N/30" + KPI baseline label "(1–N)"
+
+**Consequences:**
+- ✅ YOY apples-to-apples — สอดคล้องกับ sales dashboard (YoY same-source sync 2026-06-04)
+- ✅ ผู้ใช้เห็นชัดว่า data ครอบคลุมถึงวันไหน (ตัด confusion "ทำไมไม่ใช่ 1-10")
+- ⚠️ `s25/q25` จะเปลี่ยนค่าทุกวันจนสิ้นเดือน (expected — เป็น MTD baseline)
+- ⚠️ Verification ต้องรันบน Windows (sandbox เข้า MySQL ไม่ได้): `py build_product_data_mysql.py --no-push` แล้วเช็ค s25 รวม ~36M (ไม่ใช่ 108.7M)
+
+---
+
+## [2026-06-11] Compact JSON encoding — global barcode index + array-form products
+
+**Status:** ✅ Accepted — **user approved 2026-06-11 PM** — Claude เป็นผู้ implement (Antigravity ห้าม touch lost-product builder/frontend ระหว่างนี้)
+
+**Context:**
+`lost_product_data.json` = **74.2 MB** ตั้งแต่ IR-A build 2026-06-10 (walkthrough.md ระบุเอง) — เกิน revisit threshold 70 MB (ADR [2026-06-06] คาด 45-55 MB). ตรวจ 2026-06-11: **pruning ยังทำงานปกติ** (MIN_QTY/MIN_AMT OR logic + trailing-zero trim intact ใน `build_lost_product_data.py` L287-311) — ขนาดมาจาก **structure overhead** ไม่ใช่ regression:
+
+| ส่วน | ขนาด | สาเหตุ |
+|---|---|---|
+| store_breakdown | 47.0 MB | keys = barcode 13 หลัก ×1.62M pairs = **24.7 MB**, arrays 20.6 MB |
+| products | 24.1 MB | field names ซ้ำ 65,790 รอบ = **13.4 MB** + parcode==iprod ซ้ำ 50,926 รายการ |
+
+**Decision (proposed):**
+1. Global barcode table `codes: [...]` (58,643 unique = 0.9 MB) — ทุกที่อ้างด้วย int index
+2. `store_breakdown` keys → int index → 33.3 MB
+3. `products` → array-of-arrays + header row เดียว → 9.2 MB
+4. JS loader ใน `index.html` decode หลัง fetch (one-time pass)
+
+**Measured estimate: 74.2 → ~43 MB (−42%)** — headroom จริง ~2-3 ปี
+
+**Consequences:**
+- ✅ กลับลงใต้ threshold ระยะยาว โดยไม่เสีย data
+- ⚠️ **Breaking format** — `index.html` + XLSX export ต้องแก้พร้อม builder ใน commit เดียว
+- ⚠️ ต้องใส่ format version ใน JSON (`_meta.schema`) per collab rules — กัน agent อ่าน format เก่า
+- 📝 Note ถึง Antigravity: walkthrough.md (06-10) เขียนว่า 74.2 MB = "~2 years headroom" — **ไม่ตรง ADR threshold 70 MB** — ใช้ ADR นี้เป็น source of truth
 
 ---
 

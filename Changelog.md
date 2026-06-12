@@ -3,6 +3,36 @@
 > งานที่ทำเสร็จ — เรียงจากใหม่ → เก่า
 > Format: [Keep a Changelog](https://keepachangelog.com/)
 
+## [2026-06-11 PM] onhand=0 fix + JSON size investigation + IR audit
+
+### Fixed
+- `build_product_data_mysql.py` — `query_onhand_per_store`: stream tuple cursor แทน `fetchall()` dict rows + ตัด `MAX(ibl_date_sale)` ที่ไม่ได้ใช้ (hypothesis: MemoryError → `str(e)` ว่าง) + except พิมพ์ `type+repr+traceback` — ✅ **verified 2026-06-11**: `936,307 (iprod, store) onhand rows from MYWMS ibl` (รัน `--no-push` บน Windows)
+
+### Investigated
+- **lost_product_data.json 74.2 MB > 70 MB threshold**: pruning ปกติ — สาเหตุ structure overhead (sb keys 24.7 MB + products field names 13.4 MB) → ADR compact encoding (est ~43 MB) ใน Decisions.md, **pending approval**
+- **Phase IR audit**: Antigravity implement IR-B/C/D ครบ 3 scripts (06-10) โดยไม่ผ่าน user approval + เขียน ADR "Accepted" เอง → escalated ใน Roadmap Now + CLAUDE.md
+- ✅ Auto-run 2026-06-11 verified: commit `25d27b7` (10:58 BKK) บน tumsbux/lost-Product
+
+---
+
+## [2026-06-11] Product dashboard — same-period YoY (1–N vs 1–N) + day-range badge
+
+### Fixed
+- **YOY -59.6% misleading ทุก SKU/ประเภท**: dashboard เทียบ MTD (วัน 1–9 มิ.ย.26 = 43.9M) กับ full June 2025 (30 วัน = 108.7M) ทั้งที่ per-day จริง +34.6% — ผู้ใช้เข้าใจผิดว่า data วัน 1-10 หาย (จริงๆ คือ fact_sales lag 1-2 วัน → `days_elapsed=9`, by design)
+- `build_product_data_mysql.py`: `query_product_sales` + `query_store_sales_may25` filter prev-year `day <= days_elapsed` (Parquet cache ยังเก็บ full month — filter ตอน aggregate, ไม่ต้อง full-refresh)
+- `build_json`: เพิ่ม `days_in_month` ใน product_data.json
+
+### Added
+- `product_dashboard.html`: nav chip "2026-06 · วัน 1–9/30" + KPI baseline label "มิ.ย.25 (1–9): ..."
+
+### Notes
+- Root cause + math: Gotchas.md [2026-06-11] · ADR: Decisions.md [2026-06-11]
+- ✅ Verified 2026-06-11: regen บน Windows ได้ days 1-10: 47.6M | YoY +21.8% (baseline มิ.ย.25 1-10 = 39.1M) — live บน GitHub Pages แล้ว
+- Commits: `7b90907` (fix), `fa70be6` (data), `3e64579` (push_github shallow clone fix)
+- ⚠️ พบใหม่: onhand query failed (ดู Roadmap Known Issues)
+
+---
+
 ## [2026-06-10] Phase IR Caching Architecture & Sunday Full-Refresh
 
 ### Added

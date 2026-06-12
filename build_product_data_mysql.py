@@ -522,8 +522,7 @@ def query_onhand_per_store(conn):
     sql = """
         SELECT LPAD(ibl_whsno, 3, '0') AS whs,
                ibl_parcode AS iprod,
-               SUM(ibl_qty_beg_bal + ibl_qty_rec - ibl_qty_iss) AS onhand,
-               MAX(ibl_date_sale) AS last_sale
+               SUM(ibl_qty_beg_bal + ibl_qty_rec - ibl_qty_iss) AS onhand
         FROM MYWMS2023_CENTER.ibl
         WHERE ibl_locno = 'stock'
           AND ibl_shelfno = 'shelfno'
@@ -532,13 +531,15 @@ def query_onhand_per_store(conn):
         GROUP BY whs, ibl_parcode
         HAVING onhand > 0
     """
-    cur = conn.cursor(dictionary=True)
+    # 2026-06-11: stream tuple cursor (no fetchall/dict rows) + dropped unused
+    # MAX(ibl_date_sale) — onhand=0 incident; suspected MemoryError (str(e)=='')
+    cur = conn.cursor()
     cur.execute(sql)
     result = {}
     n_rows = 0
-    for r in cur.fetchall():
+    for whs, iprod, onhand in cur:
         n_rows += 1
-        result[(r['iprod'], r['whs'])] = int(float(r['onhand']))
+        result[(iprod, whs)] = int(float(onhand))
     cur.close()
     print(f'      {n_rows:,} (iprod, store) onhand rows from MYWMS ibl')
     return result
@@ -781,7 +782,9 @@ def main():
     try:
         onhand_map = query_onhand_per_store(conn)
     except Exception as _e:
-        print(f'      WARNING: onhand query failed: {_e}')
+        import traceback
+        print(f'      WARNING: onhand query failed: {type(_e).__name__}: {_e!r}')
+        traceback.print_exc()
         onhand_map = {}
 
     conn.close()
