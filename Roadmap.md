@@ -15,15 +15,18 @@
   - ⚠️ Antigravity ก็ใช้ push — rotate แล้วแจ้งทั้ง 2 agents / อัปเดต config ที่ Antigravity ใช้ด้วย
   - size: XS
 
-- [ ] ✅→⚠️ **IR-B/C/D: user accept แบบมีเงื่อนไข (2026-06-11 PM)** — เหลือเคลียร์ 3 เงื่อนไข:
-  1. [ ] **Fraud cache lag 1 วัน** — fraud (step 1) อ่าน `sales_daily` cache ที่เขียนโดย step 5 ของเมื่อวาน → document หรือแก้ลำดับ pipeline — size: S
-  2. [x] **Verify onhand patch** — ✅ verified 2026-06-12 (รันบน Windows): `936,307 (iprod, store) onhand rows from MYWMS ibl` (stream-cursor patch แก้ MemoryError สำเร็จ) — size: XS
-     - ⚠️ **patch ยังไม่ deploy:** repo copy ของ `build_product_data_mysql.py` ยังเป็นตัวเก่า (เช็ค raw 2026-06-12) → user ต้อง `py push_py_to_github.py` + รัน `py build_product_data_mysql.py` (ไม่ใส่ --no-push) เพื่อให้เว็บได้ onhand
-     - ⚠️ GHA 2026-06-12 ไม่ fire เลยทั้ง 5 cron slots (เช็ค 11:00 BKK) — ใช้ workflow_dispatch แทน
-  3. [ ] **Repo bloat** — parquet cache push รายวัน โต GB/ปี → เสนอแนวแก้ (ไม่ commit parquet / orphan branch / etc.) — size: S
-  - 🚫 ห้ามทั้ง 2 agents ขยาย IR เพิ่มจนกว่า 3 ข้อเคลียร์ — ADR Decisions.md `[2026-06-10]` updated
+- [ ] 🔐 **ย้าย SSH creds ออกจาก VM scripts** — `run_vm_command.py` / `check_vm_status.py` / `push_to_vm.py` / `upload_test.py` ใน `F:\lost-Product` ฝัง password (ยังไม่หลุดขึ้น repo แต่อยู่ใน working copy ของ repo public) → ย้ายเป็น config แยกแบบ `db_config.json` หรือย้าย scripts ไป `F:\co work dashboard\` — พ่วง: SSH+MySQL password หลุดในแชท Cowork 2026-06-12 → แจ้ง IT rotate ถ้ากังวล — size: XS
 
-- [ ] ⚠️ **`build_grouped_with_barcodes.py` อ่าน JSON v1 — พังแล้วตอนนี้** (JSON เป็น v2 ตั้งแต่ 2026-06-12 PM) — ถ้า user ยังใช้ script นี้ ให้เพิ่ม decode แบบ `build_lost_onhand_xlsx.py::load_lost_data()` — size: XS
+- [ ] 🖥️ **ขอ IT ตั้ง restart policy ให้ VM container** (`agent-ab-sandbox`) — `start_services.py` ไม่มี auto-restart (container ไม่มี cron/systemd) ตายแล้วต้อง start มือ — ถามด้วยว่า endpoint นี้ใครเป็นคน setup (ไม่มี ADR) — size: XS
+
+- [ ] ✅→⚠️ **IR-B/C/D: user accept แบบมีเงื่อนไข (2026-06-11 PM)** — เหลือเคลียร์ 3 เงื่อนไข:
+  1. [x] **Fraud cache lag 1 วัน** — ✅ resolved 2026-06-12: **document-only** (user decision — circular dependency + fact_sales lag by design) — ดู Gotchas entry ใหม่ + ADR annotation
+  2. [x] **Verify onhand patch** — ✅ verified + **deployed 2026-06-12 PM**: `py push_py_to_github.py` (35 ไฟล์, parent `858db387`) + รัน `py build_product_data_mysql.py` จริง → `936,433 onhand rows` + product_data.json pushed OK (51.7M / +20.5% YoY, days 1-11) — size: XS
+     - ✅ GHA 2026-06-12 **fire แล้ว แค่ delay หนัก**: 4 scheduled runs 12:53–13:59 BKK (delay ~5.4 ชม. จาก slot แรก 07:30) ทุก run success — เช็คตอน 11:00 BKK เลยยังไม่เห็น — free-tier delay ปกติ ไม่ใช่ cron พัง
+  3. [ ] **Repo bloat** — ✅ **approved + implemented 2026-06-12 PM6 (Claude)**: workflow +2 steps / ตัด cache จาก push lists / `.gitignore` / `setup_cache_branch.py` — ⏳ **เหลือ user รัน:** (1) `py push_cache_migration.py` (2) `py setup_cache_branch.py` แล้วเช็ค GHA รุ่งขึ้น (restore จาก origin/cache + force-push กลับ) → เคลียร์เงื่อนไขครบ — size: S
+  - 🚫 ห้ามทั้ง 2 agents ขยาย IR เพิ่มจนกว่า 3 ข้อเคลียร์ — ADR Decisions.md `[2026-06-10]` updated — เหลือข้อ 3 ข้อเดียว
+
+> ✅ **`build_grouped_with_barcodes.py` — fixed 2026-06-12 PM (Claude):** เพิ่ม v2 decode (v1 passthrough) + แก้ DB join key เป็น JSON `iprod` ตาม naming trap — PM6: pre-verify ผ่าน MySQL MCP แล้ว (join key ตรงทุก sample รวม bridge case, coverage 145/150) — เหลือรันจริงบน Windows: copy JSON v2 จาก `F:\co work dashboard` มาก่อน (local เป็น v1 เก่า) แล้ว `py build_grouped_with_barcodes.py`
 
 > ✅ **Compact JSON v2 — deployed + pushed 2026-06-12 PM** (daily-report `858db387` + lost-Product `fdeacd1`) → ย้ายไป Changelog แล้ว — **Antigravity ปลดล็อก lost-product builder/frontend**
 
@@ -104,4 +107,4 @@
 
 ---
 
-_Last updated: 2026-06-12 (PM)_
+_Last updated: 2026-06-12 (PM6)_

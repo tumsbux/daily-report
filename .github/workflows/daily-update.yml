@@ -85,6 +85,18 @@ jobs:
           print('db_config.json created')
           "
 
+      # ADR [2026-06-12]: cache อยู่บน orphan branch `cache` ไม่ commit ลง main (แก้ repo bloat)
+      - name: Restore cache from orphan cache branch
+        if: steps.guard.outputs.skip != 'true'
+        continue-on-error: true
+        run: |
+          if git fetch origin cache --depth 1; then
+            git checkout origin/cache -- cache/ && echo "cache/ restored from origin/cache" || echo "WARN: cache branch has no cache/ dir"
+            ls -la cache/ || true
+          else
+            echo "no cache branch yet — builders will auto full-refresh"
+          fi
+
       - name: Check if today is Sunday (Bangkok time)
         if: steps.guard.outputs.skip != 'true'
         run: |
@@ -162,6 +174,28 @@ jobs:
       - name: Run dashboard update
         if: steps.guard.outputs.skip != 'true'
         run: python update_dashboard.py ${{ env.FULL_REFRESH_FLAG }}
+
+      # ADR [2026-06-12]: force-push cache ทั้งชุดไป orphan branch — history = 1 commit เสมอ ไม่มี bloat
+      - name: Push cache to orphan cache branch (force, single commit)
+        if: always() && steps.guard.outputs.skip != 'true'
+        continue-on-error: true
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          if [ ! -d cache ] || [ -z "$(ls -A cache 2>/dev/null)" ]; then
+            echo "no cache files — skipping"
+            exit 0
+          fi
+          TMP=$(mktemp -d)
+          mkdir -p "$TMP/cache"
+          cp -r cache/. "$TMP/cache/"
+          git -C "$TMP" init -b cache
+          git -C "$TMP" add -A
+          git -C "$TMP" -c user.email=bot@dashboard -c user.name="Dashboard Bot" \
+            commit -m "cache: $(TZ=Asia/Bangkok date +%Y-%m-%d) (built_by: gha)"
+          git -C "$TMP" push --force "https://x-access-token:${GH_PAT}@github.com/tumsbux/daily-report.git" cache:refs/heads/cache
+          echo "✅ cache branch force-pushed (single commit)"
+          rm -rf "$TMP"
 
       - name: Clean up credentials
         if: always()

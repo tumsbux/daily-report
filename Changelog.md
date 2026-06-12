@@ -3,6 +3,58 @@
 > งานที่ทำเสร็จ — เรียงจากใหม่ → เก่า
 > Format: [Keep a Changelog](https://keepachangelog.com/)
 
+## [2026-06-12 PM6] Repo bloat — cache ย้ายไป orphan branch `cache` (ADR approved + implemented, Claude)
+
+### Added
+- **ADR [2026-06-12] Cache persistence Option A — user approved → implement ครบ:**
+  - `daily-update.yml`: step "Restore cache from orphan cache branch" (ก่อน Sunday check) + step "Push cache to orphan cache branch (force, single commit)" (หลัง update_dashboard, `always()` + continue-on-error) — branch history = 1 commit เสมอ ไม่มี bloat
+  - `update_dashboard.py`: ตัด cache 8 รายการออกจาก `push_files` (STEP 7)
+  - `push_py_to_github.py`: ตัด cache 7 รายการออกจาก `FILES_TO_PUSH` + เพิ่ม `.gitignore` เข้า list
+  - `.gitignore` ใหม่: `cache/`, `db_config.json`, `__pycache__`, VM scripts ที่ฝัง creds
+  - `setup_cache_branch.py` (one-time, Git Data API): seed orphan branch จาก cache/ local + ลบ cache/* ออกจาก main + commit .gitignore
+  - `push_cache_migration.py` (one-time): push เฉพาะไฟล์ migration + docs — **ไม่ใช้ `push_py_to_github.py`** เพราะ list มี dashboard HTML รายวัน จะ push build เก่าทับของ GHA (Gotchas "push ทับด้วยไฟล์เก่า")
+- Sandbox verified: YAML parse 14 steps ✓ / py_compile ✓ / no null bytes ✓ (sandbox ยิง api.github.com ไม่ได้ — push ต้องรันบน Windows)
+- ⏳ **รอ user รันบน Windows ตามลำดับ:** (1) `py push_cache_migration.py` (2) `py setup_cache_branch.py` — แล้วเช็ค GHA รุ่งขึ้น
+
+### Verified (pre-run)
+- `build_grouped_with_barcodes.py` — pre-verify ผ่าน MySQL MCP: JSON `iprod` = `dim_item_barcode.parcode` ตรงทุก sample (รวมเคส barcode bridge เช่น `0800700000537`→`6996850481066`), coverage 145/150 baractive='Y' (96.7%, fallback ครอบที่เหลือ) — เหลือรันจริงกับ JSON v2 (local `F:\lost-Product` ยังเป็น v1 77.9MB ต้อง copy v2 51.9MB จาก co work dashboard มาก่อน)
+
+### Docs
+- Sync docs lost-Product → co work dashboard (ฝั่ง co work ค้างเก่า ขาด update 06-12 PM2/PM5 ทั้ง Decisions/Roadmap/Changelog/CLAUDE/Gotchas/How_To)
+
+---
+
+## [2026-06-12 PM5] MySQL MCP live + VM mirror recovery + data day-11 (Claude + user)
+
+### Added
+- **MySQL MCP ใช้งานได้ใน Cowork** — tools `mcp__mysql__execute_sql / get_schema_info / get_table_sample` — root cause สุดท้าย: app ไม่ถูก Quit จริงจาก tray (process ค้าง 10 ตัว) — verify: dim_branch 203 / cross-DB ครบ 3 ฐาน / READ-only denied (ดู Architecture.md §MySQL MCP + Gotchas)
+
+### Fixed
+- **VM Dashboard Hub (`agent-ab-sandbox:48081`) กู้คืน** — identify ได้ว่าเป็น container mirror sync จาก GitHub ทุก 10 นาที (`How_To_Modify_Dashboards.md` มี doc แต่ไม่มี ADR) — service ตายตั้งแต่ 11 มิ.ย. 13:05 (รันโดยไม่มี nohup + ไม่มี auto-restart) → restart ผ่าน SSH ด้วย nohup + กวาด duplicate instance — auto-restart ทำในเครื่องไม่ได้ (container PID1=sh, ไม่มี cron/systemd) ต้องขอ IT
+- **Dashboard Hub ข้อมูลถอยหลังเป็นวัน 9** — push v2 schema (`858db387`) พ่วง `index.html` เก่าทับ build ล่าสุด (Gotchas entry ใหม่) → user รัน `run_manual_update.ps1` rebuild วัน 11 + push สำเร็จ (MTD 51.5M, +24.3% YoY proj, lost-Product `0a5b414`) — verify raw GitHub = วัน 11 ✓
+
+### Security (ค้าง)
+- ⚠️ `run_vm_command.py` / `check_vm_status.py` / `push_to_vm.py` / `upload_test.py` ใน `F:\lost-Product` ฝัง SSH password — เช็คแล้ว**ยังไม่หลุดขึ้น repo** — ควรย้าย creds เป็น config แยก + SSH password และ MySQL password หลุดในแชท Cowork → พิจารณาให้ IT rotate
+
+---
+
+## [2026-06-12 PM2] IR conditions cleanup + build_grouped v2 fix (Claude)
+
+### Fixed
+- **`build_grouped_with_barcodes.py`** — รองรับ JSON schema v2 (decode codes/products_header/status_codes แบบเดียวกับ `build_lost_onhand_xlsx.py`) + v1 passthrough + แก้ DB join key จาก JSON `parcode` (barcode) → JSON `iprod` (DB parcode จริง) ตาม Gotchas naming trap — sandbox tested (syntax + mock v2/v1 decode + join key), ยังไม่ได้รันจริงบน Windows
+
+### Resolved
+- **IR เงื่อนไข 1 (fraud cache lag 1 วัน)** — user เลือก **document-only**: circular dependency (update_dashboard ใช้ fraud_data.json inject HTML → reorder ไม่ได้) + fact_sales lag 1-2 วัน by design + Sunday full-refresh — Gotchas entry ใหม่ + ADR annotation
+- **GHA 2026-06-12 "ไม่ fire"** — จริงๆ **fire แล้ว แค่ delay ~5.4 ชม.** (4 scheduled runs 12:53–13:59 BKK, success ทุก run) — free-tier delay ไม่ใช่ cron พัง — Roadmap note แก้แล้ว
+
+### Proposed
+- **IR เงื่อนไข 3 (repo bloat)** — ADR `[2026-06-12]` ใน Decisions.md: orphan branch `cache` + force-push (เทียบ 4 options) — **รอ user approve**
+
+### Noted
+- Cowork sandbox mount stale ซ้ำอีกครั้ง (build_grouped หลัง Edit → mount เห็น snapshot เก่า+truncated เกิน 45 วิ) — verify โดย copy ผ่าน Write tool ไป outputs แล้วทดสอบที่นั่นแทน (Gotchas 2026-06-11 ยังใช้ได้)
+
+---
+
 ## [2026-06-12] Lost Product × Onhand Excel report (one-off, user request)
 
 ### Added

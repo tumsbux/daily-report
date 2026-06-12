@@ -1122,16 +1122,8 @@ try:
     push_files = ['index.html', 'sales_dashboard_v8.html', 'fraud_dashboard.html',
                   'fraud_analysis.html', 'fraud_data.json',
                   'product_dashboard.html', 'product_data.json',
-                  'analytics.js',
-                  # Cache files to preserve across GHA runs
-                  'cache/lost_qty_2021_2025.parquet',
-                  'cache/lost_store_2021_2025.parquet',
-                  f'cache/product_mtd_{YEAR}-{MONTH}.parquet',
-                  'cache/product_mtd_2025-06.parquet',
-                  f'cache/sales_daily_{YEAR}-{MONTH}.json',
-                  'cache/sales_daily_2025-06.json',
-                  'cache/sales_monthly_tot.json',
-                  'cache/fraud_closed_2026-03.json']
+                  'analytics.js']
+    # cache/* ไม่ commit ลง main แล้ว — GHA push ไป orphan branch `cache` แทน (ADR [2026-06-12])
     for fname in push_files:
         src = os.path.join(FOLDER, fname)
         dst = os.path.join(REPO_DIR, fname)

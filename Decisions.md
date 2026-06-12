@@ -255,7 +255,7 @@ Lost Product dashboard ETL queries 6 years of transaction history. Static histor
 
 > **Annotation [2026-06-11]:** ADR นี้ Antigravity ใส่สถานะ "Accepted" เอง **โดย user ยังไม่ได้อนุมัติ** — ขัด collab rule Claude review แล้วพบคุณภาพ code ดี (rule_hash/v:2/built_by ครบ, safe_write จริง, fallback chain เดิมอยู่ครบ, upsert ถูกต้อง, Sunday full-refresh ใน GHA) → user ตัดสินใจ **accept แบบมีเงื่อนไข 3 ข้อ** (ดู Roadmap Now):
 >
-> 1. **Fraud cache lag 1 วัน** — fraud (pipeline step 1) อ่าน `sales_daily` cache ที่ update_dashboard (step 5) เขียนเมื่อวาน → ต้อง document หรือแก้ลำดับ
+> 1. **Fraud cache lag 1 วัน** — ✅ **resolved 2026-06-12: document-only (user decision)** — แก้ลำดับไม่ได้เพราะ circular dependency (update_dashboard ต้องใช้ fraud_data.json inject HTML) + fact_sales lag 1-2 วัน by design + Sunday full-refresh reconcile รายสัปดาห์ — ดู Gotchas "Fraud risk score — MTD sales/cost lag 1 วัน"
 > 2. **Verify onhand patch** — IR-B memory pressure เป็น suspect ของ onhand=0 (patched 2026-06-11, รอรันบน Windows)
 > 3. **Repo bloat** — parquet cache 4-10 MB push ขึ้น repo รายวัน → โตหลัก GB/ปี ต้องหาทางแก้ (เช่น ไม่ commit parquet)
 >
@@ -329,6 +329,54 @@ Product dashboard เทียบ `s26` (MTD วัน 1–9 มิ.ย. 2026, �
 
 ---
 
+## [2026-06-12] Cache persistence — หยุด commit cache ลง main (แก้ repo bloat, IR เงื่อนไข 3)
+
+**Status:** ✅ Accepted — **user approved 2026-06-12 PM6** (Claude เสนอ + implement)
+
+**Context:**
+Phase IR ทำให้ GHA daily run ต้อง persist cache ข้าม run (runner ephemeral) — ปัจจุบันแก้ด้วยการ **commit cache files (parquet 4-10 MB + JSON) ลง main ทุกวัน** → git history โต ~2-3.5 GB/ปี (binary diff ไม่ได้) ทำให้ clone ช้า (เคยโดน timeout 60s — Gotchas) และเปลือง bandwidth
+
+**Options พิจารณา:**
+
+| Option | วิธี | ข้อดี | ข้อเสีย |
+|---|---|---|---|
+| **A. Orphan branch `cache` + force-push** ⭐ | GHA push cache ไป branch แยก ด้วย `--force` (history = 1 commit เสมอ) — daily run `fetch origin cache` ก่อน build | ไม่มี bloat ถาวร (branch ขนาด ≈ cache จริง), ไม่มี eviction, ใช้ git เดิม, Windows run ก็ใช้ได้ | ต้องแก้ workflow + push scripts (S) |
+| B. `actions/cache` | ใช้ GHA cache action, key = month + rule_hash | สะอาดสุด, ไม่แตะ repo เลย | evict ได้ (7-day unused / 10GB), ไม่ช่วย Windows manual run, ผูกกับ GHA |
+| C. Separate cache repo | repo ใหม่ force-push | เหมือน A แต่แยก repo | repo เพิ่มอีกตัว ไม่จำเป็น |
+| D. ไม่ commit เลย + full-refresh ทุกวัน | ตัด cache persistence | ง่ายสุด | เสียประโยชน์ IR ทั้งหมด (กลับไป 2-3 นาที + DB load) |
+
+**Decision (proposed): Option A** — orphan branch `cache` ใน daily-report:
+1. สร้าง orphan branch ครั้งเดียว: `git checkout --orphan cache && git rm -rf . && cp cache/* && commit && push`
+2. GHA workflow: ก่อน build → `git fetch origin cache && git checkout origin/cache -- cache/` (หรือ clone branch แยก depth 1); หลัง build → commit cache ใหม่บน orphan + `push --force`
+3. ลบ `cache/` ออกจาก main + เพิ่ม `.gitignore` — main เหลือเฉพาะ code + dashboard files
+4. fallback เดิมอยู่แล้ว: cache หาย/hash mismatch → auto `--full-refresh`
+5. (optional, ทีหลัง) `git filter-repo` ล้าง cache เก่าใน history main — ทำหลัง rotate PAT + ตกลง Antigravity เพราะ rewrite history กระทบทุก clone
+
+**Consequences:**
+- ✅ main history หยุดโต — เหลือ commit code/data dashboard ตามปกติ
+- ✅ ไม่มี eviction risk, Windows/VM ใช้ branch เดียวกันได้
+- ⚠️ force-push = ไม่มี cache history (ไม่ต้องการอยู่แล้ว)
+- ✅ **Implemented 2026-06-12 PM6 (Claude):** `daily-update.yml` (+2 steps: Restore ก่อน build / force-push หลัง build), `update_dashboard.py` + `push_py_to_github.py` (ตัด cache ออกจาก push list), `.gitignore` ใหม่, `setup_cache_branch.py` (one-time: seed branch + ลบ cache/* จาก main ผ่าน Git Data API) — sandbox verified (YAML/py_compile/no null bytes) — ⏳ รอ user รัน `py push_cache_migration.py` → `py setup_cache_branch.py` บน Windows แล้ว verify GHA รุ่งขึ้น (ใช้ script push เฉพาะกิจ — `push_py_to_github.py` พ่วง dashboard HTML เก่า)
+
+---
+
+## [2026-06-12] VM Dashboard Mirror (agent-ab-sandbox) — documented post-hoc
+
+**Status:** 📝 Documented post-hoc (setup เกิดก่อนหน้าโดยไม่มี ADR — ไม่ทราบว่า agent ไหน/เมื่อไหร่)
+
+**Context:**
+พบว่ามี container `agent-ab-sandbox.tjinternal.com` (122.155.213.17) serve dashboards ชุดเดียวกับ GitHub Pages ที่ port 48081 (NAT → http.server 8080) + scheduler ดึง commit ใหม่จาก GitHub ทุก 10 นาที (`start_services.py` + `sync_files.py`) — มี user doc ใน `How_To_Modify_Dashboards.md` แต่ไม่มี ADR ตาม collab rules
+
+**Decision (โดยพฤตินัย):**
+ยอมรับเป็นส่วนหนึ่งของระบบ — internal mirror ใช้ดู dashboard โดยไม่พึ่ง GitHub Pages — รายละเอียด operations ดู Architecture.md §VM Dashboard Mirror
+
+**Consequences:**
+- ไม่มี auto-restart (container PID1=`sh`, ไม่มี cron/systemd) — ตาย 11 มิ.ย. แล้วไม่มีใครรู้จนวันถัดไป → ขอ IT ตั้ง restart policy (Roadmap)
+- SSH creds ฝังใน scripts ฝั่ง Windows — ต้องย้ายเป็น config แยก (Roadmap)
+- เป็น consumer ของ GitHub main → bug "push ทับด้วยไฟล์เก่า" กระจายถึง VM ด้วย (Gotchas 2026-06-12)
+
+---
+
 ## 📚 Superseded
 
 - ~~`solinetype = 'N'` filter~~ (pre-2026-05-31) → `solinetype NOT IN ('C','R')` to match mobile app
@@ -338,5 +386,4 @@ Product dashboard เทียบ `s26` (MTD วัน 1–9 มิ.ย. 2026, �
 
 ---
 
-_Last updated: 2026-06-10_
-
+_Last updated: 2026-06-12_

@@ -1,1 +1,15 @@
+# Secrets — ห้าม commit เด็ดขาด
+db_config.json
+
+# Cache — อยู่บน orphan branch `cache` ไม่ commit ลง main (ADR [2026-06-12])
+cache/
+
+# Python
 __pycache__/
+*.pyc
+
+# VM scripts ที่ฝัง credentials (Roadmap: รอย้ายเป็น config แยก)
+run_vm_command.py
+check_vm_status.py
+push_to_vm.py
+upload_test.py

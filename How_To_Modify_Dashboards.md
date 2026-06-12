@@ -80,3 +80,107 @@ Open PowerShell on your Windows laptop and run the manual runner wrapper:
 1. Every morning between **07:30 AM and 09:30 AM Bangkok time**, GitHub Actions runs a multi-cron scheduler.
 2. The workflow compiles Sales, Fraud, and Lost Product data and commits the output directly to GitHub.
 3. The VM's background synchronization daemon polls GitHub for new commits every 10 minutes. When it detects the Actions commit, it pulls the updated dashboards and files immediately.
+
+---
+
+## 📊 Column Reference Workbook (สำคัญสำหรับ Power BI)
+
+**File:** `Column_Reference.xlsx` ใน repo root
+
+มี 6 sheets:
+1. **Summary** — Metric → Table.Column quick lookup
+2. **Discount Structure** — `sodisc` 4-channel rollup (verified 100%)
+3. **GP Calculator** — เปลี่ยน input ฟ้า → output คำนวณอัตโนมัติ
+4. **Power BI DAX** — measures ready-to-paste
+5. **SQL Reference** — query patterns ใช้รันได้ทันที
+6. **Changelog** — track verifications
+
+**ใช้เมื่อ:**
+- สร้าง measure ใหม่ใน Power BI → ดู sheet "Power BI DAX"
+- ต้อง query MySQL ใหม่ → ดู sheet "SQL Reference"
+- ลืมว่า GP คิดยังไง → ดู sheet "GP Calculator"
+- ตอบคำถาม "ยอดขายใช้ column ไหน" → ดู sheet "Summary"
+
+---
+
+## ⚡ 4. Incremental Refresh (Phase IR) — 🟡 PROPOSED 2026-06-10, awaiting approval
+
+> ห้ามแตะ code จนกว่า user จะอนุมัติ — ดู `Decisions.md` ADR `[2026-06-10]`
+
+### หลักการ
+แทนที่จะ query MySQL ใหม่ทุกวันสำหรับ data 6 ปี (Lost Product) หรือ MTD เต็มเดือน (Product/Sales), จะแบ่งเป็น:
+- **Frozen zone** — past years + days ก่อน `D-7` → cache บน disk (`cache/*.parquet`, `cache/*.json`)
+- **Hot zone** — `D-7` ถึง `D-1` → query สดทุก daily run แล้ว merge เข้า cache
+
+### Daily run flow (หลังเปิด IR)
+```
+1. Load cache/* → frozen data
+2. Query MySQL: WHERE sodate BETWEEN D-7 AND D-1
+3. Upsert hot data into cache (overwrite D-7..D-1 slots)
+4. Verify schema_hash + rule_hash match
+5. Aggregate frozen + hot → output JSON/HTML
+6. Push
+```
+
+### Flags
+- `--full-refresh` — ละ cache, rebuild ทั้งหมด (สำหรับ emergency หรือ rule change)
+- ไม่มี flag = incremental default
+
+### Weekly full-refresh cron
+ทุกวันอาทิตย์ตี 1 BKK (`0 18 * * 6` UTC) — รัน `--full-refresh` ทุก builder รับมือ late-arriving data > 7 วัน
+
+### Cache file structure
+```
+F:\co work dashboard\cache\
+├─ lost_2021_2024.parquet         (immutable — build once)
+├─ lost_2025_final.parquet        (build once after 2026-01-15)
+├─ lost_2026_incremental.parquet  (daily upsert)
+├─ product_mtd_2026-06.parquet    (reset monthly)
+├─ sales_daily_2026-06.json
+├─ sales_monthly_tot.json
+└─ fraud_closed_2026-05.json
+```
+
+**Gitignore:** ทุกไฟล์ใน `cache/` — never commit
+
+### Verify cache health
+```powershell
+py -c "import json,glob; [print(f, json.load(open(f))['_meta']) for f in glob.glob('cache/*.json')]"
+```
+
+### หาก cache เสีย / dashboard ตัวเลขไม่ตรง
+```powershell
+del F:\co work dashboard\cache\*
+& "F:\co work dashboard\run_manual_update.ps1"   # rebuild from scratch
+```
+
+---
+
+## 🖥️ 4b. VM Mirror Operations (`agent-ab-sandbox:48081`) — เพิ่ม 2026-06-12
+
+VM (จริงๆ คือ container) serve dashboards ชุดเดียวกับ GitHub Pages + ดึง commit ใหม่เองทุก ~10 นาที — **ไม่มี auto-restart** ถ้า service ตายต้อง start มือ
+
+**เช็คสถานะ** (จาก Windows — scripts อยู่ `F:\lost-Product\`):
+```powershell
+py "F:\lost-Product\run_vm_command.py" "pgrep -af 'python3 start_services.py'; tail -5 /home/agent-worker/dashboard/services.log"
+```
+ต้องเห็น `python3 start_services.py` **1 บรรทัดเดียว** (2+ = duplicate, kill PID ตัวใหม่)
+
+**Restart เมื่อตาย:**
+```powershell
+py "F:\lost-Product\run_vm_command.py" "cd /home/agent-worker/dashboard && nohup python3 start_services.py >> services.log 2>&1 < /dev/null & sleep 3; pgrep -af start_services"
+```
+
+**ข้อจำกัด:** container ไม่มี `cron`/`systemd`/`curl`/`ss` — ขอ IT ทำ restart policy (Roadmap) | ⚠️ scripts ฝัง SSH password — ห้าม push ขึ้น repo | หน้าเว็บโชว์ข้อมูลเก่า → เช็คว่า GitHub main fresh ก่อน (ดู Gotchas "push ทับด้วยไฟล์เก่า") แล้วค่อย hard refresh เบราว์เซอร์ (`Ctrl+Shift+R`)
+
+---
+
+## 🤝 5. Multi-Agent Workflow Note
+
+User ทำงาน dashboard ด้วย **2 agents**: Claude (Cowork) + Antigravity (Gemini 3 Flash).
+
+**กฎ:**
+- อ่าน `Decisions.md` + `Roadmap.md` ก่อนเริ่มงานใหม่ทุกครั้ง
+- ทุก architectural change ต้อง add ADR ก่อน touch code
+- Cache file ที่ build ต้องมี `_meta.built_by` (agent identifier)
+- งานที่ "Now" ใน Roadmap = source of truth สำหรับ in-flight work — อย่า claim งานซ้ำ
