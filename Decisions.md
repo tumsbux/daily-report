@@ -356,7 +356,7 @@ Phase IR ทำให้ GHA daily run ต้อง persist cache ข้าม r
 - ✅ main history หยุดโต — เหลือ commit code/data dashboard ตามปกติ
 - ✅ ไม่มี eviction risk, Windows/VM ใช้ branch เดียวกันได้
 - ⚠️ force-push = ไม่มี cache history (ไม่ต้องการอยู่แล้ว)
-- ✅ **Implemented 2026-06-12 PM6 (Claude):** `daily-update.yml` (+2 steps: Restore ก่อน build / force-push หลัง build), `update_dashboard.py` + `push_py_to_github.py` (ตัด cache ออกจาก push list), `.gitignore` ใหม่, `setup_cache_branch.py` (one-time: seed branch + ลบ cache/* จาก main ผ่าน Git Data API) — sandbox verified (YAML/py_compile/no null bytes) — ⏳ รอ user รัน `py push_cache_migration.py` → `py setup_cache_branch.py` บน Windows แล้ว verify GHA รุ่งขึ้น (ใช้ script push เฉพาะกิจ — `push_py_to_github.py` พ่วง dashboard HTML เก่า)
+- ✅ **Implemented 2026-06-12 PM6 (Claude):** `daily-update.yml` (+2 steps: Restore ก่อน build / force-push หลัง build), `update_dashboard.py` + `push_py_to_github.py` (ตัด cache ออกจาก push list), `.gitignore` ใหม่, `setup_cache_branch.py` (one-time: seed branch + ลบ cache/* จาก main ผ่าน Git Data API) — sandbox verified (YAML/py_compile/no null bytes) — ✅ **Deployed 2026-06-12 PM7:** main `d57451ee` → branch `cache` seeded `b42be68c` (11 ไฟล์) → main cleaned `dd6fb478` — เหลือ verify GHA รุ่งขึ้น (push ใช้ `push_cache_migration.py` เฉพาะกิจ — `push_py_to_github.py` พ่วง dashboard HTML เก่า)
 
 ---
 

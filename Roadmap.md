@@ -23,10 +23,10 @@
   1. [x] **Fraud cache lag 1 วัน** — ✅ resolved 2026-06-12: **document-only** (user decision — circular dependency + fact_sales lag by design) — ดู Gotchas entry ใหม่ + ADR annotation
   2. [x] **Verify onhand patch** — ✅ verified + **deployed 2026-06-12 PM**: `py push_py_to_github.py` (35 ไฟล์, parent `858db387`) + รัน `py build_product_data_mysql.py` จริง → `936,433 onhand rows` + product_data.json pushed OK (51.7M / +20.5% YoY, days 1-11) — size: XS
      - ✅ GHA 2026-06-12 **fire แล้ว แค่ delay หนัก**: 4 scheduled runs 12:53–13:59 BKK (delay ~5.4 ชม. จาก slot แรก 07:30) ทุก run success — เช็คตอน 11:00 BKK เลยยังไม่เห็น — free-tier delay ปกติ ไม่ใช่ cron พัง
-  3. [ ] **Repo bloat** — ✅ **approved + implemented 2026-06-12 PM6 (Claude)**: workflow +2 steps / ตัด cache จาก push lists / `.gitignore` / `setup_cache_branch.py` — ⏳ **เหลือ user รัน:** (1) `py push_cache_migration.py` (2) `py setup_cache_branch.py` แล้วเช็ค GHA รุ่งขึ้น (restore จาก origin/cache + force-push กลับ) → เคลียร์เงื่อนไขครบ — size: S
-  - 🚫 ห้ามทั้ง 2 agents ขยาย IR เพิ่มจนกว่า 3 ข้อเคลียร์ — ADR Decisions.md `[2026-06-10]` updated — เหลือข้อ 3 ข้อเดียว
+  3. [x] **Repo bloat** — ✅ **deployed 2026-06-12 PM7**: main `d57451ee` (workflow + update_dashboard + .gitignore + docs) → branch `cache` seeded `b42be68c` (11 ไฟล์) → main cleaned `dd6fb478` (ลบ cache 8 ไฟล์ + .gitignore) — size: S
+  - 🟡 **3 เงื่อนไขเคลียร์ครบแล้ว** — เหลือ verify GHA รุ่งขึ้น (step "Restore cache" + "Push cache to orphan cache branch" เขียวทั้งคู่) แล้วค่อยปลดล็อกขยาย IR เป็นทางการ
 
-> ✅ **`build_grouped_with_barcodes.py` — fixed 2026-06-12 PM (Claude):** เพิ่ม v2 decode (v1 passthrough) + แก้ DB join key เป็น JSON `iprod` ตาม naming trap — PM6: pre-verify ผ่าน MySQL MCP แล้ว (join key ตรงทุก sample รวม bridge case, coverage 145/150) — เหลือรันจริงบน Windows: copy JSON v2 จาก `F:\co work dashboard` มาก่อน (local เป็น v1 เก่า) แล้ว `py build_grouped_with_barcodes.py`
+> ✅ **`build_grouped_with_barcodes.py` — verified จบ 2026-06-12 PM7:** รันจริงบน Windows ผ่านทั้ง v1 passthrough และ v2 decoded — ตัวเลข parity เป๊ะทุก count (65,812 products / 74,747 barcode rows / ACTIVE 117,019 / STALE 39,698 / LOST 65,714 / DISC 1,109) + xlsx saved → ย้ายไป Changelog
 
 > ✅ **Compact JSON v2 — deployed + pushed 2026-06-12 PM** (daily-report `858db387` + lost-Product `fdeacd1`) → ย้ายไป Changelog แล้ว — **Antigravity ปลดล็อก lost-product builder/frontend**
 
