@@ -90,3 +90,61 @@ def verify_json(path: str) -> bool:
         return True
     except (json.JSONDecodeError, OSError):
         return False
+
+
+def safe_write_parquet(path: str, df: Any, schema: Any = None, metadata: dict[bytes | str, bytes | str] | None = None) -> int:
+    """Write pandas DataFrame to Parquet, setting custom schema and metadata, and verify readability.
+
+    Returns:
+        Number of bytes written.
+
+    Raises:
+        RuntimeError: if file fails verification.
+    """
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    # Normalize metadata to bytes
+    bytes_metadata = {}
+    if metadata:
+        for k, v in metadata.items():
+            kb = k.encode('utf-8') if isinstance(k, str) else k
+            vb = v.encode('utf-8') if isinstance(v, str) else v
+            bytes_metadata[kb] = vb
+
+    # If schema is provided, apply metadata to it
+    if schema is not None:
+        if bytes_metadata:
+            schema = schema.with_metadata(bytes_metadata)
+        table = pa.Table.from_pandas(df, schema=schema)
+    else:
+        table = pa.Table.from_pandas(df)
+        if bytes_metadata:
+            new_schema = table.schema.with_metadata(bytes_metadata)
+            table = table.cast(new_schema)
+
+    # Ensure parent directory exists
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+
+    pq.write_table(table, path, compression='SNAPPY')
+    size = os.path.getsize(path)
+
+    # Verification: read it back
+    try:
+        meta = pq.read_metadata(path)
+        if meta.num_rows != len(df):
+            raise ValueError(f"Parquet row count mismatch: expected {len(df)}, got {meta.num_rows}")
+        pq.read_schema(path)
+    except Exception as e:
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+        raise RuntimeError(
+            f"{path} written ({size} bytes) but failed verification: {e}. "
+            "File may be truncated or corrupt. Deleted."
+        )
+
+    return size
+
