@@ -33,174 +33,9 @@ DB_CONFIG_FILE = os.path.join(FOLDER, 'db_config.json')
 FULL_REFRESH = False
 RULE_HASH = "v2_sotowhs_1_500_solinetype_not_C_R"
 
-def get_sales_daily_cache(cfg, year, month, days_elapsed, full_refresh=False):
-    cache_dir = os.path.join(FOLDER, 'cache')
-    os.makedirs(cache_dir, exist_ok=True)
-    cache_path = os.path.join(cache_dir, f'sales_daily_{year}-{month}.json')
-    
-    rebuild = full_refresh or not os.path.exists(cache_path)
-    if not rebuild:
-        try:
-            with open(cache_path, encoding='utf-8') as f:
-                cache_data = json.load(f)
-            c_meta = cache_data.get('_meta', {})
-            if c_meta.get('v') != 2 or c_meta.get('rule_hash') != RULE_HASH:
-                print(f"  Sales cache mismatch -> auto full-refresh")
-                rebuild = True
-        except Exception:
-            rebuild = True
-            
-    import mysql.connector
-    if rebuild:
-        print(f"  [SALES CACHE] Full refresh for {year}-{month} up to day {days_elapsed}...")
-        conn = mysql.connector.connect(
-            host=cfg['host'], port=cfg.get('port', 3306),
-            user=cfg['user'], password=cfg['password'],
-            database=cfg.get('database', 'data-lake'),
-            connection_timeout=60, charset='utf8mb4'
-        )
-        try:
-            start_date = f'{year}-{month}-01'
-            end_date = f'{year}-{month}-{days_elapsed:02d}'
-            sql = """
-                SELECT sotowhs AS whs,
-                       DAY(sodate) AS day,
-                       SUM(net_sales_amt)          AS sales_amt,
-                       SUM(COALESCE(total_cost,0)) AS cost_amt,
-                       COUNT(DISTINCT sono)        AS txn_count
-                FROM fact_sales
-                WHERE sodate BETWEEN %s AND %s
-                  AND solinetype NOT IN ('C', 'R')
-                  AND sotowhs REGEXP '^[0-9]+$'
-                  AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
-                GROUP BY sotowhs, DAY(sodate)
-            """
-            cur = conn.cursor(dictionary=True)
-            cur.execute(sql, (start_date, end_date))
-            rows = cur.fetchall()
-            cur.close()
-            
-            stores_data = defaultdict(dict)
-            for r in rows:
-                raw_whs = str(r['whs']).strip()
-                day_str = str(r['day'])
-                stores_data[raw_whs][day_str] = {
-                    'sales': float(r['sales_amt'] or 0),
-                    'cost': float(r['cost_amt'] or 0),
-                    'txn': int(r['txn_count'] or 0)
-                }
-                
-            cache_data = {
-                '_meta': {
-                    'v': 2,
-                    'built_by': 'antigravity-gemini-3-flash',
-                    'rule_hash': RULE_HASH,
-                    'timestamp': datetime.now().isoformat()
-                },
-                'stores': dict(stores_data)
-            }
-            from lib.safe_write import safe_write_json
-            safe_write_json(cache_path, cache_data)
-        finally:
-            conn.close()
-    else:
-        start_day = max(1, days_elapsed - 6)
-        print(f"  [SALES CACHE] Incremental refresh for {year}-{month} days {start_day}..{days_elapsed}...")
-        conn = mysql.connector.connect(
-            host=cfg['host'], port=cfg.get('port', 3306),
-            user=cfg['user'], password=cfg['password'],
-            database=cfg.get('database', 'data-lake'),
-            connection_timeout=60, charset='utf8mb4'
-        )
-        try:
-            start_date = f'{year}-{month}-{start_day:02d}'
-            end_date = f'{year}-{month}-{days_elapsed:02d}'
-            sql = """
-                SELECT sotowhs AS whs,
-                       DAY(sodate) AS day,
-                       SUM(net_sales_amt)          AS sales_amt,
-                       SUM(COALESCE(total_cost,0)) AS cost_amt,
-                       COUNT(DISTINCT sono)        AS txn_count
-                FROM fact_sales
-                WHERE sodate BETWEEN %s AND %s
-                  AND solinetype NOT IN ('C', 'R')
-                  AND sotowhs REGEXP '^[0-9]+$'
-                  AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
-                GROUP BY sotowhs, DAY(sodate)
-            """
-            cur = conn.cursor(dictionary=True)
-            cur.execute(sql, (start_date, end_date))
-            rows = cur.fetchall()
-            cur.close()
-            
-            with open(cache_path, encoding='utf-8') as f:
-                cache_data = json.load(f)
-                
-            stores_data = cache_data.setdefault('stores', {})
-            for s_code, d_map in list(stores_data.items()):
-                for d in range(start_day, days_elapsed + 1):
-                    d_map.pop(str(d), None)
-                    
-            for r in rows:
-                raw_whs = str(r['whs']).strip()
-                day_str = str(r['day'])
-                stores_data.setdefault(raw_whs, {})[day_str] = {
-                    'sales': float(r['sales_amt'] or 0),
-                    'cost': float(r['cost_amt'] or 0),
-                    'txn': int(r['txn_count'] or 0)
-                }
-            cache_data['_meta']['timestamp'] = datetime.now().isoformat()
-            from lib.safe_write import safe_write_json
-            safe_write_json(cache_path, cache_data)
-        finally:
-            conn.close()
-            
-    result = {}
-    for whs, d_map in cache_data.get('stores', {}).items():
-        sales_sum = 0.0
-        cost_sum = 0.0
-        txn_sum = 0
-        for d in range(1, days_elapsed + 1):
-            day_str = str(d)
-            if day_str in d_map:
-                sales_sum += d_map[day_str].get('sales', 0.0)
-                cost_sum += d_map[day_str].get('cost', 0.0)
-                txn_sum += d_map[day_str].get('txn', 0)
-        entry = {
-            'sales': sales_sum,
-            'cost': cost_sum,
-            'txn': txn_sum
-        }
-        result[whs] = entry
-        try:
-            result[str(int(whs))] = entry
-        except Exception:
-            pass
-        try:
-            result[whs.zfill(3)] = entry
-        except Exception:
-            pass
-            
-    return result
-
-def update_monthly_totals_cache(D, current_month_key, current_month_total):
-    cache_path = os.path.join(FOLDER, 'cache', 'sales_monthly_tot.json')
-    cache_data = {'m25_tot': {}, 'm26_tot': {}}
-    if os.path.exists(cache_path):
-        try:
-            with open(cache_path, encoding='utf-8') as f:
-                cache_data = json.load(f)
-        except Exception:
-            pass
-    for k, v in D['summary'].get('m26_tot', {}).items():
-        if k != current_month_key and k not in cache_data.setdefault('m26_tot', {}):
-            cache_data['m26_tot'][k] = v
-    for k, v in D['summary'].get('m25_tot', {}).items():
-        if k not in cache_data.setdefault('m25_tot', {}):
-            cache_data['m25_tot'][k] = v
-    from lib.safe_write import safe_write_json
-    safe_write_json(cache_path, cache_data)
-    return cache_data
+from dashboards.sales_data import get_sales_daily_cache, update_monthly_totals_cache
+from dashboards.html_patch import upd_hk, upd_skpi, upd_kc
+from dashboards.git_push   import push_to_github
 
 DB_CONFIG_FILE = os.path.join(FOLDER, 'db_config.json')
 REPO_DIR       = os.path.join(tempfile.gettempdir(), f'dlr-{uuid.uuid4().hex[:8]}')
@@ -340,7 +175,7 @@ for row in _whsdd_rows:
  # Supplement store_txn_mtd and MTD sales from caches
 if _db_cfg:
     try:
-        _fact_sales_mtd = get_sales_daily_cache(_db_cfg, YEAR, MONTH, DAYS_ELAPSED, full_refresh=FULL_REFRESH)
+        _fact_sales_mtd = get_sales_daily_cache(_db_cfg, YEAR, MONTH, DAYS_ELAPSED, full_refresh=FULL_REFRESH, folder=FOLDER, rule_hash=RULE_HASH)
         for _whs, _entry in _fact_sales_mtd.items():
             store_txn_mtd[_whs] = _entry['txn']
         print('    fact_sales MTD cache loaded successfully: %d stores' % len(_fact_sales_mtd))
@@ -368,7 +203,7 @@ _fact_max_day   = DAYS_ELAPSED
 if _db_cfg:
     try:
         if not _fact_sales_mtd:
-            _fact_sales_mtd = get_sales_daily_cache(_db_cfg, YEAR, MONTH, DAYS_ELAPSED, full_refresh=FULL_REFRESH)
+            _fact_sales_mtd = get_sales_daily_cache(_db_cfg, YEAR, MONTH, DAYS_ELAPSED, full_refresh=FULL_REFRESH, folder=FOLDER, rule_hash=RULE_HASH)
         _unique_fs = {id(v): v for v in _fact_sales_mtd.values()}
         _fs_total  = sum(v['sales'] for v in _unique_fs.values())
         _fs_stores = len(_unique_fs)
@@ -390,7 +225,7 @@ if _db_cfg:
     try:
         prev_y = int(YEAR) - 1
         _last_day25 = _cal.monthrange(prev_y, int(MONTH))[1]
-        _fact_sales_25_raw = get_sales_daily_cache(_db_cfg, str(prev_y), MONTH, _last_day25, full_refresh=FULL_REFRESH)
+        _fact_sales_25_raw = get_sales_daily_cache(_db_cfg, str(prev_y), MONTH, _last_day25, full_refresh=FULL_REFRESH, folder=FOLDER, rule_hash=RULE_HASH)
         for _whs, _entry in _fact_sales_25_raw.items():
             _fact_sales_25[_whs] = {
                 's25': _entry['sales'],
@@ -402,80 +237,87 @@ if _db_cfg:
     except Exception as _f25e:
         print('    WARNING: YoY baseline cache load failed: %s -- keeping existing s25_may' % _f25e)
 
-# STEP 2: factXX.txt
-print('\n[2/7] Reading factXX.txt for unfinalized days ...')
+# STEP 2: factXX.txt (skip when MySQL fact_sales is available)
+if not _fact_sales_mtd:
+    print('\n[2/7] Reading factXX.txt for unfinalized days ...')
 
-# Build day_file_map by peeking at actual sodate inside each fact file
-# (ETL sometimes names files by export date, not data date)
-# Priority: clean (no NUL) > more rows > newer mtime
-day_file_map = {}  # {day: (is_clean, row_count, fpath)}
-for fpath in glob.glob(os.path.join(FOLDER, 'fact*.txt')):
-    bn = os.path.basename(fpath)
-    if not re.match(r'fact\d{1,2}\.txt$', bn, re.IGNORECASE):
-        continue
-    try:
-        with open(fpath, 'rb') as _rb:
-            _has_nul = b'\x00' in _rb.read(65536)  # sample first 64KB
-        _is_clean = not _has_nul
-        with open(fpath, encoding='utf-8', errors='replace') as _f:
-            _cleaned = (_l.replace('\x00', '') for _l in _f)
-            _reader = csv.DictReader(_cleaned, delimiter='\t')
-            if 'sodate' not in (_reader.fieldnames or []):
-                print('    SKIP %s -- no sodate column (not a sales file)' % bn)
-                continue
-            _row_count = 0
-            _actual_day = None
-            for _row in _reader:
-                _sodate = (_row.get('sodate') or '')[:10]
-                if _sodate.startswith(MONTH_KEY):
-                    if _actual_day is None:
-                        _actual_day = int(_sodate.split('-')[2])
-                    _row_count += 1
-            if _actual_day is None:
-                continue
-            _cur = day_file_map.get(_actual_day)
-            # Prefer: clean over NUL, then more rows
-            if (_cur is None or
-                    (_is_clean and not _cur[0]) or
-                    (_is_clean == _cur[0] and _row_count > _cur[1])):
-                if _cur:
-                    print('    DUPLICATE day %d: prefer %s(%s,%d rows) over %s(%s,%d rows)' % (
-                        _actual_day, bn,
-                        'clean' if _is_clean else 'NUL', _row_count,
-                        os.path.basename(_cur[2]),
-                        'clean' if _cur[0] else 'NUL', _cur[1]))
-                day_file_map[_actual_day] = (_is_clean, _row_count, fpath)
-    except Exception as _e:
-        print('    SKIP %s -- error: %s' % (bn, _e))
+    # Build day_file_map by peeking at actual sodate inside each fact file
+    # (ETL sometimes names files by export date, not data date)
+    # Priority: clean (no NUL) > more rows > newer mtime
+    day_file_map = {}  # {day: (is_clean, row_count, fpath)}
+    for fpath in glob.glob(os.path.join(FOLDER, 'fact*.txt')):
+        bn = os.path.basename(fpath)
+        if not re.match(r'fact\d{1,2}\.txt$', bn, re.IGNORECASE):
+            continue
+        try:
+            with open(fpath, 'rb') as _rb:
+                _has_nul = b'\x00' in _rb.read(65536)  # sample first 64KB
+            _is_clean = not _has_nul
+            with open(fpath, encoding='utf-8', errors='replace') as _f:
+                _cleaned = (_l.replace('\x00', '') for _l in _f)
+                _reader = csv.DictReader(_cleaned, delimiter='\t')
+                if 'sodate' not in (_reader.fieldnames or []):
+                    print('    SKIP %s -- no sodate column (not a sales file)' % bn)
+                    continue
+                _row_count = 0
+                _actual_day = None
+                for _row in _reader:
+                    _sodate = (_row.get('sodate') or '')[:10]
+                    if _sodate.startswith(MONTH_KEY):
+                        if _actual_day is None:
+                            _actual_day = int(_sodate.split('-')[2])
+                        _row_count += 1
+                if _actual_day is None:
+                    continue
+                _cur = day_file_map.get(_actual_day)
+                # Prefer: clean over NUL, then more rows
+                if (_cur is None or
+                        (_is_clean and not _cur[0]) or
+                        (_is_clean == _cur[0] and _row_count > _cur[1])):
+                    if _cur:
+                        print('    DUPLICATE day %d: prefer %s(%s,%d rows) over %s(%s,%d rows)' % (
+                            _actual_day, bn,
+                            'clean' if _is_clean else 'NUL', _row_count,
+                            os.path.basename(_cur[2]),
+                            'clean' if _cur[0] else 'NUL', _cur[1]))
+                    day_file_map[_actual_day] = (_is_clean, _row_count, fpath)
+        except Exception as _e:
+            print('    SKIP %s -- error: %s' % (bn, _e))
 
-store_fact_sales = defaultdict(float)
-store_fact_txn   = defaultdict(set)
-loaded_fact_days = []
+    store_fact_sales = defaultdict(float)
+    store_fact_txn   = defaultdict(set)
+    loaded_fact_days = []
 
-for day in sorted(unfinalized_days):
-    entry = day_file_map.get(day)
-    if not entry:
-        print('    WARNING: fact file for day %d not found' % day)
-        continue
-    fpath = entry[2]
-    with open(fpath, encoding='utf-8', errors='replace') as f:
-        cleaned = (line.replace('\x00', '') for line in f)
-        reader = csv.DictReader(cleaned, delimiter='\t')
-        for row in reader:
-            whs  = row.get('sotowhs', '')
-            if not valid_store(whs): continue
-            if row.get('soretflag', '') == 'Y': continue
-            amt  = float(row.get('net_sales_amt') or 0)
-            sono = row.get('sono', '')
-            store_fact_sales[whs] += amt
-            store_fact_txn[whs].add((day, sono))
-    loaded_fact_days.append(day)
+    for day in sorted(unfinalized_days):
+        entry = day_file_map.get(day)
+        if not entry:
+            print('    WARNING: fact file for day %d not found' % day)
+            continue
+        fpath = entry[2]
+        with open(fpath, encoding='utf-8', errors='replace') as f:
+            cleaned = (line.replace('\x00', '') for line in f)
+            reader = csv.DictReader(cleaned, delimiter='\t')
+            for row in reader:
+                whs  = row.get('sotowhs', '')
+                if not valid_store(whs): continue
+                if row.get('soretflag', '') == 'Y': continue
+                amt  = float(row.get('net_sales_amt') or 0)
+                sono = row.get('sono', '')
+                store_fact_sales[whs] += amt
+                store_fact_txn[whs].add((day, sono))
+        loaded_fact_days.append(day)
 
-if loaded_fact_days:
-    print('    Loaded fact files for days : %s' % loaded_fact_days)
-    print('    Fact sales total           : %s baht' % format(int(sum(store_fact_sales.values())), ','))
+    if loaded_fact_days:
+        print('    Loaded fact files for days : %s' % loaded_fact_days)
+        print('    Fact sales total           : %s baht' % format(int(sum(store_fact_sales.values())), ','))
+    else:
+        print('    No unfinalized days -- nothing to load from fact files')
+
 else:
-    print('    No unfinalized days -- nothing to load from fact files')
+    print('\n[2/7] Skipping factXX.txt — MySQL fact_sales covers days 1-%d' % DAYS_ELAPSED)
+    store_fact_sales = defaultdict(float)
+    store_fact_txn   = defaultdict(set)
+    loaded_fact_days = []
 
 # STEP 3: Returns — primary: MySQL fact_returns; fallback: static files
 print('\n[3/7] Reading returns ...')
@@ -700,7 +542,7 @@ D['summary']['m25_tot'][_prev_yr_key_t] = s25
 
 # Read and update past months' trend totals cache
 try:
-    monthly_cache = update_monthly_totals_cache(D, MONTH_KEY, sm)
+    monthly_cache = update_monthly_totals_cache(D, MONTH_KEY, sm, folder=FOLDER)
     for k, v in monthly_cache.get('m26_tot', {}).items():
         if k != MONTH_KEY:
             D['summary']['m26_tot'][k] = v
@@ -751,51 +593,6 @@ proj_yoy_val = S.get('total_proj_yoy') or 0
 yoy_str = ('+' if proj_yoy_val >= 0 else '') + ('%.1f%%' % proj_yoy_val)
 txn_d = format(daily_txn, ',')
 
-def upd_hk(html, val, label):
-    return re.sub(
-        r'(<div class="hk-val">)[^<]+(</div><div class="hk-lab">' + re.escape(label) + ')',
-        r'\g<1>' + val + r'\g<2>', html)
-
-def upd_skpi(html, val, label):
-    return re.sub(
-        r'(<div class="skpi-label">' + re.escape(label) + r'</div>\s*<div class="skpi-val">)[^<]+(</div>)',
-        r'\g<1>' + val + r'\g<2>', html)
-
-# Day badge
-idx = re.sub(r'(\d+ / \d+|Day \d+/\d+)', 'Day %d/%d' % (DAYS_ELAPSED, DAYS_IN_MONTH), idx)
-idx = re.sub(r'(<div class="day-badge">)\d+(</div>)',
-             r'\g<1>' + str(DAYS_ELAPSED) + r'\g<2>', idx)
-
-# date-badge nav (e.g. "1 มิ.ย. 2569 · วัน 1/30")
-THAI_MONTHS = ['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.',
-               'ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
-YEAR_BE = today.year + 543
-THAI_MON = THAI_MONTHS[today.month]
-new_badge = '%d %s %d · วัน %d/%d' % (DAYS_ELAPSED, THAI_MON, YEAR_BE, DAYS_ELAPSED, DAYS_IN_MONTH)
-idx = re.sub(
-    r'\d+\s+\S+\s+\d{4}\s+·\s+วัน\s+\d+/\d+',
-    new_badge, idx)
-
-# Hero KPIs (Thai labels)
-idx = upd_hk(idx, mtd_m, '\xe0\xb8\xa2\xe0\xb8\xad\xe0\xb8\x94\xe0\xb8\x82\xe0\xb8\xb2\xe0\xb8\xa2 MTD (\xe0\xb8\x9f)'.encode().decode('unicode_escape') if False else 'ยอดขาย MTD (฿)')
-idx = upd_hk(idx, pct_tgt, 'vs เป้า MTD')
-idx = upd_hk(idx, proj_m, 'Projected (฿)')
-idx = upd_hk(idx, yoy_str, 'YoY Projected')
-idx = upd_hk(idx, gp_str, 'GP%')
-
-# Sales card KPIs
-idx = upd_skpi(idx, mtd_m, 'ยอดขาย MTD')
-idx = upd_skpi(idx, proj_m, 'Projected เต็มเดือน')
-idx = upd_skpi(idx, txn_d, 'บิล/วัน')
-
-# ── KPI Detail Cards (11 cards) ──────────────────────────────────────────
-def upd_kc(html, kc_id, val):
-    """Replace content of <div id="kc_id">...</div>"""
-    return re.sub(
-        r'(<div[^>]+id="' + kc_id + r'"[^>]*>)[^<]*(</div>)',
-        lambda m: m.group(1) + val + m.group(2),
-        html
-    )
 
 daily_run   = sm / DAYS_ELAPSED if DAYS_ELAPSED else 0
 s25_may     = S.get('total_s25', 0)
@@ -817,6 +614,34 @@ yoy_color   = 'pos' if proj_yoy_val >= 0 else 'neg'
 tgt_color   = 'pos' if (S.get('total_pct_target', 0) or 0) >= 100 else 'neg'
 txn_yoy_arrow = '▲' if txn_yoy >= 0 else '▼'
 tk_yoy_arrow  = '▲' if ticket_yoy >= 0 else '▼'
+
+
+# Day badge
+idx = re.sub(r'(\d+ / \d+|Day \d+/\d+)', 'Day %d/%d' % (DAYS_ELAPSED, DAYS_IN_MONTH), idx)
+idx = re.sub(r'(<div class="day-badge">)\d+(</div>)',
+             r'\g<1>' + str(DAYS_ELAPSED) + r'\g<2>', idx)
+
+# date-badge nav (e.g. "1 มิ.ย. 2569 · วัน 1/30")
+THAI_MONTHS = ['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.',
+               'ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
+YEAR_BE = today.year + 543
+THAI_MON = THAI_MONTHS[today.month]
+new_badge = '%d %s %d · วัน %d/%d' % (DAYS_ELAPSED, THAI_MON, YEAR_BE, DAYS_ELAPSED, DAYS_IN_MONTH)
+idx = re.sub(
+    r'\d+\s+\S+\s+\d{4}\s+·\s+วัน\s+\d+/\d+',
+    new_badge, idx)
+
+# Hero KPIs (Thai labels)
+idx = upd_hk(idx, mtd_m,   'ยอดขาย MTD (฿)')
+idx = upd_hk(idx, pct_tgt, 'vs เป้า MTD')
+idx = upd_hk(idx, proj_m,  'Projected (฿)')
+idx = upd_hk(idx, yoy_str, 'YoY Projected')
+idx = upd_hk(idx, gp_str,  'GP%')
+
+# Sales card KPIs
+idx = upd_skpi(idx, mtd_m,  'ยอดขาย MTD')
+idx = upd_skpi(idx, proj_m, 'Projected เต็มเดือน')
+idx = upd_skpi(idx, txn_d,  'บิล/วัน')
 
 # 4 KPI cards (ไม่ซ้ำ hero): Run Rate, Ticket, Bills, Returns
 idx = upd_kc(idx, 'k-run',     '฿%.2fM' % (daily_run / 1e6))
@@ -1101,60 +926,13 @@ if os.path.exists(FRAUD_FILE) and os.path.exists(FRAUD_JSON):
 
 # STEP 7: Push to GitHub Pages
 print('[7/7] Pushing to GitHub Pages ...')
-try:
-    if os.path.exists(os.path.join(REPO_DIR, '.git')):
-        subprocess.run(['git', '-C', REPO_DIR, 'pull', '--ff-only'],
-                       check=True, capture_output=True)
-    else:
-        subprocess.run(['git', 'clone', GITHUB_URL, REPO_DIR],
-                       check=True, capture_output=True)
-
-    # Stamp product_data.json with today's date so it always gets committed
-    prod_json = os.path.join(FOLDER, 'product_data.json')
-    if os.path.exists(prod_json):
-        import json as _pj
-        _pd = _pj.load(open(prod_json, encoding='utf-8'))
-        _pd['generated'] = str(date.today())
-        with open(prod_json, 'w', encoding='utf-8') as _pf:
-            _pj.dump(_pd, _pf, ensure_ascii=False, separators=(',', ':'))
-        print('    product_data.json generated -> %s' % date.today())
-
-    push_files = ['index.html', 'sales_dashboard_v8.html', 'fraud_dashboard.html',
-                  'fraud_analysis.html', 'fraud_data.json',
-                  'product_dashboard.html', 'product_data.json',
-                  'analytics.js']
-    # cache/* ไม่ commit ลง main แล้ว — GHA push ไป orphan branch `cache` แทน (ADR [2026-06-12])
-    for fname in push_files:
-        src = os.path.join(FOLDER, fname)
-        dst = os.path.join(REPO_DIR, fname)
-        if os.path.exists(src):
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            shutil.copy2(src, dst)
-    _env = os.environ.copy()
-    _env['GIT_AUTHOR_NAME']     = 'Dashboard Bot'
-    _env['GIT_AUTHOR_EMAIL']    = 'bot@dashboard'
-    _env['GIT_COMMITTER_NAME']  = 'Dashboard Bot'
-    _env['GIT_COMMITTER_EMAIL'] = 'bot@dashboard'
-    subprocess.run(['git', '-C', REPO_DIR, 'add', '-A'],
-                   capture_output=True, env=_env)
-    _cr = subprocess.run(
-        ['git', '-C', REPO_DIR, 'commit', '-m',
-         'auto: Day %d/%d %s' % (DAYS_ELAPSED, DAYS_IN_MONTH, MONTH_NAME)],
-        capture_output=True, text=True, env=_env)
-    if 'nothing to commit' in (_cr.stdout + _cr.stderr):
-        print('  GitHub: nothing to commit (data unchanged)')
-    else:
-        _pr = subprocess.run(['git', '-C', REPO_DIR, 'push', 'origin', 'main'],
-                             capture_output=True, text=True, env=_env)
-        if _pr.returncode == 0:
-            print('  GitHub: pushed OK')
-        else:
-            print('  WARNING: push failed: ' + _pr.stderr[-200:])
-except Exception as _e:
-    print('  WARNING: GitHub push failed: ' + str(_e))
-finally:
-    if os.path.exists(REPO_DIR):
-        shutil.rmtree(REPO_DIR, ignore_errors=True)
+push_files = ['index.html', 'sales_dashboard_v8.html', 'fraud_dashboard.html',
+              'fraud_analysis.html', 'fraud_data.json',
+              'product_dashboard.html', 'product_data.json',
+              'analytics.js']
+# cache/* ไม่ commit ลง main แล้ว — GHA push ไป orphan branch `cache` แทน (ADR [2026-06-12])
+push_to_github(FOLDER, push_files, GITHUB_URL, REPO_DIR,
+               DAYS_ELAPSED, DAYS_IN_MONTH, MONTH_NAME)
 
 print()
 print('All done.')
