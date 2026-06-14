@@ -242,23 +242,32 @@ def load_returns(umap, branches=None):
     df['cstcode'] = df['cstcode'].fillna('').astype(str).str.strip()
     df['is_zero'] = df['cstcode'] == '0000'
 
-    # rttime: timedelta64 (MySQL TIME) or string → convert to "HH:MM" string
+    # rttime: timedelta64 (MySQL TIME) or string → convert to "HH:MM" string and extract hour
     if 'rttime' in df.columns:
-        if pd.api.types.is_timedelta64_dtype(df['rttime']):
-            df['hour'] = df['rttime'].dt.components['hours']
-            # Convert timedelta to "HH:MM" so JSON serialises as readable string
-            def _td_to_hhmm(td):
-                try:
-                    if pd.isna(td): return ''
-                    c = td.components
-                    return f"{int(c.hours):02d}:{int(c.minutes):02d}"
-                except Exception:
-                    return ''
-            df['rttime'] = df['rttime'].apply(_td_to_hhmm)
-        else:
-            df['hour'] = pd.to_numeric(df['rttime'].astype(str).str[:2], errors='coerce')
-            # Normalise string times to "HH:MM"
-            df['rttime'] = df['rttime'].astype(str).str[:5]
+        def _parse_time_row(val):
+            if pd.isna(val) or val is None:
+                return None, ''
+            if hasattr(val, 'components'):
+                h = int(val.components.hours)
+                m = int(val.components.minutes)
+                return h, f"{h:02d}:{m:02d}"
+            s = str(val).strip()
+            if not s:
+                return None, ''
+            if 'days' in s:
+                parts = s.split('days')[-1].strip().split(':')
+            else:
+                parts = s.split(':')
+            try:
+                h = int(parts[0])
+                m = int(parts[1]) if len(parts) > 1 else 0
+                return h, f"{h:02d}:{m:02d}"
+            except Exception:
+                return None, ''
+
+        parsed = df['rttime'].apply(_parse_time_row)
+        df['hour'] = parsed.apply(lambda x: x[0])
+        df['rttime'] = parsed.apply(lambda x: x[1])
     else:
         df['hour'] = None
 
