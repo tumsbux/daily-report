@@ -286,9 +286,10 @@ tbody tr:hover{background:#f8f9ff}
           <th class="r" onclick="sortProd(9,this)">เฉลี่ย/วัน <span class="sa"></span></th>
           <th class="r" onclick="sortProd(10,this)">เฉลี่ยชิ้น/วัน <span class="sa"></span></th>
           <th class="r" onclick="sortProd(11,this)">Onhand <span class="sa"></span></th>
-          <th class="r" onclick="sortProd(12,this)">ipunit3 <span class="sa"></span></th>
-          <th class="r" onclick="sortProd(13,this)">Dif Ly QTY <span class="sa"></span></th>
-          <th class="r" onclick="sortProd(14,this)">YoY ยอดขาย <span class="sa"></span></th>
+          <th class="r" onclick="sortProd(12,this)">วันหมด <span class="sa"></span></th>
+          <th class="r" onclick="sortProd(13,this)">ipunit3 <span class="sa"></span></th>
+          <th class="r" onclick="sortProd(14,this)">Dif Ly QTY <span class="sa"></span></th>
+          <th class="r" onclick="sortProd(15,this)">YoY ยอดขาย <span class="sa"></span></th>
         </tr></thead>
         <tbody id="prod-tbody"></tbody>
       </table>
@@ -696,9 +697,10 @@ function pSortVal(p,col,days){
     case 9:  return (p.s26||0)/d;
     case 10: return (p.q26||0)/d;
     case 11: return p.onhand||0;
-    case 12: return p.ipunit3||0;
-    case 13: return (p.q26||0)-(p.q25||0);
-    case 14: return p.s_yoy!=null?p.s_yoy:-9999;
+    case 12: { if(!(p.onhand>0)) return 0; const r=(p.q26||0)/d; return r?Math.round(p.onhand/r):999999; }
+    case 13: return p.ipunit3||0;
+    case 14: return (p.q26||0)-(p.q25||0);
+    case 15: return p.s_yoy!=null?p.s_yoy:-9999;
     default: return 0;
   }
 }
@@ -727,6 +729,7 @@ function renderProdPage(){
       <td class="r">${fmt(mv)}</td>
       <td class="r">${fmt(mq)}</td>
       <td class="r">${p.onhand!=null?fmt(p.onhand):'—'}</td>
+      <td class="r">${(()=>{if(!(p.onhand>0))return'<span style="color:#aaa">OOS</span>';const r=(p.q26||0)/(days||1);if(!r)return'—';const dd=Math.round(p.onhand/r);const c=dd<=7?'#e74c3c':dd<=14?'#e67e22':'#2e86ab';return'<span style="color:'+c+';font-weight:600">'+dd+'</span>';})()}</td>
       <td class="r">${p.ipunit3||'—'}</td>
       <td class="r ${difQty>=0?'yoy-p':'yoy-n'}">${difQty>=0?'+':''}${fmt(difQty)}</td>
       <td class="r">${yoyBadge(p.s_yoy)}</td>
