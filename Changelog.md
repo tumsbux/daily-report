@@ -3,6 +3,50 @@
 > งานที่ทำเสร็จ — เรียงจากใหม่ → เก่า
 > Format: [Keep a Changelog](https://keepachangelog.com/)
 
+## [2026-06-14] bugfix(3c): whsdd loop body missing — day_totals/targets never populated (Claude)
+
+### Fixed
+- `update_dashboard.py`: Phase 3c surgery accidentally dropped 7 lines from the `_whsdd_rows` loop body
+  - Missing: `store_tar_monthly[no] += tar`, `store_tar_mtd[no] += tar`, `day_totals[day] += act`, `store_target_days[no][day] = act`, `store_txn_mtd[no] += txn`
+  - Effect: `day_totals = {}` every run → `finalized_days = []` → `max_fin_day = 0` → `data_note = 'target(d1-0)'` always (misleading)
+  - Also: target comparisons used stale JSON values instead of fresh whsdd targets
+  - Sales totals were still correct (fact_sales primary path unaffected)
+  - Fix: restored 7 lines from `update_dashboard_v1_backup.py` reference
+  - 939 → 946 lines
+
+---
+
+## [2026-06-14] Phase B — วันหมด (Days-until-OOS) column ใน product_dashboard (Claude)
+
+### Added
+- `product_dashboard.html`: คอลัมน์ **วันหมด** (Days until OOS) — col 12 ในตารางสินค้า
+  - Formula: `onhand ÷ (q26 / days_elapsed)` — JS-only, ข้อมูลมีอยู่ใน JSON แล้ว
+  - แสดง: 🔴 ≤7 วัน (`#e74c3c`) / 🟠 ≤14 วัน (`#e67e22`) / 🔵 >14 วัน (`#2e86ab`) / "OOS" (onhand=0) / "—" (ไม่มียอดขาย)
+  - Sortable: เรียง 0 (OOS ก่อน) → ascending days → 999999 (ไม่ขาย = ท้ายสุด)
+  - Shifted existing cols: ipunit3 (12→13), Dif Ly QTY (13→14), YoY ยอดขาย (14→15)
+  - ไม่แตะ backend / JSON schema — JS-only change
+
+---
+
+## [2026-06-14] Phase 3d — decompose rebuild_fraud_analysis.py (Claude)
+
+### Changed
+- `rebuild_fraud_analysis.py`: **934 → 458 lines (−476 lines, −51%)**
+  - Extracted **`dashboards/fraud_queries.py`** (303 lines): `_mysql_conn`, `_load_sales_mtd_from_cache`, `_get_frozen_returns`, `_query_returns_full`, `_query_whsdd_sales_cost`, `_query_sales_mtd` — added `folder` keyword param to 3 functions that previously used FOLDER global
+  - Extracted **`dashboards/fraud_agg.py`** (211 lines): `_rec`, `_build_product_agg`, `_build_reason_agg`, `build_month`
+  - Kept in main: `_load_db_config`, `load_users`, legacy file parsers, `load_returns`, `compute_store_risk`, `push_github`, `main`
+  - Call site patches: `_query_returns_full(cfg, FOLDER, ...)` + `_load_sales_mtd_from_cache(max_mo, FOLDER)`
+
+---
+
+## [2026-06-14] Phase 3c bugfix — THAI_MON + factXX.txt suppression (Claude)
+
+### Fixed
+- **`THAI_MON` not defined** (WARNING เวลา fraud inject): Phase 3c surgery ลบ script code ที่อยู่ระหว่าง function defs ออกด้วยโดยไม่ตั้งใจ (original lines 764-791 — Day badge, THAI_MONTHS, YEAR_BE, THAI_MON, upd_hk/skpi calls) — restored ที่ `update_dashboard.py` line 619-644
+- **factXX.txt warnings suppressed**: Step 2 wrapped ด้วย `if not _fact_sales_mtd:` guard — เมื่อ MySQL fact_sales มีข้อมูลครบ (normal case) จะ skip scan ทั้งหมดและ print `[2/7] Skipping factXX.txt — MySQL fact_sales covers days 1-N` แทน
+
+---
+
 ## [2026-06-12 PM8] Product dashboard — label เฉลี่ยชิ้น/วัน + sort bug (Claude)
 
 ### Fixed

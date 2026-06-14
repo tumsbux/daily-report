@@ -172,7 +172,15 @@ for row in _whsdd_rows:
     # whsddpact may lag 1-2 days; fall back to whsddpnetamt so recent days are recognised as finalized
     act = float(row.get('whsddpact') or row.get('whsddpnetamt') or 0)
     txn = int(float(row.get('whsddtotdoc') or 0))
- # Supplement store_txn_mtd and MTD sales from caches
+    store_tar_monthly[no] += tar
+    if day <= DAYS_ELAPSED:
+        store_tar_mtd[no] += tar
+        day_totals[day]   += act
+        if act > 0:
+            store_target_days[no][day] = act
+            store_txn_mtd[no]         += txn
+
+# Supplement store_txn_mtd and MTD sales from caches
 if _db_cfg:
     try:
         _fact_sales_mtd = get_sales_daily_cache(_db_cfg, YEAR, MONTH, DAYS_ELAPSED, full_refresh=FULL_REFRESH, folder=FOLDER, rule_hash=RULE_HASH)
