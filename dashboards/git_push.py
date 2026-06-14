@@ -66,7 +66,7 @@ def push_to_github(folder, push_files, github_url, repo_dir,
             print('  GitHub: nothing to commit (data unchanged)')
         else:
             _pr = subprocess.run(
-                ['git', '-C', repo_dir, 'push', 'origin', 'main'],
+                ['git', '-C', repo_dir, 'push', github_url, 'main'],
                 capture_output=True, text=True, env=_env)
             if _pr.returncode == 0:
                 print('  GitHub: pushed OK')
