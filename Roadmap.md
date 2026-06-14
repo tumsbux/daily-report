@@ -6,6 +6,14 @@
 
 ## 🔥 Now (สัปดาห์นี้)
 
+- [ ] 🏪 **กิจกรรมธงฟ้า Dashboard — ตั้ง GitHub Actions auto-update** (user ทำเอง — ทำครั้งเดียว)
+  1. ไปที่ `github.com/tumsbux/thongfah-dashboard` → Settings → Secrets → Actions → เพิ่ม 4 secrets: `MYSQL_HOST=203.154.83.62`, `MYSQL_PORT=13306`, `MYSQL_USER`, `MYSQL_PASSWORD`
+  2. Actions → New workflow → "set up a workflow yourself" → วาง YAML จาก `daily-update.yml` (อยู่ใน Cowork outputs) → Commit
+  3. ทดสอบ: กด "Run workflow" → ดูว่า data.json commit ใหม่ขึ้น
+  - Dashboard URL: `https://tumsbux.github.io/thongfah-dashboard/`
+  - หลังทำแล้ว: อัปเดตอัตโนมัติทุก 08:35 BKK ไม่ต้องเปิด laptop
+  - size: XS
+
 - [ ] 🔐 **Rotate GitHub PAT** — PAT หลุดใน log (2026-06-11) — **user ต้องทำเอง** (agents แตะ secrets ไม่ได้)
   1. github.com → Settings → Developer settings → สร้าง fine-grained PAT ใหม่ (repos: `daily-report` + `lost-Product`, permission: Contents RW)
   2. อัปเดต `F:\co work dashboard\db_config.json` (key เก็บ PAT)
@@ -34,18 +42,13 @@
 
 ## 📅 Next (Sprint หน้า)
 
-- [ ] **Phase 3c** — extract `update_dashboard.py` sections to `dashboards/sales_data.py` + `dashboards/html_patch.py` + `dashboards/git_push.py`
-  - size: M
-  - depends: Phase 3b verification (done)
+- [x] ✅ **Phase 3c** — extracted to `dashboards/sales_data.py` + `html_patch.py` + `git_push.py` — `update_dashboard.py` 1160→939 lines (bugfix THAI_MON + factXX suppress) — 2026-06-14
 
-- [ ] **Phase 3d** — decompose `rebuild_fraud_analysis.py` (757 lines) similarly
-  - size: M
-  - depends: Phase 3c pattern established
+- [x] ✅ **Phase 3d** — extracted to `dashboards/fraud_queries.py` (303L) + `fraud_agg.py` (211L) — `rebuild_fraud_analysis.py` 934→458 lines (−51%) — 2026-06-14
 
-- [ ] **Phase B: Days-until-OOS column on product_dashboard**
-  - Formula: `onhand ÷ avg_daily_run_rate`
-  - JS-only change (data already in JSON)
-  - size: S
+- [x] ✅ **Phase B: วันหมด (Days-until-OOS) column ใน product_dashboard** — JS-only, sortable, color-coded (≤7🔴 ≤14🟠 >14🔵 OOS/—) — 2026-06-14
+
+- [x] ✅ **bugfix(3c): whsdd loop body** — 7 assignment lines dropped by Phase 3c surgery → `day_totals` never populated → `data_note='target(d1-0)'` every run + stale targets — restored, 939→946 lines — 2026-06-14
 
 - [ ] **Verify all 210 stores in store_breakdown match expectations**
   - vs 203 in dim_branch
@@ -82,29 +85,4 @@
   - ▶️ **Verify บน Windows:** `py build_product_data_mysql.py --no-push` → เช็ค log "N (iprod, store) onhand rows" > 0 + คอลัมน์ ONHAND บน dashboard มีค่า
   - หมายเหตุ: เริ่ม fail หลัง IR-B cache implement พอดี (06-10) — อาจเกี่ยว (memory pressure จาก parquet/pandas load ก่อนถึง onhand step)
 
-- [ ] `fetch_missing_facts.py` warning ในทุก daily run — severity: low
-- [ ] pandas SQLAlchemy warning ทุกครั้งที่รัน — severity: low
-- [ ] Console cmd window ค้างทั้งวัน — severity: low (cosmetic)
-- [ ] `update_dashboard_v1_backup.py` ยังอยู่ root — clean up after stable Phase 3b — severity: trivial
-- [ ] `CLAUDE.old.md` (73KB backup) — เก็บไว้ก่อน ลบทีหลังเมื่อมั่นใจ split สมบูรณ์
-
----
-
-## 🎯 Quarterly Goals
-
-### Q2 2026
-- [x] Lost Product dashboard (live at https://tumsbux.github.io/lost-Product/)
-- [x] Phase 3b refactor (–209 lines, verified zero drift)
-- [x] Documentation split (CLAUDE.md 73KB → 8 files)
-- [x] Phase IR-A: Lost Product Caching via Parquet
-- [x] Phase IR-B, IR-C, and IR-D Caching Architecture & Sunday Full-Refresh ⚠️ *unilateral by Antigravity — under review (ดู Now)*
-- [ ] Phase 3c + 3d (continued refactor)
-
-### Q3 2026
-- [ ] Phase B (Days-until-OOS)
-- [ ] Phase C (Dead Stock report)
-- [ ] Phase D (Visual Adjustment audit / fraud signal)
-
----
-
-_Last updated: 2026-06-12 (PM6)_
+- [ ] `fetch_missing_facts.py` warning ในทุก daily run — severi

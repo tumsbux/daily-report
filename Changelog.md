@@ -3,6 +3,35 @@
 > งานที่ทำเสร็จ — เรียงจากใหม่ → เก่า
 > Format: [Keep a Changelog](https://keepachangelog.com/)
 
+## [2026-06-14] กิจกรรมธงฟ้า Dashboard — grand total + date filter + GitHub Actions (Claude)
+
+### Fixed
+- `thongfah_dashboard/index.html`: grand total %GP ผิดคอลัมน์ — แสดง GP฿ amount แทน %
+  - Root cause: `if(c.k==='g'||c.k==='gp')` ใน tfoot match `k='gp'` ใน aggregate views (ที่ `gp` = %GP)
+  - Fix: check `curView` — `if(c.k==='gpp'||(c.k==='gp'&&curView!=='detail'))` → %GP, `if(c.k==='g'||(c.k==='gp'&&curView==='detail'))` → GP฿
+  - `totG` ก็ต้อง check: `curView==='detail'?r.gp:r.g`
+- `tfoot td.r` ชิดซ้าย: CSS `tbody td.r{text-align:right}` ไม่ cover `<tfoot>` → เพิ่ม `tfoot td.r`
+- `build_data.py`: SQL `ORDER BY sodate` ผิด `only_full_group_by` (sodate ไม่อยู่ใน GROUP BY) → `ORDER BY DATE(f.sodate)`
+- `push_data_json.ps1`: `$ErrorActionPreference='Stop'` + git stderr → script ตาย → redirect `2>&1 | Out-Null`
+- `index.html` ใน Cowork working copy truncated (15KB แทน 19KB) — rebuild จาก GitHub raw content
+
+### Added
+- Date range filter (📅 ตั้งแต่วันที่ / ถึงวันที่) — auto min/max จาก data, reset button
+- `DT=14` constant (index 14 = date string `YYYY-MM-DD`)
+- `build_data.py`: env var support (`MYSQL_HOST/PORT/USER/PASSWORD`) เพื่อรันใน GitHub Actions + fallback `db_config.json`
+- `push_data_json.ps1`: push 46MB data.json ผ่าน git clone (bypass GitHub Contents API 422 limit)
+- `push_thongfah_update.py`: push index.html + build_data.py ผ่าน GitHub Contents API
+- `daily-update.yml` (saved to outputs): GHA workflow รันทุกวัน 08:35 BKK — pip install → build_data.py → git push
+
+### Pushed
+- `tumsbux/thongfah-dashboard`: index.html (fixed) + data.json (160,753 rows, 2026-05-01–2026-06-12, 45.3MB) + build_data.py
+
+### Pending (user ทำเอง — ทำครั้งเดียว)
+- เพิ่ม 4 MySQL Secrets ใน thongfah-dashboard repo → Settings → Secrets → Actions: `MYSQL_HOST/PORT/USER/PASSWORD`
+- สร้าง `.github/workflows/daily-update.yml` ผ่าน GitHub web UI (PAT ขาด `workflow` scope) — YAML อยู่ใน outputs
+
+---
+
 ## [2026-06-14] bugfix(3c): whsdd loop body missing — day_totals/targets never populated (Claude)
 
 ### Fixed
@@ -258,159 +287,4 @@
 
 ### Added
 - `index.html` in lost-Product repo (the dashboard)
-- AI Analysis bar (4 pill buttons): สาเหตุสินค้าหาย, แนะนำสินค้าทดแทน, ระบุโอกาส Recovery, Trend ปีต่อปี
-- Per-scope KPI recompute (`kpiBase` = all filters except status)
-- Empty-table state + console diagnostic
-- GitHub Actions: build + cross-repo push
-
-### Removed
-- Hub nav link + quick-link card from `index.html` (daily-report)
-- Lost Product references in `update_dashboard.py push_files`
-- PS 5.1 here-string from `push_lost_data.ps1`
-
-### Fixed
-- `push_lost_data.ps1`: `cmd /c` wrapper for git stderr
-- `push_lost_data.ps1`: handle empty-repo first push
-- Browser cache after rename: forced rebuild via new README commit
-
----
-
-## [2026-06-05 night] Lost Product — JOIN bld_acc + blh_acc
-
-**Commits:** `d4b48d6` `5bd7926` `a0c6b35` `a432930` `880e805` `d00131b` `30137bc` `86c8150` `8131c21` `25153e6` `0216f00`
-
-### Added
-- 🎉 Lost Product dashboard — first version
-- `build_lost_product_data.py` — aggregates 6 years (2021-2026)
-- `lost_product_dashboard.html` — table with year columns, filters, XLSX export
-- RM/DM/Store filters + per-store year breakdown
-- Pruning step
-
-### Changed
-- `query_year()` JOIN `bld_acc_*_lake` ↔ `blh_acc_*_lake` on `sono`
-- **210 stores in store_breakdown** (up from 79 with broken sono substring)
-- Split JSON to separate repo `tumsbux/lost-Product`
-
-### Fixed
-- Bug: sono substring extraction returned 4-digit POS terminal ID, not 3-digit store code
-- Restored truncated `main()` call
-- Correct sono substrings + dim_branch column
-
----
-
-## [2026-06-05 evening] ONHAND / IPUNIT3 bugfix
-
-**Commits:** `baba317`, `b12a7cb`, `d15d8e4`
-
-### Fixed
-- **Bug 1 — HTML cells swapped vs headers** (`product_dashboard.html` lines 720-721)
-- **Bug 2 — `ipunit3` from wrong table** — now from `dim_product` instead of `dim_item_barcode`
-- **Bug 3 — Scope=ALL onhand=0** — precompute `ohTot[iprod]` summing `arr[2]` across all stores
-
-### Documented
-- Edit-tool truncation strike #6 — `product_dashboard.html` (40KB → 39627 bytes)
-- **New rule:** for HTML/JS file edit > 20KB, use Python via Bash, not Edit tool
-- Timing trap: wait for file mtime before user regen
-
----
-
-## [2026-06-05] product_dashboard updates
-
-**Commits:** `73dd90d`
-
-### Changed
-- Month label dynamic — 4 hardcoded "พ.ค." replaced with `_TH_MO_S[currentMonth]`
-- `HAVING s26 >= 500` → `HAVING s26 > 0`. Small stores now show all SKUs
-- Column rename: `เลื่อน/วัน` → `เฉลี่ย/วัน`
-
-### Added
-- Phase A: per-store onhand from MyWMS `ibl`
-- `query_onhand_per_store(conn)` in `build_product_data_mysql.py`
-- `store_breakdown[whs][iprod] = [s26, q26, onhand]`
-
----
-
-## [2026-06-05] Phase 3b refactor
-
-### Changed
-- `update_dashboard.py`: **1215 → 1006 lines** (–209)
-- Imports from `dashboards/helpers.py` + `dashboards/mysql_queries.py`
-- One signature change wrapped in shim
-
-### Verified
-- `test_phase3b_parity.bat` — **"no differences encountered"** (`fc /b`)
-
-### Safety
-- `update_dashboard_v1_backup.py` preserved
-
----
-
-## [2026-06-05] Phase 1 — Shared library `lib/`
-
-### Added
-- `lib/db.py`, `lib/dates.py`, `lib/safe_write.py`
-
-### Status
-- Helpers ready, production scripts not migrated yet
-
----
-
-## [2026-06-04] sales_dashboard_v8.html — JS Proxy for MTH
-
-### Changed
-- `const MTH = {...}` (static) → JS Proxy auto-format
-- MTD key auto-detect
-
-### Fixed
-- YoY baseline auto-detect (was hardcoded May)
-- Same-source sync: `s.s25_may` + `s.m25[YEAR-1-MONTH]` both from fact_sales
-
----
-
-## [2026-06-04] GitHub Actions — Multi-cron 5 slots
-
-### Changed
-- Schedule: `30 0`, `0 1`, `30 1`, `0 2`, `30 2` UTC = 07:30-09:30 BKK
-- Skip-guard: only first successful run commits
-- Concurrency: `group: daily-update, cancel-in-progress: false`
-
----
-
-## [2026-06-03] fraud_dashboard.html — restored full version
-
-### Restored
-- Full-featured template from `afaa0d5` (29 พ.ค.)
-- Return Bill toolbar + XLSX/PDF export
-- Converted to template with `PLACEHOLDER_DATA`
-
-### Fixed
-- `inject_fraud_only.py` — produce LONG names data contract
-- `so = so_all` (all bills, cap 500)
-- Line Type modal: added `solinetype NOT IN ('C','R')`
-
----
-
-## [2026-06-02] Fraud injection auto-regen
-
-### Added
-- Auto-regenerate `fraud_dashboard.html` if local truncated
-- Month auto-detect in `update_dashboard.py`
-- index.html chart rebuild from `D.summary.m26_tot`/`m25_tot`
-
-### Changed
-- Overview KPI card #3: "Repeat rtsono" → "Return Bill"
-
-### Removed
-- Partial month exclusion in `rebuild_fraud_analysis.py`
-
----
-
-## [2026-05-31] solinetype filter alignment
-
-### Fixed
-- Dashboard `solinetype NOT IN ('C', 'R')` (matches mobile app)
-- Previously used `solinetype = 'N'` → diff ~14.5M/month vs app
-
----
-
-_Last updated: 2026-06-12_
+- AI Analysis bar (4 pill buttons): สาเห

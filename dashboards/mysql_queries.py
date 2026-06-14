@@ -146,8 +146,12 @@ def query_prev_year_same_month(cfg, year, month):
     Returns:
         dict {store_code → {'s25': sales_amt, 'txn25': txn_count}}
     """
+    import calendar
     prev_y = int(year) - 1
     cur_m = int(month)
+    _, last_day25 = calendar.monthrange(prev_y, cur_m)
+    start_date = f'{prev_y}-{cur_m:02d}-01'
+    end_date = f'{prev_y}-{cur_m:02d}-{last_day25:02d}'
     conn = _open_conn(cfg, timeout=60)
     cursor = conn.cursor(dictionary=True)
     cursor.execute(
@@ -156,7 +160,7 @@ def query_prev_year_same_month(cfg, year, month):
                SUM(net_sales_amt)   AS sales25,
                COUNT(DISTINCT sono) AS txn25
         FROM fact_sales
-        WHERE YEAR(sodate) = {prev_y} AND MONTH(sodate) = {cur_m}
+        WHERE sodate BETWEEN '{start_date}' AND '{end_date}'
           AND solinetype NOT IN ('C', 'R')
           AND sotowhs REGEXP '^[0-9]+$'
           AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
@@ -300,7 +304,11 @@ def autodetect_max_day(cfg, year, month) -> int:
     (lines 299-321). Returns 0 on any error (caller falls back).
     """
     try:
-        import mysql.connector
+        import mysql.connector, calendar
+        y, m = int(year), int(month)
+        _, last_day = calendar.monthrange(y, m)
+        start_date = f'{y}-{m:02d}-01'
+        end_date = f'{y}-{m:02d}-{last_day:02d}'
         conn = mysql.connector.connect(
             host=cfg['host'],
             port=cfg.get('port', 3306),
@@ -314,12 +322,12 @@ def autodetect_max_day(cfg, year, month) -> int:
         cur.execute(
             """
             SELECT MAX(DAY(sodate)) FROM fact_sales
-            WHERE YEAR(sodate)=%s AND MONTH(sodate)=%s
+            WHERE sodate BETWEEN %s AND %s
               AND solinetype NOT IN ('C','R')
               AND sotowhs REGEXP '^[0-9]+$'
               AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
             """,
-            (int(year), int(month)),
+            (start_date, end_date),
         )
         row = cur.fetchone()
         cur.close()
