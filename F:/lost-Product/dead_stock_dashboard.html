@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dead Stock Dashboard</title>
+<style>
+:root{--bg:#f4f6f9;--card:#fff;--border:#e0e4ea;--text:#2c3e50;--muted:#7f8c9a;--red:#e74c3c;--orange:#e67e22;--blue:#2e86ab;--green:#27ae60;--purple:#8e44ad}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);color:var(--text);font-size:13px}
+/* header */
+.hdr{background:#1a252f;color:#fff;padding:12px 20px;display:flex;align-items:center;gap:16px}
+.hdr h1{font-size:16px;font-weight:600}
+.hdr .sub{font-size:12px;color:#aab;margin-left:auto}
+/* kpi */
+.kpi-row{display:flex;gap:12px;padding:14px 20px;flex-wrap:wrap}
+.kpi{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px 18px;min-width:160px;flex:1}
+.kpi .label{font-size:11px;color:var(--muted);margin-bottom:4px}
+.kpi .value{font-size:22px;font-weight:700}
+.kpi.red .value{color:var(--red)}
+.kpi.orange .value{color:var(--orange)}
+.kpi.blue .value{color:var(--blue)}
+/* filters */
+.filters{display:flex;gap:10px;padding:0 20px 12px;flex-wrap:wrap;align-items:center}
+.filters select,.filters input{border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:12px;background:#fff;color:var(--text)}
+.filters label{font-size:12px;color:var(--muted)}
+.btn{border:none;border-radius:6px;padding:6px 14px;font-size:12px;cursor:pointer;font-weight:500}
+.btn-clear{background:#ecf0f1;color:var(--text)}
+.btn-xlsx{background:#27ae60;color:#fff}
+/* table */
+.tbl-wrap{padding:0 20px 40px;overflow-x:auto}
+table{width:100%;border-collapse:collapse;background:var(--card);border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+thead th{background:#2c3e50;color:#fff;padding:9px 10px;text-align:left;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;user-select:none}
+thead th:hover{background:#34495e}
+thead th.r,tbody td.r,tfoot td.r{text-align:right}
+thead th.sort-asc::after{content:' ▲'}
+thead th.sort-desc::after{content:' ▼'}
+tbody tr{border-bottom:1px solid var(--border)}
+tbody tr:hover{background:#f8f9fa}
+tbody tr.detail-row{background:#f0f4f8}
+tbody td{padding:7px 10px;vertical-align:top}
+.expand-btn{cursor:pointer;color:var(--blue);font-size:11px;margin-right:4px;user-select:none}
+.badge{display:inline-block;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:600;color:#fff}
+.d90{background:var(--orange)}
+.d180{background:var(--red)}
+.d365{background:#8e44ad}
+.never{background:#636e72}
+tfoot td{padding:8px 10px;font-weight:700;background:#ecf0f1;border-top:2px solid var(--border)}
+/* store sub-table */
+.sub-tbl{width:100%;margin-top:4px;border-collapse:collapse;font-size:11px}
+.sub-tbl th{background:#dde3ea;padding:4px 8px;text-align:left;font-weight:500}
+.sub-tbl th.r,.sub-tbl td.r{text-align:right}
+.sub-tbl td{padding:3px 8px;border-bottom:1px solid #e8ecf0}
+.sub-tbl tr:last-child td{border-bottom:none}
+/* no-data */
+.no-data{text-align:center;padding:40px;color:var(--muted)}
+/* loading */
+#loading{position:fixed;inset:0;background:rgba(255,255,255,.85);display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--muted);z-index:999}
+</style>
+</head>
+<body>
+<div id="loading">⏳ กำลังโหลดข้อมูล...</div>
+
+<div class="hdr">
+  <h1>📦 Dead Stock Dashboard</h1>
+  <span id="hdr-sub" class="sub"></span>
+</div>
+
+<div class="kpi-row" id="kpi-row">
+  <div class="kpi red"><div class="label">สินค้าค้างสต็อก</div><div class="value" id="k-products">—</div></div>
+  <div class="kpi orange"><div class="label">มูลค่ารวม (฿)</div><div class="value" id="k-value">—</div></div>
+  <div class="kpi blue"><div class="label">จำนวนชิ้นรวม</div><div class="value" id="k-qty">—</div></div>
+  <div class="kpi" id="k-filter-card"><div class="label">หลังกรอง</div><div class="value" id="k-filtered">—</div></div>
+</div>
+
+<div class="filters">
+  <label>ค้างนาน:</label>
+  <select id="f-days">
+    <option value="0">ทั้งหมด (≥90 วัน)</option>
+    <option value="180">≥ 180 วัน</option>
+    <option value="365">≥ 365 วัน</option>
+    <option value="-1">ไม่เคยขาย</option>
+  </select>
+  <label>กลุ่มสินค้า:</label>
+  <select id="f-group"><option value="">ทั้งหมด</option></select>
+  <label>ค้นหา:</label>
+  <input id="f-search" type="text" placeholder="ชื่อ / parcode..." style="width:180px">
+  <button class="btn btn-clear" onclick="clearFilters()">ล้าง</button>
+  <button class="btn btn-xlsx" onclick="exportXLSX()">⬇ XLSX</button>
+</div>
+
+<div class="tbl-wrap">
+<table id="main-tbl">
+  <thead>
+    <tr>
+      <th style="width:24px"></th>
+      <th data-col="iprod">Parcode</th>
+      <th data-col="name">ชื่อสินค้า</th>
+      <th data-col="group">กลุ่ม</th>
+      <th data-col="last_sale">วันขายล่าสุด</th>
+      <th data-col="days_since" class="r sort-desc">วันค้าง</th>
+      <th data-col="onhand_qty" class="r">Onhand (ชิ้น)</th>
+      <th data-col="onhand_value" class="r">มูลค่า (฿)</th>
+      <th data-col="stores_count" class="r">ร้าน</th>
+    </tr>
+  </thead>
+  <tbody id="tbody"></tbody>
+  <tfoot id="tfoot"><tr><td colspan="9" class="no-data">โหลด...</td></tr></tfoot>
+</table>
+</div>
+
+<script>
+let ALL = [], FILTERED = [], SORT_COL = 'days_since', SORT_DIR = -1;
+const fmt  = n => n == null ? '—' : Number(n).toLocaleString('th-TH', {maximumFractionDigits:0});
+const fmtD = n => n == null ? '—' : Number(n).toLocaleString('th-TH', {maximumFractionDigits:2});
+
+function daysBadge(d){
+  if(d == null) return '<span class="badge never">ไม่เคยขาย</span>';
+  if(d >= 365)  return `<span class="badge d365">${d} วัน</span>`;
+  if(d >= 180)  return `<span class="badge d180">${d} วัน</span>`;
+  return `<span class="badge d90">${d} วัน</span>`;
+}
+
+function render(){
+  const tbody = document.getElementById('tbody');
+  const tfoot = document.getElementById('tfoot');
+  if(!FILTERED.length){
+    tbody.innerHTML = '';
+    tfoot.innerHTML = '<tr><td colspan="9" class="no-data">ไม่พบข้อมูล</td></tr>';
+    document.getElementById('k-filtered').textContent = '0';
+    return;
+  }
+
+  // sort
+  FILTERED.sort((a,b)=>{
+    let av = a[SORT_COL], bv = b[SORT_COL];
+    if(av == null) av = SORT_DIR > 0 ? -Infinity : Infinity;
+    if(bv == null) bv = SORT_DIR > 0 ? -Infinity : Infinity;
+    return SORT_DIR * (av < bv ? -1 : av > bv ? 1 : 0);
+  });
+
+  const rows = [];
+  FILTERED.slice(0, 2000).forEach((p, i) => {
+    rows.push(`<tr>
+      <td><span class="expand-btn" onclick="toggleDetail(${i})" id="exp-${i}">▶</span></td>
+      <td>${p.iprod}</td>
+      <td>${p.name || '—'}</td>
+      <td>${p.group || '—'}</td>
+      <td>${p.last_sale || '—'}</td>
+      <td class="r">${daysBadge(p.days_since)}</td>
+      <td class="r">${fmtD(p.onhand_qty)}</td>
+      <td class="r">${fmt(p.onhand_value)}</td>
+      <td class="r">${p.stores ? p.stores.length : 0}</td>
+    </tr>
+    <tr id="detail-${i}" style="display:none"><td colspan="9" style="padding:0 10px 8px 32px">
+      <table class="sub-tbl">
+        <thead><tr><th>รหัส</th><th>ร้าน</th><th>DM</th><th>RM</th><th class="r">Onhand</th><th class="r">มูลค่า (฿)</th></tr></thead>
+        <tbody>${(p.stores||[]).map(s=>`<tr>
+          <td>${s.code}</td><td>${s.name}</td><td>${s.dm}</td><td>${s.rm}</td>
+          <td class="r">${fmtD(s.qty)}</td><td class="r">${fmt(s.value)}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </td></tr>`);
+  });
+  tbody.innerHTML = rows.join('');
+
+  // totals
+  const totQty = FILTERED.reduce((s,p)=>s+p.onhand_qty,0);
+  const totVal = FILTERED.reduce((s,p)=>s+p.onhand_value,0);
+  tfoot.innerHTML = `<tr>
+    <td colspan="4"></td>
+    <td colspan="1" style="color:var(--muted);font-size:11px">${FILTERED.length.toLocaleString()} รายการ${FILTERED.length>2000?' (แสดง 2,000 แรก)':''}</td>
+    <td></td>
+    <td class="r">${fmtD(totQty)}</td>
+    <td class="r">${fmt(totVal)}</td>
+    <td></td>
+  </tr>`;
+  document.getElementById('k-filtered').textContent = FILTERED.length.toLocaleString();
+}
+
+function toggleDetail(i){
+  const row = document.getElementById(`detail-${i}`);
+  const btn = document.getElementById(`exp-${i}`);
+  if(row.style.display==='none'){row.style.display='';btn.textContent='▼';}
+  else{row.style.display='none';btn.textContent='▶';}
+}
+
+function applyFilters(){
+  const days   = parseInt(document.getElementById('f-days').value);
+  const group  = document.getElementById('f-group').value;
+  const search = document.getElementById('f-search').value.trim().toLowerCase();
+  FILTERED = ALL.filter(p => {
+    if(days === -1 && p.last_sale !== null) return false;
+    if(days > 0 && (p.days_since == null || p.days_since < days)) return false;
+    if(group && p.group !== group) return false;
+    if(search && !p.iprod.includes(search) && !(p.name||'').toLowerCase().includes(search)) return false;
+    return true;
+  });
+  render();
+}
+
+function clearFilters(){
+  document.getElementById('f-days').value = '0';
+  document.getElementById('f-group').value = '';
+  document.getElementById('f-search').value = '';
+  applyFilters();
+}
+
+// sort headers
+document.querySelectorAll('thead th[data-col]').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.col;
+    if(SORT_COL === col) SORT_DIR *= -1;
+    else { SORT_COL = col; SORT_DIR = -1; }
+    document.querySelectorAll('thead th').forEach(t => t.classList.remove('sort-asc','sort-desc'));
+    th.classList.add(SORT_DIR === 1 ? 'sort-asc' : 'sort-desc');
+    render();
+  });
+});
+
+// filter events
+['f-days','f-group'].forEach(id => document.getElementById(id).addEventListener('change', applyFilters));
+document.getElementById('f-search').addEventListener('input', applyFilters);
+
+// XLSX export
+function exportXLSX(){
+  const rows = [['Parcode','ชื่อสินค้า','กลุ่ม','วันขายล่าสุด','วันค้าง','Onhand (ชิ้น)','มูลค่า (฿)','จำนวนร้าน']];
+  FILTERED.forEach(p => rows.push([p.iprod, p.name||'', p.group||'', p.last_sale||'ไม่เคยขาย', p.days_since??'', p.onhand_qty, p.onhand_value, p.stores?p.stores.length:0]));
+  // CSV fallback (no SheetJS in standalone HTML)
+  const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const bom = '﻿';
+  const blob = new Blob([bom+csv], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `dead_stock_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+}
+
+// load data
+fetch('./dead_stock_data.json')
+  .then(r => r.json())
+  .then(data => {
+    ALL = data.products || [];
+    const m = data._meta || {};
+    const s = data.summary || {};
+
+    document.getElementById('hdr-sub').textContent =
+      `ข้อมูล ณ ${m.as_of||''} · threshold ${m.threshold_days||90} วัน · built by ${m.built_by||''}`;
+    document.getElementById('k-products').textContent = (s.total_products||0).toLocaleString();
+    document.getElementById('k-value').textContent    = '฿' + fmt(s.total_onhand_value);
+    document.getElementById('k-qty').textContent      = fmtD(s.total_onhand_qty);
+
+    // populate group filter
+    const groups = [...new Set(ALL.map(p=>p.group).filter(Boolean))].sort();
+    const sel = document.getElementById('f-group');
+    groups.forEach(g => { const o=document.createElement('option'); o.value=o.textContent=g; sel.appendChild(o); });
+
+    FILTERED = [...ALL];
+    render();
+    document.getElementById('loading').style.display = 'none';
+  })
+  .catch(e => {
+    document.getElementById('loading').textContent = '❌ โหลดข้อมูลไม่ได้: ' + e.message;
+  });
+</script>
+</body>
+</html>

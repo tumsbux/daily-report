@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Visual Adjustment Audit</title>
+<style>
+:root{--bg:#f4f6f9;--card:#fff;--border:#e0e4ea;--text:#2c3e50;--muted:#7f8c9a;--red:#e74c3c;--orange:#e67e22;--blue:#2e86ab;--green:#27ae60;--purple:#8e44ad;--dark:#1a252f}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);color:var(--text);font-size:13px}
+.hdr{background:var(--dark);color:#fff;padding:12px 20px;display:flex;align-items:center;gap:12px}
+.hdr h1{font-size:16px;font-weight:600}
+.hdr .sub{font-size:11px;color:#aab;margin-left:auto}
+/* tabs */
+.tabs{display:flex;gap:0;background:var(--dark);padding:0 20px}
+.tab{padding:9px 18px;cursor:pointer;color:#aab;font-size:13px;border-bottom:3px solid transparent;transition:.15s}
+.tab.active{color:#fff;border-bottom-color:#e67e22}
+.tab:hover:not(.active){color:#ddd}
+.panel{display:none;padding:14px 20px 40px}
+.panel.active{display:block}
+/* kpi */
+.kpi-row{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+.kpi{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:11px 16px;min-width:140px;flex:1}
+.kpi .label{font-size:11px;color:var(--muted);margin-bottom:3px}
+.kpi .value{font-size:20px;font-weight:700}
+.kpi.red .value{color:var(--red)}
+.kpi.orange .value{color:var(--orange)}
+.kpi.blue .value{color:var(--blue)}
+.kpi.purple .value{color:var(--purple)}
+/* filters */
+.filters{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center}
+.filters select,.filters input{border:1px solid var(--border);border-radius:6px;padding:5px 9px;font-size:12px;background:#fff}
+.btn{border:none;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;font-weight:500}
+.btn-clear{background:#ecf0f1;color:var(--text)}
+.btn-csv{background:var(--green);color:#fff}
+/* table */
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;background:var(--card);border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.07)}
+thead th{background:#2c3e50;color:#fff;padding:8px 10px;text-align:left;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;user-select:none}
+thead th:hover{background:#34495e}
+thead th.r,tbody td.r,tfoot td.r{text-align:right}
+thead th.sort-asc::after{content:' ▲'}
+thead th.sort-desc::after{content:' ▼'}
+tbody tr{border-bottom:1px solid var(--border);transition:background .1s}
+tbody tr:hover{background:#f8f9fa}
+tbody td{padding:7px 10px}
+tfoot td{padding:7px 10px;font-weight:700;background:#ecf0f1;border-top:2px solid var(--border)}
+/* risk badge */
+.risk{display:inline-block;border-radius:10px;padding:1px 8px;font-size:11px;font-weight:600;color:#fff}
+.risk-h{background:var(--red)}
+.risk-m{background:var(--orange)}
+.risk-l{background:var(--blue)}
+/* net value color */
+.pos{color:var(--red)}
+.neg{color:var(--blue)}
+/* sessions mini */
+.sess-badge{display:inline-block;background:#eaf3ff;color:var(--blue);border-radius:10px;padding:1px 7px;font-size:11px;font-weight:600}
+/* loading */
+#loading{position:fixed;inset:0;background:rgba(255,255,255,.9);display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--muted);z-index:999}
+.no-data{text-align:center;padding:32px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div id="loading">⏳ กำลังโหลด...</div>
+
+<div class="hdr">
+  <h1>🔍 Visual Adjustment Audit</h1>
+  <span id="hdr-meta" class="sub"></span>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('stores')">🏪 ตามร้าน</div>
+  <div class="tab" onclick="switchTab('products')">📦 ตามสินค้า</div>
+  <div class="tab" onclick="switchTab('sessions')">📋 Sessions ล่าสุด</div>
+</div>
+
+<!-- STORES TAB -->
+<div id="panel-stores" class="panel active">
+  <div class="kpi-row" id="kpi-stores"></div>
+  <div class="filters">
+    <select id="sf-dm"><option value="">DM ทั้งหมด</option></select>
+    <select id="sf-rm"><option value="">RM ทั้งหมด</option></select>
+    <select id="sf-dir">
+      <option value="">ทิศทางทั้งหมด</option>
+      <option value="up">Net บวก (rec > iss)</option>
+      <option value="down">Net ลบ (iss > rec)</option>
+    </select>
+    <input id="sf-search" type="text" placeholder="ค้นหาร้าน..." style="width:160px">
+    <button class="btn btn-clear" onclick="clearStoreFilters()">ล้าง</button>
+    <button class="btn btn-csv" onclick="exportCSV('stores')">⬇ CSV</button>
+  </div>
+  <div class="tbl-wrap">
+  <table id="tbl-stores">
+    <thead><tr>
+      <th data-col="store">รหัส</th>
+      <th data-col="name">ร้าน</th>
+      <th data-col="dm">DM</th>
+      <th data-col="rm">RM</th>
+      <th data-col="products" class="r">สินค้า</th>
+      <th data-col="qty_up" class="r">Qty รับเข้า↑</th>
+      <th data-col="qty_down" class="r">Qty จ่ายออก↓</th>
+      <th data-col="net_qty" class="r sort-desc">Net Qty</th>
+      <th data-col="net_value" class="r">Net มูลค่า (฿)</th>
+      <th data-col="session_count" class="r">Sessions</th>
+      <th data-col="recent_date">ล่าสุด</th>
+    </tr></thead>
+    <tbody id="tbody-stores"></tbody>
+    <tfoot id="tfoot-stores"><tr><td colspan="11" class="no-data">โหลด...</td></tr></tfoot>
+  </table>
+  </div>
+</div>
+
+<!-- PRODUCTS TAB -->
+<div id="panel-products" class="panel">
+  <div class="filters">
+    <select id="pf-group"><option value="">กลุ่มทั้งหมด</option></select>
+    <input id="pf-search" type="text" placeholder="ชื่อ / parcode..." style="width:200px">
+    <button class="btn btn-clear" onclick="clearProdFilters()">ล้าง</button>
+    <button class="btn btn-csv" onclick="exportCSV('products')">⬇ CSV</button>
+  </div>
+  <div class="tbl-wrap">
+  <table id="tbl-products">
+    <thead><tr>
+      <th data-col="iprod" tgt="p">Parcode</th>
+      <th data-col="name" tgt="p">ชื่อสินค้า</th>
+      <th data-col="group" tgt="p">กลุ่ม</th>
+      <th data-col="stores" class="r" tgt="p">ร้าน</th>
+      <th data-col="qty_up" class="r" tgt="p">Qty รับ↑</th>
+      <th data-col="qty_down" class="r" tgt="p">Qty จ่าย↓</th>
+      <th data-col="net_qty" class="r sort-desc" tgt="p">Net Qty</th>
+      <th data-col="net_value" class="r" tgt="p">Net มูลค่า (฿)</th>
+    </tr></thead>
+    <tbody id="tbody-products"></tbody>
+    <tfoot id="tfoot-products"><tr><td colspan="8" class="no-data">โหลด...</td></tr></tfoot>
+  </table>
+  </div>
+</div>
+
+<!-- SESSIONS TAB -->
+<div id="panel-sessions" class="panel">
+  <div class="filters">
+    <input id="sessf-store" type="text" placeholder="รหัสร้าน..." style="width:120px">
+    <input id="sessf-date" type="date">
+    <button class="btn btn-clear" onclick="clearSessFilters()">ล้าง</button>
+    <button class="btn btn-csv" onclick="exportCSV('sessions')">⬇ CSV</button>
+  </div>
+  <div class="tbl-wrap">
+  <table id="tbl-sessions">
+    <thead><tr>
+      <th data-col="date" tgt="s">วันที่</th>
+      <th data-col="store" tgt="s">รหัส</th>
+      <th data-col="store_name" tgt="s">ร้าน</th>
+      <th data-col="session_ref" tgt="s">Session Ref</th>
+      <th data-col="txn_count" class="r" tgt="s">รายการ</th>
+      <th data-col="total_qty" class="r sort-desc" tgt="s">Qty รวม</th>
+      <th data-col="total_value" class="r" tgt="s">มูลค่า (฿)</th>
+    </tr></thead>
+    <tbody id="tbody-sessions"></tbody>
+    <tfoot id="tfoot-sessions"><tr><td colspan="7" class="no-data">โหลด...</td></tr></tfoot>
+  </table>
+  </div>
+</div>
+
+<script>
+const fmt  = n => n == null ? '—' : Number(n).toLocaleString('th-TH', {maximumFractionDigits:0});
+const fmtN = n => {
+  if(n == null) return '—';
+  const s = fmt(Math.abs(n));
+  return n > 0 ? `<span class="pos">+${s}</span>` : n < 0 ? `<span class="neg">−${s}</span>` : s;
+};
+
+let DATA = {};
+let SORT = {stores:{col:'net_qty',dir:-1}, products:{col:'net_qty',dir:-1}, sessions:{col:'total_qty',dir:-1}};
+let FILT_STORES = [], FILT_PRODS = [], FILT_SESS = [];
+
+function switchTab(t){
+  document.querySelectorAll('.tab').forEach((el,i)=>el.classList.toggle('active', ['stores','products','sessions'][i]===t));
+  document.querySelectorAll('.panel').forEach(el=>el.classList.remove('active'));
+  document.getElementById('panel-'+t).classList.add('active');
+}
+
+// ── STORES ───────────────────────────────────────────────────────────────────
+function renderStores(){
+  let rows = [...FILT_STORES];
+  const sc = SORT.stores;
+  rows.sort((a,b)=>{
+    let av=a[sc.col]??'', bv=b[sc.col]??'';
+    return sc.dir*(av<bv?-1:av>bv?1:0);
+  });
+  const tbody = document.getElementById('tbody-stores');
+  const tfoot = document.getElementById('tfoot-stores');
+  if(!rows.length){tbody.innerHTML='';tfoot.innerHTML='<tr><td colspan="11" class="no-data">ไม่พบข้อมูล</td></tr>';return;}
+
+  tbody.innerHTML = rows.slice(0,500).map(r => {
+    const absV = Math.abs(r.net_value);
+    const risk = absV > 1000000 ? '<span class="risk risk-h">HIGH</span>' :
+                 absV > 300000  ? '<span class="risk risk-m">MED</span>'  :
+                                  '<span class="risk risk-l">LOW</span>';
+    return `<tr>
+      <td>${r.store} ${risk}</td>
+      <td>${r.name}</td><td>${r.dm}</td><td>${r.rm}</td>
+      <td class="r">${fmt(r.products)}</td>
+      <td class="r">${fmt(r.qty_up)}</td>
+      <td class="r">${fmt(r.qty_down)}</td>
+      <td class="r">${fmtN(r.net_qty)}</td>
+      <td class="r">${fmtN(r.net_value)}</td>
+      <td class="r"><span class="sess-badge">${r.session_count||0}</span></td>
+      <td>${r.recent_date||'—'}</td>
+    </tr>`;
+  }).join('');
+
+  const tQty = FILT_STORES.reduce((s,r)=>s+r.net_qty,0);
+  const tVal = FILT_STORES.reduce((s,r)=>s+r.net_value,0);
+  tfoot.innerHTML = `<tr>
+    <td colspan="4" style="color:var(--muted);font-size:11px">${FILT_STORES.length} ร้าน${FILT_STORES.length>500?' (แสดง 500 แรก)':''}</td>
+    <td></td><td></td><td></td>
+    <td class="r">${fmtN(tQty)}</td>
+    <td class="r">${fmtN(tVal)}</td>
+    <td></td><td></td>
+  </tr>`;
+}
+
+function applyStoreFilters(){
+  const dm  = document.getElementById('sf-dm').value;
+  const rm  = document.getElementById('sf-rm').value;
+  const dir = document.getElementById('sf-dir').value;
+  const q   = document.getElementById('sf-search').value.trim().toLowerCase();
+  FILT_STORES = (DATA.stores||[]).filter(r => {
+    if(dm && r.dm !== dm) return false;
+    if(rm && r.rm !== rm) return false;
+    if(dir === 'up'   && r.net_qty <= 0) return false;
+    if(dir === 'down' && r.net_qty >= 0) return false;
+    if(q && !r.store.includes(q) && !r.name.toLowerCase().includes(q)) return false;
+    return true;
+  });
+  renderStores();
+}
+function clearStoreFilters(){
+  ['sf-dm','sf-rm','sf-dir'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('sf-search').value='';
+  applyStoreFilters();
+}
+
+// ── PRODUCTS ─────────────────────────────────────────────────────────────────
+function renderProducts(){
+  let rows = [...FILT_PRODS];
+  const sc = SORT.products;
+  rows.sort((a,b)=>sc.dir*(( a[sc.col]??0)<(b[sc.col]??0)?-1:(a[sc.col]??0)>(b[sc.col]??0)?1:0));
+  const tbody = document.getElementById('tbody-products');
+  const tfoot = document.getElementById('tfoot-products');
+  if(!rows.length){tbody.innerHTML='';tfoot.innerHTML='<tr><td colspan="8" class="no-data">ไม่พบ</td></tr>';return;}
+  tbody.innerHTML = rows.slice(0,500).map(r=>`<tr>
+    <td>${r.iprod}</td><td>${r.name||'—'}</td><td>${r.group||'—'}</td>
+    <td class="r">${fmt(r.stores)}</td>
+    <td class="r">${fmt(r.qty_up)}</td>
+    <td class="r">${fmt(r.qty_down)}</td>
+    <td class="r">${fmtN(r.net_qty)}</td>
+    <td class="r">${fmtN(r.net_value)}</td>
+  </tr>`).join('');
+  tfoot.innerHTML=`<tr><td colspan="8" style="color:var(--muted);font-size:11px">${FILT_PRODS.length} รายการ</td></tr>`;
+}
+function applyProdFilters(){
+  const g = document.getElementById('pf-group').value;
+  const q = document.getElementById('pf-search').value.trim().toLowerCase();
+  FILT_PRODS = (DATA.products||[]).filter(r=>{
+    if(g && r.group!==g) return false;
+    if(q && !r.iprod.includes(q) && !(r.name||'').toLowerCase().includes(q)) return false;
+    return true;
+  });
+  renderProducts();
+}
+function clearProdFilters(){
+  document.getElementById('pf-group').value='';
+  document.getElementById('pf-search').value='';
+  applyProdFilters();
+}
+
+// ── SESSIONS ─────────────────────────────────────────────────────────────────
+function renderSessions(){
+  let rows = [...FILT_SESS];
+  const sc = SORT.sessions;
+  rows.sort((a,b)=>sc.dir*((a[sc.col]??'')<(b[sc.col]??'')?-1:(a[sc.col]??'')>(b[sc.col]??'')?1:0));
+  const tbody = document.getElementById('tbody-sessions');
+  const tfoot = document.getElementById('tfoot-sessions');
+  if(!rows.length){tbody.innerHTML='';tfoot.innerHTML='<tr><td colspan="7" class="no-data">ไม่พบ</td></tr>';return;}
+  tbody.innerHTML = rows.slice(0,1000).map(r=>`<tr>
+    <td>${r.date||'—'}</td>
+    <td>${r.store}</td>
+    <td>${r.store_name||'—'}</td>
+    <td style="font-size:11px;color:var(--muted)">${r.session_ref}</td>
+    <td class="r">${fmt(r.txn_count)}</td>
+    <td class="r">${fmt(r.total_qty)}</td>
+    <td class="r">${fmt(r.total_value)}</td>
+  </tr>`).join('');
+  tfoot.innerHTML=`<tr><td colspan="7" style="color:var(--muted);font-size:11px">${FILT_SESS.length} sessions${FILT_SESS.length>1000?' (แสดง 1,000 แรก)':''}</td></tr>`;
+}
+function applySessFilters(){
+  const st = document.getElementById('sessf-store').value.trim();
+  const dt = document.getElementById('sessf-date').value;
+  FILT_SESS = (DATA.sessions||[]).filter(r=>{
+    if(st && !r.store.includes(st)) return false;
+    if(dt && r.date !== dt) return false;
+    return true;
+  });
+  renderSessions();
+}
+function clearSessFilters(){
+  document.getElementById('sessf-store').value='';
+  document.getElementById('sessf-date').value='';
+  applySessFilters();
+}
+
+// ── sort headers ─────────────────────────────────────────────────────────────
+document.querySelectorAll('thead th[data-col]').forEach(th=>{
+  th.addEventListener('click',()=>{
+    const col = th.dataset.col;
+    const tgt = th.dataset.tgt;
+    const key = tgt==='p'?'products':tgt==='s'?'sessions':'stores';
+    if(SORT[key].col===col) SORT[key].dir*=-1;
+    else{SORT[key].col=col;SORT[key].dir=-1;}
+    th.closest('table').querySelectorAll('thead th').forEach(t=>t.classList.remove('sort-asc','sort-desc'));
+    th.classList.add(SORT[key].dir===1?'sort-asc':'sort-desc');
+    if(key==='stores') renderStores();
+    else if(key==='products') renderProducts();
+    else renderSessions();
+  });
+});
+
+// ── filter events ────────────────────────────────────────────────────────────
+['sf-dm','sf-rm','sf-dir'].forEach(id=>document.getElementById(id).addEventListener('change',applyStoreFilters));
+document.getElementById('sf-search').addEventListener('input',applyStoreFilters);
+document.getElementById('pf-group').addEventListener('change',applyProdFilters);
+document.getElementById('pf-search').addEventListener('input',applyProdFilters);
+document.getElementById('sessf-store').addEventListener('input',applySessFilters);
+document.getElementById('sessf-date').addEventListener('change',applySessFilters);
+
+// ── CSV export ───────────────────────────────────────────────────────────────
+function exportCSV(tab){
+  let rows, headers, filename;
+  if(tab==='stores'){
+    headers=['รหัส','ร้าน','DM','RM','สินค้า','qty_up','qty_down','net_qty','net_value','sessions'];
+    rows=FILT_STORES.map(r=>[r.store,r.name,r.dm,r.rm,r.products,r.qty_up,r.qty_down,r.net_qty,r.net_value,r.session_count||0]);
+    filename='visual_adj_stores';
+  } else if(tab==='products'){
+    headers=['Parcode','ชื่อ','กลุ่ม','ร้าน','qty_up','qty_down','net_qty','net_value'];
+    rows=FILT_PRODS.map(r=>[r.iprod,r.name,r.group,r.stores,r.qty_up,r.qty_down,r.net_qty,r.net_value]);
+    filename='visual_adj_products';
+  } else {
+    headers=['วันที่','รหัส','ร้าน','Session Ref','รายการ','total_qty','total_value'];
+    rows=FILT_SESS.map(r=>[r.date,r.store,r.store_name,r.session_ref,r.txn_count,r.total_qty,r.total_value]);
+    filename='visual_adj_sessions';
+  }
+  const csv=[headers,...rows].map(r=>r.map(c=>`"${String(c??'').replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'}));
+  a.download=`${filename}_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+}
+
+// ── load ─────────────────────────────────────────────────────────────────────
+fetch('./visual_adj_data.json').then(r=>r.json()).then(data=>{
+  DATA = data;
+  const m = data._meta||{}, s = data.summary||{};
+
+  document.getElementById('hdr-meta').textContent =
+    `built ${m.built_at?.slice(0,10)||''} · ibl=all-time | itd_acc=recent sessions`;
+
+  // KPI
+  document.getElementById('kpi-stores').innerHTML = `
+    <div class="kpi red"><div class="label">ร้านที่ปรับ</div><div class="value">${(s.total_stores||0).toLocaleString()}</div></div>
+    <div class="kpi orange"><div class="label">Net มูลค่ารวม (฿)</div><div class="value">${Number(s.total_net_value||0).toLocaleString('th-TH',{maximumFractionDigits:0})}</div></div>
+    <div class="kpi blue"><div class="label">Net Qty รวม</div><div class="value">${Number(s.total_net_qty||0).toLocaleString('th-TH',{maximumFractionDigits:0})}</div></div>
+    <div class="kpi purple"><div class="label">Sessions ล่าสุด</div><div class="value">${(s.total_sessions||0).toLocaleString()}</div></div>
+  `;
+
+  // populate selects
+  const dms=[...new Set((data.stores||[]).map(r=>r.dm).filter(Boolean))].sort();
+  const rms=[...new Set((data.stores||[]).map(r=>r.rm).filter(Boolean))].sort();
+  dms.forEach(d=>{const o=document.createElement('option');o.value=o.textContent=d;document.getElementById('sf-dm').appendChild(o);});
+  rms.forEach(r=>{const o=document.createElement('option');o.value=o.textContent=r;document.getElementById('sf-rm').appendChild(o);});
+
+  const grps=[...new Set((data.products||[]).map(r=>r.group).filter(Boolean))].sort();
+  grps.forEach(g=>{const o=document.createElement('option');o.value=o.textContent=g;document.getElementById('pf-group').appendChild(o);});
+
+  // enrich sessions with store name
+  const storeMap = Object.fromEntries((data.stores||[]).map(r=>[r.store, r.name]));
+  (data.sessions||[]).forEach(s=>{ s.store_name = storeMap[s.store]||''; });
+
+  FILT_STORES = [...(DATA.stores||[])];
+  FILT_PRODS  = [...(DATA.products||[])];
+  FILT_SESS   = [...(DATA.sessions||[])];
+
+  renderStores(); renderProducts(); renderSessions();
+  document.getElementById('loading').style.display='none';
+}).catch(e=>{
+  document.getElementById('loading').textContent='❌ โหลดไม่ได้: '+e.message;
+});
+</script>
+</body>
+</html>
