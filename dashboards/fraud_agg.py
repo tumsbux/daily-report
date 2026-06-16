@@ -1,21 +1,17 @@
 """
 dashboards/fraud_agg.py — Fraud analysis aggregation functions (Phase 3d, 2026-06-14)
-
 Extracted from rebuild_fraud_analysis.py:
   - _rec(d)
   - _build_product_agg(sub)
   - _build_reason_agg(sub)
   - build_month(sub)
 """
-
+import gc
 import json
 import pandas as pd
-
-
 # ── AGGREGATION HELPERS ────────────────────────────────────────────────────────
 def _rec(d):
     return json.loads(d.fillna('?').to_json(orient='records', force_ascii=False))
-
 def _build_product_agg(sub, barmap=None, prodmap=None):
     """Aggregate by product. Uses pre-joined parcode/idesc (barmap/prodmap ignored)."""
     agg = sub.groupby('iprod').agg(
@@ -30,7 +26,6 @@ def _build_product_agg(sub, barmap=None, prodmap=None):
     agg = agg[['barcode', 'parcode', 'idesc', 'return_qty', 'bills', 'amount']]
     agg = agg.sort_values('amount', ascending=False)  # no cap — export all products
     records = json.loads(agg.fillna('').to_json(orient='records', force_ascii=False))
-
     for rec in records:
         bc = rec['barcode']
         sub_bc = sub[sub['iprod'] == bc].copy()
@@ -48,7 +43,6 @@ def _build_product_agg(sub, barmap=None, prodmap=None):
             grp['return_date'] = grp['return_date'].dt.strftime('%Y-%m-%d').where(grp['return_date'].notna(), '')
         rec['bills_list'] = json.loads(grp.fillna('').to_json(orient='records', force_ascii=False))
     return records
-
 def _build_reason_agg(sub):
     """Dominant-reason aggregation — no double-counting per bill."""
     if 'rtrdesc' not in sub.columns:
@@ -56,13 +50,11 @@ def _build_reason_agg(sub):
     sub = sub.copy()
     sub['rtrdesc'] = sub['rtrdesc'].fillna('').str.strip()
     sub.loc[sub['rtrdesc'] == '', 'rtrdesc'] = 'ไม่ระบุเหตุผล'
-
     dominant = (sub.sort_values('amount', ascending=False)
                    .groupby('rtsono')['rtrdesc'].first()
                    .reset_index()
                    .rename(columns={'rtrdesc': 'dominant_reason'}))
     sub = sub.merge(dominant, on='rtsono', how='left')
-
     returns_agg = sub.groupby('rtrdesc').agg(
         returns=('rtno', 'count'), amount=('amount', 'sum'),
         stores=('whs', 'nunique'), cashiers=('rtuname', 'nunique'),
@@ -73,7 +65,6 @@ def _build_reason_agg(sub):
     agg['bills'] = agg['bills'].fillna(0).astype(int)
     agg = agg.sort_values('amount', ascending=False)
     records = json.loads(agg.fillna('').to_json(orient='records', force_ascii=False))
-
     dom_map = dominant.set_index('rtsono')['dominant_reason'].to_dict()
     for rec in records:
         reason = rec['rtrdesc']
@@ -92,11 +83,10 @@ def _build_reason_agg(sub):
             grp['return_date'] = grp['return_date'].dt.strftime('%Y-%m-%d').where(grp['return_date'].notna(), '')
         rec['bills_list'] = json.loads(grp.fillna('').to_json(orient='records', force_ascii=False))
     return records
-
 def build_month(sub, barmap=None, prodmap=None):
     """Build all aggregations for one month (or ALL). barmap/prodmap ignored."""
+    gc.collect()   # ← free memory from previous months before heavy work
     sub = sub.copy()
-
     # All return bills (per rtsono). The Return Bill table shows EVERY bill.
     # so_dup (>1 line) is kept separately for the Repeat-SO fraud-signal stats.
     so_all = sub.groupby('rtsono').agg(
@@ -113,8 +103,8 @@ def build_month(sub, barmap=None, prodmap=None):
     if 'date' in so.columns and pd.api.types.is_datetime64_any_dtype(so['date']):
         so = so.copy()
         so['date'] = so['date'].dt.strftime('%d-%m-%Y')
+    gc.collect()   # ← free memory before large to_json serialization
     so_list = json.loads(so.fillna('?').to_json(orient='records', date_format='iso', force_ascii=False))
-
     # Product detail per rtsono — for every bill shown (all of them, no cap)
     _shown = {r.get('rtsono') for r in so_list}
     detail_map = (
@@ -139,7 +129,6 @@ def build_month(sub, barmap=None, prodmap=None):
         detail_dict[sono] = items
     for r in so_list:
         r['detail'] = detail_dict.get(r.get('rtsono'), [])
-
     # rtuname
     rtu = sub.groupby(['rtuname', 'fullname', 'whs', 'store_name', 'dm', 'rm']).agg(
         returns=('rtno', 'count'), amount=('amount', 'sum'),
@@ -150,7 +139,6 @@ def build_month(sub, barmap=None, prodmap=None):
     mx_a = max(rtu['amount'].max(), 1); mx_r = max(rtu['rep'].max(), 1)
     rtu['score'] = ((rtu['amount']/mx_a*40) + (rtu['zp']/100*35) + (rtu['rep']/mx_r*25)).round(1)
     rtu = rtu.sort_values('amount', ascending=False)
-
     # Store
     st = sub.groupby(['whs', 'store_name', 'dm', 'rm']).agg(
         returns=('rtno', 'count'), amount=('amount', 'sum'),
@@ -158,7 +146,6 @@ def build_month(sub, barmap=None, prodmap=None):
     ).reset_index()
     st['zp'] = (st['zero'] / st['returns'] * 100).round(1)
     st = st.sort_values('amount', ascending=False)
-
     # DM
     dm = sub.groupby(['dm', 'rm']).agg(
         returns=('rtsono', 'nunique'), amount=('amount', 'sum'),
@@ -167,7 +154,6 @@ def build_month(sub, barmap=None, prodmap=None):
     ).reset_index()
     dm['zp'] = (dm['zero'] / dm['row_cnt'] * 100).round(1)
     dm = dm.drop(columns=['row_cnt']).sort_values('amount', ascending=False)
-
     # RM
     rm = sub.groupby('rm').agg(
         returns=('rtsono', 'nunique'), amount=('amount', 'sum'),
@@ -177,16 +163,13 @@ def build_month(sub, barmap=None, prodmap=None):
     ).reset_index()
     rm['zp'] = (rm['zero'] / rm['row_cnt'] * 100).round(1)
     rm = rm.drop(columns=['row_cnt']).sort_values('amount', ascending=False)
-
     # Hour / Day
     hr = sub.groupby('hour').agg(returns=('rtno', 'count'), amount=('amount', 'sum')).reset_index()
     hr = hr[hr['hour'].notna()].copy(); hr['hour'] = hr['hour'].astype(int); hr = hr.sort_values('hour')
     dy = sub.groupby('day').agg(returns=('rtno', 'count'), amount=('amount', 'sum')).reset_index()
     dy['day'] = dy['day'].astype(int); dy = dy.sort_values('day')
-
     za = float(sub[sub['is_zero']]['amount'].sum())
     na = float(hr[hr['hour'].isin([22, 23])]['amount'].sum()) if len(hr) else 0.0
-
     return {
         'stats': {
             'n':          int(sub['rtsono'].nunique()),
