@@ -4,6 +4,84 @@
 
 ---
 
+### ⚠️ GitHub Contents API ปฏิเสธไฟล์ใหญ่ > ~50MB (พบ 2026-06-14)
+
+**Symptom:** `push_to_github.py` อัปโหลดไฟล์ผ่าน GitHub Contents API → error 422 `"Sorry, the file is too large to be processed."`
+
+**Root cause:** GitHub Contents API รองรับไฟล์ได้ถึง 100MB แต่ base64 payload JSON ใหญ่กว่านั้น — `data.json` 46MB → base64 ~61MB + JSON wrapper เกิน limit จริง
+
+**Fix:** ใช้ `push_data_json.ps1` — git clone → copy file → git commit → git push (ไม่มี limit)
+
+**Rule:** ไฟล์ใหญ่ (>30MB) ห้ามใช้ Contents API — ใช้ git clone เสมอ
+
+**Tags:** `#github` `#push` `#large-file`
+
+---
+
+### ⚠️ MySQL `only_full_group_by`: ORDER BY ต้องใช้ aggregate function (พบ 2026-06-14)
+
+**Symptom:** `ProgrammingError: 1055 (42000): Expression #1 of ORDER BY clause is not in GROUP BY clause...`
+
+**Root cause:** `ORDER BY sodate` ใช้ raw column `f.sodate` แต่ GROUP BY ใช้ `DATE(f.sodate)` — MySQL strict mode ไม่ยอม
+
+**Fix:** เปลี่ยน `ORDER BY sodate, ...` → `ORDER BY DATE(f.sodate), ...` ให้ตรงกับ expression ใน GROUP BY
+
+**Rule:** ทุก column ใน ORDER BY ต้องอยู่ใน GROUP BY หรือเป็น aggregate function
+
+**Tags:** `#mysql` `#sql` `#group-by`
+
+---
+
+### ⚠️ PowerShell `$ErrorActionPreference='Stop'` + git stderr = script ตาย (พบ 2026-06-14)
+
+**Symptom:** `push_data_json.ps1` ตายหลัง `git clone` บรรทัดแรก — git output error `"NativeCommandError"` ทั้งที่ clone สำเร็จ
+
+**Root cause:** git เขียน progress/info ไป stderr เสมอ (รวม "Cloning into..." ปกติ) — PowerShell `$ErrorActionPreference='Stop'` นับ stderr จาก native commands เป็น error → throw exception
+
+**Fix:** redirect stderr ด้วย `2>&1 | Out-Null` ใน git commands ทุกบรรทัด — และลบ `$ErrorActionPreference='Stop'` ออก ใช้ `Test-Path` verify clone สำเร็จแทน
+
+**Tags:** `#powershell` `#git` `#stderr`
+
+---
+
+### ⚠️ Cowork working copy ของ HTML อาจ truncated กลางไฟล์ (พบ 2026-06-14)
+
+**Symptom:** `index.html` ใน `F:\lost-Product\thongfah_dashboard\` ขนาด 15KB แทนที่ควรเป็น 19KB — จบกลางฟังก์ชัน `getViewData` ตัด `</script></body></html>` ออกหมด
+
+**Root cause:** ไม่ชัดเจน — น่าจะเกิดจาก write ถูก interrupt หรือ Cowork sync ผิดพลาด
+
+**Fix:** fetch จาก GitHub raw content แทน (`https://raw.githubusercontent.com/...`) แล้ว overwrite ไฟล์ local
+
+**Detect:** เช็ค `wc -c <file>` หรือ `python3 -c "...h[-50:]"` ว่าลงท้าย `</html>` — ถ้าไม่ = truncated
+
+**Tags:** `#cowork` `#truncation` `#sync`
+
+---
+
+### ⚠️ CSS `tbody td.r` ไม่ cover `tfoot` — grand total ชิดซ้าย (พบ 2026-06-14)
+
+**Symptom:** ตัวเลขใน grand total row (tfoot) ชิดซ้าย ไม่ตรงกับ column ด้านบน ทั้งที่ใส่ `class="r"` แล้ว
+
+**Root cause:** CSS rule `tbody td.r{text-align:right}` ใช้ selector เฉพาะ `<tbody>` — `<tfoot>` ไม่ match
+
+**Fix:** เปลี่ยนเป็น `tbody td.r,tfoot td.r{text-align:right}` หรือใส่ inline `style="text-align:right"` ในทุก tfoot cell
+
+**Tags:** `#css` `#tfoot` `#alignment`
+
+---
+
+### ⚠️ `push_py_to_github.py` ทับ `.github/workflows/daily-update.yml` ด้วย local version เก่า (พบ 2026-06-13)
+
+**Symptom:** หลัง `push_py_to_github.py` รัน (29 ไฟล์) GHA cache steps หายหมด — workflow ไม่มี "Restore cache" + "Push cache to orphan branch"
+
+**Root cause:** `push_py_to_github.py` มี hardcoded list รวม `.github/workflows/daily-update.yml` — ถ้า local file เก่ากว่า GitHub (เช่น Antigravity แก้ GitHub แต่ local ยังเก่า) จะ **push local ทับ GitHub โดยไม่เตือน**
+
+**Fix:** rebuild YAML ที่ถูกต้อง + push ผ่าน GitHub web editor (`e795c00`) เพราะ PAT ขาด `workflow` scope
+
+**กฎ:** ห้ามใช้ `push_py_to_github.py` เด็ดขาด — ใช้ `push_files_api.py <file>` แทนเสมอ (เลือกไฟล์ได้ชัดเจน) — ถ้าต้อง push `.github/workflows/` ต้องใช้ GitHub web editor หรือ PAT ที่มี `workflow` scope
+
+---
+
 ### ⚠️ Claude Desktop (Microsoft Store) ไม่อ่าน `%APPDATA%\Claude\claude_desktop_config.json` (พบ 2026-06-12)
 
 **Symptom:** เพิ่ม MCP server ("mysql") ใน `%APPDATA%\Claude\claude_desktop_config.json` → JSON valid, server รัน standalone ได้, restart app จริง (verify ด้วย `Get-Process` StartTime) — แต่ MCP ไม่โผล่ใน Settings → Connectors
@@ -580,4 +658,32 @@ Pipeline order: fraud (step 1) อ่าน `cache/sales_daily_{YYYY-MM}.json` �
 
 ---
 
-_Last updated: 2026-06-12_
+### ⚠️ `rttime` แสดง "0 day" ใน Return Bill tab ของ Fraud Dashboard (พบ 2026-06-14)
+
+**Symptom:** เวลาคอลัมน์ใน Return Bill tab แสดง "0 day" ทุก record แทนที่จะเป็น "HH:MM"
+
+**Root cause:** `pd.Timedelta.days` = **0 เสมอ** สำหรับค่า TIME ภายใน 1 วัน — code เก่า (pre-Phase 3d) ที่ GHA รัน build `fraud_data.json` ใช้ attribute `.days` แทน `.components.hours`:
+```python
+# BUG (pre-Phase 3d): str(timedelta.days) + ' day'  →  '0 day' ทุก record
+pd.Timedelta('18:00:20').days = 0  →  "0 day"
+
+# FIX (Phase 3d _parse_time_row):
+pd.Timedelta('18:00:20').components.hours = 18  →  "18:00"
+```
+
+**Fix (Phase 3d — ใช้งานแล้วใน local):** `_parse_time_row()` ใน `rebuild_fraud_analysis.py` แก้แล้ว — ต้อง push scripts + rebuild:
+```powershell
+cd "F:\co work dashboard"
+py push_files_api.py rebuild_fraud_analysis.py dashboards/fraud_queries.py dashboards/fraud_agg.py -m "fix(fraud): Phase 3d rttime parse HH:MM"
+py rebuild_fraud_analysis.py --no-push
+# verify: data['data']['ALL']['so'][0]['time'] ต้องได้ HH:MM format
+py push_files_api.py fraud_data.json -m "fix(fraud): correct time HH:MM"
+```
+
+**Avoid:** ห้ามใช้ `.days` attribute กับ time-of-day timedelta — ใช้ `.components.hours` หรือ parse string `'0 days HH:MM:SS'` แทน
+
+**Tags:** `#fraud` `#rttime` `#timedelta` `#phase-3d`
+
+---
+
+_Last updated: 2026-06-14_

@@ -3,6 +3,89 @@
 > งานที่ทำเสร็จ — เรียงจากใหม่ → เก่า
 > Format: [Keep a Changelog](https://keepachangelog.com/)
 
+## [2026-06-15] Phase C+D: fixes + GHA weekly-rebuild (Claude)
+
+### Fixed
+- **Dead Stock**: กรองกลุ่มสินค้าที่ไม่ใช่ retail ออก — `EXCLUDED_ITY = {'03','12','15','20','26'}` + `EXCLUDED_IGRCODE = {'10006'}` (Supply Use, สินทรัพย์, ค่าใช้จ่าย, อุปกรณ์ไฟฟ้า, สินค้าสมนาคุณ, อุปกรณ์ตกปลา) → ลด 6,917 → 6,474 products
+- **Dead Stock**: กรอง null parcode + สินค้าที่ไม่อยู่ใน `dim_product` (name = '—') ออกทั้งหมด
+- **Dead Stock**: dropdown กลุ่มสินค้าแสดง `igrdesc` (ชื่อเต็ม) แทนรหัส — เพิ่ม `query_group_names()` จาก `MYPOS2018_CENTER.item_group` + field `group_name` ใน JSON
+- **Visual Adj**: ลบ LIMIT 500 ออกจาก `query_ibl_products()` → แสดง all SKUs (49,094)
+- **Visual Adj**: แก้ `→` UnicodeEncodeError (cp874) + `datetime.utcnow()` deprecation → `datetime.now(timezone.utc)`
+- **Push target**: สร้าง `push_lost_product_files.py` ใหม่ — target `tumsbux/lost-Product` via Contents API (แก้ bug เดิมที่ push ไป `daily-report` เพราะ db_config.json `github_repo` ชี้ผิด)
+- **Sales/Fraud/Thongfah day 12→14**: GHA ไม่รัน 2 วัน — manual push `index.html`, `sales_dashboard_v8.html`, `fraud_dashboard.html` → commit `0a47f95a`; Thongfah → commit manual ผ่าน `push_data_json.ps1`
+- **`gc.collect()`**: เพิ่มระหว่าง step ใน `build_dead_stock.py` ป้องกัน `MemoryError` บน Windows
+
+### Added
+- **`push_lost_product_files.py`**: push ไฟล์ไป `tumsbux/lost-Product` ผ่าน Contents API พร้อม `--repo-path` flag สำหรับ push ไป subdirectory (เช่น `.github/workflows/`)
+- **`.github/workflows/weekly-rebuild.yml`** (ใน lost-Product): GHA รันทุกวันอาทิตย์ 09:00 BKK — `build_dead_stock.py --no-push` → `build_visual_adj.py --no-push` → `git commit + push` — manual trigger ผ่าน `workflow_dispatch` — ✅ test run สำเร็จ 7m 36s
+
+### Deployed
+- lost-Product commits: `038d284d` (dead_stock_data.json, 6.4MB) + `316367a5` (dead_stock_dashboard.html + build_dead_stock.py) + `22c92f7b` (push_lost_product_files.py) + `26575150` (weekly-rebuild.yml)
+- Secrets เพิ่มใน lost-Product repo: DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_DATABASE, GH_PAT
+
+---
+
+## [2026-06-15] Phase D: Visual Adjustment Audit — deployed (Claude)
+
+### Added
+- **`build_visual_adj.py`** — 4 steps: dim_branch → ibl store summary → ibl all SKUs → itd_acc UNION sessions
+  - `ibl` (locno='visual', shelfno='adjustment'): cumulative all-time per store (204) + product (49,094 SKUs)
+  - `itd_acc UNION itd_acc_20260610`: 41,205 sessions (full history)
+  - valid_store filter 1-500 ทั้งสอง sources
+  - Result: net_qty=-10,455,868 / net_value=฿-332,447,546
+  - Output: `visual_adj_data.json` (13.6 MB) — sections: stores, products, sessions
+- **`visual_adj_dashboard.html`** — 3 tabs:
+  - ตามร้าน: risk badge HIGH/MED/LOW by |net_value|, filter DM/RM/ทิศทาง, color-coded net
+  - ตามสินค้า: all 49,094 SKUs by |net_qty|, filter group/search
+  - Sessions: 41,205 sessions, filter by store/date
+- ⚠️ ไม่มี cashier column ใน MYWMS — fraud signal = store-level + session (itd_refno)
+- Commits: `e95cf2a7` (data) + `a75e68f5` (dashboards + scripts)
+
+---
+
+## [2026-06-14] Phase C: Dead Stock report (Claude)
+
+### Added
+- **`build_dead_stock.py`** — chain-level dead stock builder
+  - Step 1: `data-lake.fact_sales` → last_sale per iprod (stream cursor)
+  - Step 2: `MYWMS2023_CENTER.ibl` → onhand qty + value per (iprod, whsno), valid_store 1-500
+  - Step 3: join in Python → filter onhand > 0 + last_sale < cutoff (default 90 วัน)
+  - Result: 6,917 dead-stock products / ฿12,163,121 total value
+  - Output: `dead_stock_data.json` — schema 1, built_by, as_of, threshold_days
+  - CLI: `py build_dead_stock.py [--no-push] [--days N]`
+- **`dead_stock_dashboard.html`** — filters วันค้าง/กลุ่ม/ค้นหา, expand → store breakdown, export CSV
+- Commits: `a75e68f5` (dashboards + scripts) — data pushed previous session
+
+---
+
+## [2026-06-14] bugfix(fraud): rttime ทุก record stack ที่ 07:00 — deeper root cause fix (Antigravity)
+
+### Fixed
+- **Fraud Dashboard → เวลา tab → กราฟ**: return bills ทั้งหมดกระจุกอยู่ที่ 07:00 ทุก record
+  - Root cause จริง: `rttime.astype(str).str[:2]` บน string format `"0 days 18:00:20"` → ได้ `"0 "` → hour=0 → frontend +7 ICT = 07:00 ทุกตัว
+  - Fix: `_parse_time_row()` ใน `rebuild_fraud_analysis.py` แก้ให้ parse จาก timedelta/string format ได้ถูก (extract `18` จาก `"0 days 18:00:20"`)
+- **GHA ModuleNotFoundError**: `dashboards/fraud_queries.py` + `dashboards/fraud_agg.py` ไม่ได้อยู่ใน `push_py_to_github.py` file list → GHA fail ทุก run ตั้งแต่ Phase 3d
+  - Fix: เพิ่ม `dashboards/` files เข้า push list
+- **GHA git push auth**: `dashboards/git_push.py` ไม่ใช้ authenticated URL → credential helper ล้มเหลวใน GHA runner
+  - Fix: ใช้ `github_url` (with token) แทน bare URL
+- GHA Run `27503699346` — succeeded ✅
+- VM synced + verified: hours กระจาย `14:00–23:00` แทน stack ที่ `07:00`
+- Cleaned up `upload_script_vm.py` (temp script)
+
+---
+
+## [2026-06-14] bugfix(fraud): rttime "0 day" → HH:MM — Phase 3d rebuild (Claude)
+
+### Fixed
+- **Fraud Dashboard → Return Bill tab → เวลาคอลัมน์**: แสดง "0 day" ทุก record (8,816 bills)
+  - Root cause: Pre-Phase-3d code ใช้ `pd.Timedelta.days` = 0 เสมอสำหรับ intraday time → `str(0) + ' day'`
+  - Fix: Phase 3d `_parse_time_row()` ใน `rebuild_fraud_analysis.py` ใช้ `.components.hours` + `.components.minutes` → HH:MM
+  - `fraud_data.json` rebuilt + pushed (commit `3302c2f2`) — verified `"time": "22:24"` ✅
+  - Phase 3d scripts pushed (commit `da46c8d7`): `rebuild_fraud_analysis.py`, `dashboards/fraud_queries.py`, `dashboards/fraud_agg.py`
+  - `fraud_dashboard.html` regenerated + pushed ผ่าน `run_manual_update.ps1` (709s)
+
+---
+
 ## [2026-06-14] กิจกรรมธงฟ้า Dashboard — grand total + date filter + GitHub Actions (Claude)
 
 ### Fixed
@@ -263,28 +346,4 @@
 ### Changed
 - `MIN_QTY` raised from 5 → 15
 - Added `MIN_AMT = 3000` baht threshold with OR logic
-- Pruning: drop `(whs, iprod)` if `total_qty < 15 AND total_amt < 3000`
-- `query_year()` returns `(tot_qty_by_iprod, {(whs, iprod): (qty, amt)})`
-
-### Documented
-- `lost_score` formula (years_gone × max_qty)
-- `solineamt` meaning
-- Self-hosted MySQL evaluated + rejected
-
-**Impact:** 97 MB → ~45-55 MB. ~2 years headroom.
-
----
-
-## [2026-06-06] Lost Product — Standalone dashboard repo
-
-**Commits (daily-report):** `795f973` `de88899` `4681d4b` `7bc050f` `0b1d9d3` `b68febb` `93010a3` `c7c684f` `a4b3b94` `66e82c6` `f934c3d`
-**Commits (lost-Product):** `15b6836` `7e10cff` `c06a3d1`
-
-### Changed
-- Repo rename: `lost-Product-` → `lost-Product`
-- `tumsbux/lost-Product` is now standalone (HTML + JSON + README)
-- Fetch URL: relative `./lost_product_data.json` (no CORS)
-
-### Added
-- `index.html` in lost-Product repo (the dashboard)
-- AI Analysis bar (4 pill buttons): สาเห
+- Pruning: drop `(whs, iprod)` if `total_qty < 15 AND tot
