@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<script>window.DASHBOARD_NAME="lost_product";</script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E3ZFFKXFT8"></script>
+<script>
+  window.dataLayer=window.dataLayer||[];
+  function gtag(){dataLayer.push(arguments);}
+  gtag("js",new Date());
+  gtag("config","G-E3ZFFKXFT8");
+</script>
+<script src="analytics.js"></script>
+<title>Lost Product Analysis — Tuenjai</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Noto Sans Thai',Sarabun,sans-serif;background:#f1f5f9;color:#1e293b;font-size:13px}
+nav{background:#1e293b;padding:10px 18px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:200}
+nav h1{font-size:14px;font-weight:700;color:#fff}
+.chip{font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;background:rgba(255,255,255,.12);color:#e2e8f0}
+.nav-r{margin-left:auto;display:flex;align-items:center;gap:8px}
+.hub-btn{background:#6366f1;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;text-decoration:none}
+.nav-date{font-size:11px;color:#94a3b8}
+.filter-bar{background:#fff;border-bottom:1px solid #e2e8f0;padding:8px 18px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;position:sticky;top:41px;z-index:150}
+.filter-bar label{font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.4px}
+.filter-bar select{border:1px solid #cbd5e1;border-radius:6px;padding:4px 8px;font-size:12px;color:#1e293b;background:#f8fafc;min-width:130px;cursor:pointer}
+.filter-bar select:focus{outline:none;border-color:#6366f1}
+.filter-sep{width:1px;height:22px;background:#e2e8f0}
+.reset-btn{background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px;padding:4px 11px;font-size:12px;font-weight:600;color:#475569;cursor:pointer}
+.reset-btn:hover{background:#e2e8f0}
+.xlsx-btn{background:#16a34a;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer}
+.xlsx-btn:hover{background:#15803d}
+.search-box{border:1px solid #cbd5e1;border-radius:6px;padding:4px 10px;font-size:12px;min-width:200px}
+.search-box:focus{outline:none;border-color:#6366f1}
+.page{max-width:1500px;margin:0 auto;padding:14px 18px;display:flex;flex-direction:column;gap:12px}
+.sum-row{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+.sc{background:#fff;border-radius:10px;padding:14px 16px;border-top:3px solid;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.sc-lbl{font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px}
+.sc-val{font-size:22px;font-weight:800;color:#1e293b;line-height:1}
+.sc-sub{font-size:11px;color:#64748b;margin-top:4px}
+.card{background:#fff;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.06);overflow:hidden}
+.card-head{padding:10px 16px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #f1f5f9}
+.card-head h2{font-size:12px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.5px;flex:1}
+.cnt{font-size:11px;font-weight:700;padding:2px 8px;border-radius:12px;background:#ede9fe;color:#5b21b6}
+.tbl-wrap{overflow-x:auto;max-height:640px;overflow-y:auto}
+table{width:100%;border-collapse:collapse;font-size:12px;min-width:1100px}
+thead{position:sticky;top:0;z-index:10}
+thead tr{background:#f8fafc}
+th{padding:7px 10px;text-align:left;font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.3px;border-bottom:2px solid #e2e8f0;white-space:nowrap;cursor:pointer;user-select:none}
+th:hover{color:#6366f1}
+th.r{text-align:right}
+th.c{text-align:center}
+td{padding:6px 10px;border-bottom:1px solid #f1f5f9;color:#374151;white-space:nowrap}
+td.r{text-align:right}
+td.c{text-align:center}
+td.b{font-weight:600;color:#1e293b}
+tbody tr:hover{background:#f8f9ff}
+.prod-name{max-width:280px;overflow:hidden;text-overflow:ellipsis;font-weight:600;color:#1e293b}
+.parcode{font-family:monospace;font-size:11px;color:#475569}
+.badge-grp{display:inline-block;background:#f0fdf4;color:#166534;border-radius:4px;padding:1px 5px;font-size:10px;font-weight:600}
+.yr-zero{color:#cbd5e1;font-weight:400}
+.yr-val{color:#1e293b;font-weight:600}
+.yr-recent-zero{color:#dc2626;font-weight:700;background:#fef2f2}
+.st-act{background:#dcfce7;color:#15803d;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700}
+.st-stl{background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700}
+.st-lst{background:#fee2e2;color:#b91c1c;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700}
+.pag-row{padding:8px 16px;display:flex;align-items:center;gap:6px;border-top:1px solid #f1f5f9;background:#fafafa;flex-wrap:wrap}
+.pag-row button{border:1px solid #cbd5e1;border-radius:5px;padding:3px 9px;font-size:12px;cursor:pointer;background:#fff;color:#374151}
+.pag-row button:hover:not(:disabled){background:#f1f5f9}
+.pag-row button:disabled{opacity:.4;cursor:default}
+.pag-row button.active{background:#6366f1;border-color:#6366f1;color:#fff}
+.pag-info{margin-left:auto;font-size:11px;color:#64748b}
+.sa{font-size:9px;margin-left:2px;opacity:.3}
+.sa::after{content:'⇅'}
+.sa.asc::after{content:'▲'}.sa.desc::after{content:'▼'}
+.sa.asc,.sa.desc{opacity:1;color:#6366f1}
+.filter-info{font-size:11px;color:#6366f1;font-weight:600}
+.recom-box{background:#fffbeb;border-left:3px solid #f59e0b;padding:10px 14px;border-radius:6px;font-size:12px;color:#78350f}
+.recom-box b{color:#92400e}
+@media(max-width:900px){
+  .sum-row{grid-template-columns:repeat(3,1fr)}
+  table{font-size:11px;min-width:900px}
+}
+@media(max-width:600px){
+  .sum-row{grid-template-columns:repeat(2,1fr)}
+  .sum-row .sc:last-child{grid-column:span 2}
+  .filter-bar select{min-width:0;flex:1}
+}
+</style>
+</head>
+<body>
+<nav>
+  <h1>📉 Lost Product Analysis</h1>
+  <span class="chip" id="nav-yrs"></span>
+  <span class="chip" id="nav-sku"></span>
+  <div class="nav-r">
+    <span class="nav-date" id="nav-date"></span>
+    <a class="hub-btn" href="index.html">← Hub</a>
+  </div>
+</nav>
+
+<div class="filter-bar">
+  <label>RM</label>
+  <select id="f-rm" onchange="onScopeChange('rm')"><option value="">ทั้งหมด</option></select>
+  <div class="filter-sep"></div>
+  <label>DM</label>
+  <select id="f-dm" onchange="onScopeChange('dm')"><option value="">ทั้งหมด</option></select>
+  <div class="filter-sep"></div>
+  <label>ร้าน</label>
+  <select id="f-store" onchange="onScopeChange('store')"><option value="">ทั้งหมด</option></select>
+  <div class="filter-sep"></div>
+  <label>สถานะ</label>
+  <select id="f-status" onchange="applyAll()">
+    <option value="">ทั้งหมด</option>
+    <option value="ACTIVE">🟢 Active (มียอด 2026)</option>
+    <option value="STALE">🟡 Stale (มียอด 2025 ไม่มี 2026)</option>
+    <option value="LOST" selected>🔴 Lost (ไม่มียอด 2025 และ 2026)</option>
+  </select>
+  <div class="filter-sep"></div>
+  <label>กลุ่ม</label>
+  <select id="f-grp" onchange="applyAll()"><option value="">ทั้งหมด</option></select>
+  <div class="filter-sep"></div>
+  <label>ประเภท</label>
+  <select id="f-type" onchange="applyAll()"><option value="">ทั้งหมด</option></select>
+  <div class="filter-sep"></div>
+  <label>หายไป</label>
+  <select id="f-gone" onchange="applyAll()">
+    <option value="">ทุกระยะ</option>
+    <option value="1">≥1 ปี</option>
+    <option value="2">≥2 ปี</option>
+    <option value="3">≥3 ปี</option>
+    <option value="5">≥5 ปี</option>
+  </select>
+  <button class="reset-btn" onclick="resetFilter()">✕ ล้าง</button>
+  <input class="search-box" id="f-search" placeholder="🔍 ค้นหา parcode / ชื่อ / กลุ่ม / แบรนด์" oninput="applyAll()">
+  <button class="xlsx-btn" onclick="exportXLSX()">📥 Export XLSX</button>
+  <span class="filter-info" id="filter-info"></span>
+</div>
+
+<div class="page">
+
+<div class="sum-row" id="kpi-row"></div>
+
+<div id="recom" style="display:none"><div class="recom-box" id="recom-text"></div></div>
+
+<div class="card">
+  <div class="card-head">
+    <h2>📦 รายการสินค้า (ตาม lost_score มากสุด)</h2>
+    <span class="cnt" id="prod-cnt">—</span>
+  </div>
+  <div class="tbl-wrap" id="prod-tbl-wrap">
+    <table id="prod-tbl">
+      <thead><tr>
+        <th onclick="sortBy(0,this)">#<span class="sa asc"></span></th>
+        <th onclick="sortBy(1,this)">parcode<span class="sa"></span></th>
+        <th onclick="sortBy(2,this)">รายการ<span class="sa"></span></th>
+        <th onclick="sortBy(3,this)">กลุ่ม<span class="sa"></span></th>
+        <th class="r" onclick="sortBy(4,this)">2021<span class="sa"></span></th>
+        <th class="r" onclick="sortBy(5,this)">2022<span class="sa"></span></th>
+        <th class="r" onclick="sortBy(6,this)">2023<span class="sa"></span></th>
+        <th class="r" onclick="sortBy(7,this)">2024<span class="sa"></span></th>
+        <th class="r" onclick="sortBy(8,this)">2025<span class="sa"></span></th>
+        <th class="r" onclick="sortBy(9,this)">2026<span class="sa"></span></th>
+        <th class="c" onclick="sortBy(10,this)">ขายปีล่าสุด<span class="sa"></span></th>
+        <th class="c" onclick="sortBy(11,this)">หายไป (ปี)<span class="sa"></span></th>
+        <th class="r" onclick="sortBy(12,this)">peak qty<span class="sa"></span></th>
+        <th class="c" onclick="sortBy(13,this)">สถานะ<span class="sa"></span></th>
+        <th class="r" onclick="sortBy(14,this)">lost_score<span class="sa desc"></span></th>
+      </tr></thead>
+      <tbody id="prod-tbody"></tbody>
+    </table>
+  </div>
+  <div class="pag-row">
+    <div id="pag-btns"></div>
+    <span class="pag-info" id="pag-info"></span>
+  </div>
+</div>
+
+</div>
+
+<script>
+let D=null, filtered=[], page=0, sortCol=14, sortDir=-1;
+const PAGE_SIZE=50;
+const YEARS=[2021,2022,2023,2024,2025,2026];
+const fmt=n=>(n==null||isNaN(n))?'—':Math.round(n).toLocaleString();
+
+async function init(){
+  try{
+    const r=await fetch('https://tumsbux.github.io/lost-Product-/lost_product_data.json?v='+Date.now());
+    D=await r.json();
+  }catch(e){
+    document.body.innerHTML='<div style="padding:30px;color:#dc2626">ERROR loading lost_product_data.json: '+e.message+'</div>';
+    return;
+  }
+
+  // Hydrate compact schema v2: convert product arrays → objects
+  if(D.products_header && D.products.length && Array.isArray(D.products[0])){
+    const hdr=D.products_header;
+    const sc=(D._meta&&D._meta.status_codes)||['ACTIVE','STALE','LOST'];
+    D.products=D.products.map(arr=>{
+      const o={};
+      hdr.forEach((k,i)=>o[k]=arr[i]);
+      if(typeof o.status==='number') o.status=sc[o.status];
+      return o;
+    });
+  }
+
+  // Nav
+  document.getElementById('nav-yrs').textContent=YEARS[0]+'–'+YEARS[YEARS.length-1];
+  document.getElementById('nav-sku').textContent=fmt(D.summary.total_products)+' SKU';
+  document.getElementById('nav-date').textContent='อัปเดต: '+(D.generated||'—');
+
+  // Populate group + type filters
+  const grps=new Set(), types=new Set();
+  D.products.forEach(p=>{if(p.group)grps.add(p.group);if(p.type)types.add(p.type);});
+  const grpSel=document.getElementById('f-grp');
+  [...grps].sort((a,b)=>a.localeCompare(b,'th')).forEach(g=>{
+    const o=document.createElement('option');o.value=g;o.textContent=g;grpSel.appendChild(o);
+  });
+  const typeSel=document.getElementById('f-type');
+  [...types].sort((a,b)=>a.localeCompare(b,'th')).forEach(t=>{
+    const o=document.createElement('option');o.value=t;o.textContent=t;typeSel.appendChild(o);
+  });
+
+  // RM / DM / Store from store_info
+  const si=D.store_info||{};
+  const rms=new Set(), dms=new Set();
+  Object.values(si).forEach(v=>{if(v.rm)rms.add(v.rm);if(v.dm)dms.add(v.dm);});
+  const rmSel=document.getElementById('f-rm');
+  [...rms].sort().forEach(r=>{const o=document.createElement('option');o.value=r;o.textContent=r;rmSel.appendChild(o);});
+  const dmSel=document.getElementById('f-dm');
+  [...dms].sort().forEach(d=>{const o=document.createElement('option');o.value=d;o.textContent=d;dmSel.appendChild(o);});
+  rebuildStoreOptions();
+
+  renderKPI();
+  applyAll();
+}
+
+function rebuildStoreOptions(){
+  const si=D.store_info||{};
+  const fRM=document.getElementById('f-rm').value;
+  const fDM=document.getElementById('f-dm').value;
+  const stSel=document.getElementById('f-store');
+  const cur=stSel.value;
+  stSel.innerHTML='<option value="">ทั้งหมด</option>';
+  Object.entries(si).filter(([,v])=>{
+    if(fRM && v.rm!==fRM) return false;
+    if(fDM && v.dm!==fDM) return false;
+    return true;
+  }).sort(([a],[b])=>a.localeCompare(b)).forEach(([k,v])=>{
+    const o=document.createElement('option');o.value=k;o.textContent=k+' '+(v.name||'');
+    stSel.appendChild(o);
+  });
+  if(cur) stSel.value=cur;
+}
+
+function onScopeChange(which){
+  if(which==='rm' || which==='dm'){
+    if(which==='rm') document.getElementById('f-dm').value='';
+    document.getElementById('f-store').value='';
+    rebuildStoreOptions();
+  }
+  applyAll();
+}
+
+function renderKPI(prods, scopeLabel){
+  let total, active, stale, lost, qtyPeak, scopeNote;
+  if(prods){
+    total = prods.length;
+    active = prods.filter(p=>p.status==='ACTIVE').length;
+    stale  = prods.filter(p=>p.status==='STALE').length;
+    lost   = prods.filter(p=>p.status==='LOST').length;
+    qtyPeak= prods.filter(p=>p.status==='LOST').reduce((s,p)=>s+(p.max_qty||0),0);
+    scopeNote = scopeLabel ? ' · '+scopeLabel : '';
+  } else {
+    const s=D.summary;
+    total=s.total_products; active=s.active; stale=s.stale; lost=s.lost; qtyPeak=s.qty_lost_peak;
+    scopeNote='';
+  }
+  const cards=[
+    {l:'📦 รวมสินค้าทั้งหมด',v:fmt(total),sub:'ที่มียอดในประวัติ'+scopeNote,c:'#6366f1'},
+    {l:'🟢 Active',v:fmt(active),sub:'มียอดขายปี 2026',c:'#16a34a'},
+    {l:'🟡 Stale',v:fmt(stale),sub:'2025 ขายอยู่ · 2026 หาย',c:'#f59e0b'},
+    {l:'🔴 Lost',v:fmt(lost),sub:'ไม่มียอด 2025+2026',c:'#dc2626'},
+    {l:'⚠️ Qty Peak ที่หาย',v:fmt(qtyPeak),sub:'sum max_qty ของ LOST',c:'#7c3aed'},
+  ];
+  document.getElementById('kpi-row').innerHTML=cards.map(k=>
+    `<div class="sc" style="border-color:${k.c}"><div class="sc-lbl">${k.l}</div><div class="sc-val">${k.v}</div><div class="sc-sub">${k.sub}</div></div>`
+  ).join('');
+}
+
+function applyAll(){
+  const fStatus=document.getElementById('f-status').value;
+  const fGrp=document.getElementById('f-grp').value;
+  const fType=document.getElementById('f-type').value;
+  const fGone=+document.getElementById('f-gone').value||0;
+  const fSearch=(document.getElementById('f-search').value||'').toLowerCase().trim();
+  const fRM=document.getElementById('f-rm').value;
+  const fDM=document.getElementById('f-dm').value;
+  const fStore=document.getElementById('f-store').value;
+
+  const si=D.store_info||{};
+  let scopeStores=null;
+  if(fStore){
+    scopeStores=new Set([fStore]);
+  } else if(fDM){
+    scopeStores=new Set(Object.entries(si).filter(([,v])=>v.dm===fDM).map(([k])=>k));
+  } else if(fRM){
+    scopeStores=new Set(Object.entries(si).filter(([,v])=>v.rm===fRM).map(([k])=>k));
+  }
+
+  let wProds;
+  if(!scopeStores){
+    wProds=D.products;
+  } else {
+    const sb=D.store_breakdown||{};
+    const agg={};
+    for(const whs of scopeStores){
+      const ps=sb[whs]||{};
+      for(const [ip,arr] of Object.entries(ps)){
+        if(!agg[ip]) agg[ip]=[0,0,0,0,0,0];
+        for(let i=0;i<6;i++) agg[ip][i]+=arr[i]||0;
+      }
+    }
+    const pmap={};
+    for(const p of D.products) pmap[p.iprod||p.parcode]=p;
+    const cy=D.current_year||2026;
+    const YS=[2021,2022,2023,2024,2025,2026];
+    wProds=Object.entries(agg).map(([ip,arr])=>{
+      const base=pmap[ip]||{parcode:ip,iprod:ip,name:'',brand:'',group:'ไม่ระบุ',type:'',ipunit3:0};
+      const qty={2021:arr[0],2022:arr[1],2023:arr[2],2024:arr[3],2025:arr[4],2026:arr[5]};
+      const active=YS.filter(y=>qty[y]>0);
+      if(!active.length) return null;
+      const last_year=Math.max(...active);
+      const first_year=Math.min(...active);
+      const years_gone=cy-last_year;
+      const max_qty=Math.max(...arr);
+      const total=arr.reduce((a,b)=>a+b,0);
+      let status, lost_score;
+      if(qty[cy]>0){ status='ACTIVE'; lost_score=0; }
+      else if(qty[cy-1]>0){ status='STALE'; lost_score=max_qty; }
+      else { status='LOST'; lost_score=years_gone*max_qty; }
+      return {...base,
+        parcode:ip,
+        q2021:arr[0],q2022:arr[1],q2023:arr[2],
+        q2024:arr[3],q2025:arr[4],q2026:arr[5],
+        first_year, last_year, years_active:active.length,
+        years_gone, total_qty:total, max_qty,
+        status, lost_score:Math.round(lost_score)};
+    }).filter(Boolean);
+  }
+
+  const kpiBase = wProds.filter(p=>{
+    if(fGrp && p.group!==fGrp) return false;
+    if(fType && p.type!==fType) return false;
+    if(fGone && (p.years_gone||0)<fGone) return false;
+    if(fSearch){
+      const hit=(p.parcode||'').toLowerCase().includes(fSearch)||
+                (p.name||'').toLowerCase().includes(fSearch)||
+                (p.group||'').toLowerCase().includes(fSearch)||
+                (p.brand||'').toLowerCase().includes(fSearch);
+      if(!hit) return false;
+    }
+    return true;
+  });
+  filtered = fStatus ? kpiBase.filter(p=>p.status===fStatus) : kpiBase;
+
+  filtered.sort((a,b)=>{
+    const va=sortVal(a,sortCol), vb=sortVal(b,sortCol);
+    if(typeof va==='string') return sortDir*va.localeCompare(vb,'th');
+    return sortDir*((va||0)-(vb||0));
+  });
+
+  const anyFilter = scopeStores || fGrp || fType || fGone || fSearch;
+  const parts = [];
+  if(scopeStores) parts.push(`${scopeStores.size} ร้าน`);
+  if(fType) parts.push(`ประเภท: ${fType}`);
+  if(fGrp)  parts.push(`กลุ่ม: ${fGrp}`);
+  if(fGone) parts.push(`หาย ≥${fGone}ปี`);
+  if(fSearch) parts.push(`ค้นหา: "${fSearch}"`);
+  const scopeLabel = parts.length ? '🔍 '+parts.join(' · ') : '';
+  renderKPI(anyFilter ? kpiBase : null, scopeLabel);
+
+  if(scopeStores && wProds.length === 0){
+    const sb=D.store_breakdown||{};
+    const sInScope=[...scopeStores];
+    const sWithData=sInScope.filter(s=>sb[s] && Object.keys(sb[s]).length>0);
+    console.warn(`Scope has ${sInScope.length} stores, only ${sWithData.length} have sales data:`, sInScope, 'with data:', sWithData);
+  }
+
+  page=0;
+  renderTable();
+  renderRecom(fStatus);
+  const active=[fRM&&'RM: '+fRM,fDM&&'DM: '+fDM,fStore&&'ร้าน: '+fStore,fStatus&&'สถานะ: '+fStatus,fGrp&&'กลุ่ม: '+fGrp,fType&&'ประเภท: '+fType,fGone&&'หายไป ≥'+fGone+'ปี'].filter(Boolean);
+  document.getElementById('filter-info').textContent=active.length?'🔍 '+active.join(' › '):'';
+}
+
+function sortVal(p,col){
+  switch(col){
+    case 0: return p.lost_score;
+    case 1: return p.parcode;
+    case 2: return p.name;
+    case 3: return p.group;
+    case 4: return p.q2021;
+    case 5: return p.q2022;
+    case 6: return p.q2023;
+    case 7: return p.q2024;
+    case 8: return p.q2025;
+    case 9: return p.q2026;
+    case 10: return p.last_year;
+    case 11: return p.years_gone;
+    case 12: return p.max_qty;
+    case 13: return p.status;
+    case 14: return p.lost_score;
+  }
+  return 0;
+}
+
+function sortBy(col,th){
+  if(sortCol===col) sortDir=-sortDir;
+  else { sortCol=col; sortDir=col===2||col===1||col===3?1:-1; }
+  document.querySelectorAll('#prod-tbl thead .sa').forEach((s,i)=>{
+    s.className='sa'+(i===col?(sortDir===1?' asc':' desc'):'');
+  });
+  applyAll();
+}
+
+function renderTable(){
+  const start=page*PAGE_SIZE;
+  const slice=filtered.slice(start,start+PAGE_SIZE);
+  if(filtered.length===0){
+    const fRM=document.getElementById('f-rm').value;
+    const fDM=document.getElementById('f-dm').value;
+    const fStore=document.getElementById('f-store').value;
+    const hasScope=fRM||fDM||fStore;
+    const tbody=document.getElementById('prod-tbody');
+    const hint = hasScope
+      ? '⚠️ ไม่มีสินค้าตรงเงื่อนไขในขอบเขตนี้ — ลองล้าง filter ประเภท/กลุ่ม/สถานะ หรือเลือกร้านอื่น (บางสาขายังไม่มีข้อมูลใน bld_acc_lake)'
+      : '— ไม่มีรายการตรงเงื่อนไข ลองปรับ filter';
+    tbody.innerHTML=`<tr><td colspan="15" style="text-align:center;padding:20px;color:#94a3b8">${hint}</td></tr>`;
+    document.getElementById('prod-cnt').textContent='0 รายการ';
+    renderPagination();
+    return;
+  }
+  const cy=D.current_year||2026;
+  const tbody=document.getElementById('prod-tbody');
+  tbody.innerHTML=slice.map((p,idx)=>{
+    const stCls={ACTIVE:'st-act',STALE:'st-stl',LOST:'st-lst'}[p.status]||'';
+    const stLabel={ACTIVE:'🟢 ACTIVE',STALE:'🟡 STALE',LOST:'🔴 LOST'}[p.status]||p.status;
+    const yearCell=(y,q)=>{
+      if(q>0) return `<td class="r yr-val">${fmt(q)}</td>`;
+      const hadHistory=p.q2021>0||p.q2022>0||p.q2023>0||p.q2024>0;
+      if((y===cy||y===cy-1) && hadHistory) return `<td class="r yr-recent-zero">0</td>`;
+      return `<td class="r yr-zero">—</td>`;
+    };
+    return `<tr>
+      <td>${start+idx+1}</td>
+      <td class="parcode">${p.parcode}</td>
+      <td class="prod-name" title="${p.name}">${p.name||'—'}</td>
+      <td><span class="badge-grp">${p.group||'—'}</span></td>
+      ${yearCell(2021,p.q2021)}
+      ${yearCell(2022,p.q2022)}
+      ${yearCell(2023,p.q2023)}
+      ${yearCell(2024,p.q2024)}
+      ${yearCell(2025,p.q2025)}
+      ${yearCell(2026,p.q2026)}
+      <td class="c b">${p.last_year}</td>
+      <td class="c">${p.years_gone}</td>
+      <td class="r">${fmt(p.max_qty)}</td>
+      <td class="c"><span class="${stCls}">${stLabel}</span></td>
+      <td class="r b">${fmt(p.lost_score)}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('prod-cnt').textContent=filtered.length.toLocaleString()+' รายการ';
+  renderPagination();
+}
+
+function renderPagination(){
+  const pages=Math.ceil(filtered.length/PAGE_SIZE)||1;
+  const row=document.getElementById('pag-btns');
+  const info=document.getElementById('pag-info');
+  let html='';
+  html+=`<button onclick="page=0;renderTable()" ${page===0?'disabled':''}>«</button>`;
+  html+=`<button onclick="page=Math.max(0,page-1);renderTable()" ${page===0?'disabled':''}>‹ ก่อน</button>`;
+  const win=2;
+  for(let i=Math.max(0,page-win); i<=Math.min(pages-1,page+win); i++){
+    html+=`<button class="${i===page?'active':''}" onclick="page=${i};renderTable()">${i+1}</button>`;
+  }
+  html+=`<button onclick="page=Math.min(${pages-1},page+1);renderTable()" ${page>=pages-1?'disabled':''}>ถัดไป ›</button>`;
+  html+=`<button onclick="page=${pages-1};renderTable()" ${page>=pages-1?'disabled':''}>»</button>`;
+  row.innerHTML=html;
+  const from=filtered.length?page*PAGE_SIZE+1:0;
+  const to=Math.min(filtered.length,(page+1)*PAGE_SIZE);
+  info.textContent=`${from.toLocaleString()}–${to.toLocaleString()} จาก ${filtered.length.toLocaleString()}`;
+}
+
+function renderRecom(fStatus){
+  const box=document.getElementById('recom');
+  if(fStatus==='LOST' && filtered.length>0){
+    const top=filtered.slice(0,5);
+    const peakSum=top.reduce((s,p)=>s+p.max_qty,0);
+    box.style.display='block';
+    document.getElementById('recom-text').innerHTML=
+      `<b>💡 คำแนะนำ:</b> 5 อันดับสินค้าที่ "หาย" และน่ากังวลที่สุด มียอดขายสูงสุดรวม <b>${fmt(peakSum)}</b> ชิ้น/ปี ก่อนหายไป — `+
+      `ควรตรวจสอบว่า (1) เลิกจำหน่ายจริงหรือไม่ (2) supplier ยังส่งได้หรือไม่ (3) มีสินค้าทดแทนหรือไม่ — `+
+      `กรองดูแล้ว export เป็น XLSX เพื่อส่งทีมจัดซื้อทบทวน`;
+  } else {
+    box.style.display='none';
+  }
+}
+
+function resetFilter(){
+  document.getElementById('f-status').value='LOST';
+  document.getElementById('f-grp').value='';
+  document.getElementById('f-type').value='';
+  document.getElementById('f-gone').value='';
+  document.getElementById('f-search').value='';
+  document.getElementById('f-rm').value='';
+  document.getElementById('f-dm').value='';
+  document.getElementById('f-store').value='';
+  rebuildStoreOptions();
+  applyAll();
+}
+
+function exportXLSX(){
+  if(!filtered.length){ alert('ไม่มีข้อมูลให้ export'); return; }
+  const rows=filtered.map((p,i)=>({
+    '#': i+1,
+    'parcode': p.parcode,
+    'รายการ': p.name,
+    'แบรนด์': p.brand,
+    'กลุ่ม': p.group,
+    'ประเภท': p.type,
+    '2021': p.q2021, '2022': p.q2022, '2023': p.q2023,
+    '2024': p.q2024, '2025': p.q2025, '2026': p.q2026,
+    'ขายปีล่าสุด': p.last_year,
+    'หายไป (ปี)': p.years_gone,
+    'รวมทั้งหมด': p.total_qty,
+    'peak qty': p.max_qty,
+    'สถานะ': p.status,
+    'lost_score': p.lost_score,
+    'ราคา (ipunit3)': p.ipunit3,
+  }));
+  const ws=XLSX.utils.json_to_sheet(rows);
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Lost Products');
+  const today=new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb,`lost_products_${today}.xlsx`);
+}
+
+init();
+</script>
+</body>
+</html>
