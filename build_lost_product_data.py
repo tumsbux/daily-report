@@ -7,6 +7,7 @@ Format: compact schema v2 (_meta.schema=2) — global `codes` barcode table,
 products as array-of-arrays + products_header, store_breakdown keyed by code
 index. See Decisions.md ADR [2026-06-11]. Decoded by index.html decodeData().
 """
+import gc
 import json, os, sys, warnings
 from datetime import date, timedelta
 import mysql.connector
@@ -65,8 +66,11 @@ def query_year(conn, bld_table, blh_table, where_year=None):
         GROUP BY bld.iprod
         HAVING qty > 0
     """
+    gc.collect()
     df = pd.read_sql(sql_tot, conn)
     tot = dict(zip(df['iprod'].astype(str), df['qty'].astype(float)))
+    del df
+    gc.collect()
 
     sql_store = f"""
         SELECT blh.sotowhs AS whs, bld.iprod,
@@ -90,6 +94,8 @@ def query_year(conn, bld_table, blh_table, where_year=None):
                 store[(f'{n:03d}', ip)] = (q, a)
         except ValueError:
             pass
+    del df2
+    gc.collect()
     return tot, store
 
 
