@@ -116,6 +116,13 @@ tbody tr:hover{background:#f8f9ff}
   .ai-btn{padding:5px 10px;font-size:11px}
   .ai-label{font-size:10px}
 }
+@media print {
+  body > * { display: none !important; }
+  body > #ai-modal, body > #ai-modal * { display: block !important; visibility: visible !important; }
+  #ai-modal { position: absolute; left: 0; top: 0; width: 100%; height: auto; background: none !important; display: block !important; }
+  .ai-modal-body { box-shadow: none !important; max-height: none !important; overflow: visible !important; width: 100% !important; max-width: none !important; padding: 0 !important; }
+  .ai-close, .ai-btn { display: none !important; }
+}
 </style>
 </head>
 <body>
@@ -173,7 +180,8 @@ tbody tr:hover{background:#f8f9ff}
   <button class="ai-btn" onclick="aiAnalyze('replace')">🔄 แนะนำสินค้าทดแทน</button>
   <button class="ai-btn" onclick="aiAnalyze('recovery')">📈 ระบุโอกาส Recovery</button>
   <button class="ai-btn" onclick="aiAnalyze('trend')">📊 Trend ปีต่อปี</button>
-  <span style="margin-left:auto;font-size:11px;color:#7e22ce">วิเคราะห์ตาม filter ปัจจุบัน (ไม่นับ filter สถานะ)</span>
+  <span style="font-size:11px;color:#7e22ce;margin-left:10px;">วิเคราะห์ตาม filter ปัจจุบัน (ไม่นับ filter สถานะ)</span>
+  <button class="ai-btn" style="background:linear-gradient(135deg,#e11d48,#be123c);margin-left:auto;" onclick="openExecutiveReport()">📋 Executive Report</button>
 </div>
 
 <div class="page">
@@ -640,6 +648,11 @@ function aiAnalyze(type){
   document.getElementById('ai-modal').classList.add('open');
   if(typeof Analytics!=='undefined' && Analytics.dashboardNavigated) Analytics.dashboardNavigated('ai_'+type);
 }
+function openAi(title, html) {
+  document.getElementById('ai-modal-title').textContent = title;
+  document.getElementById('ai-modal-content').innerHTML = html;
+  document.getElementById('ai-modal').classList.add('open');
+}
 function closeAi(){ document.getElementById('ai-modal').classList.remove('open'); }
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeAi(); });
 
@@ -738,6 +751,80 @@ function analyzeTrend(prods){
   return h;
 }
 
+
+function openExecutiveReport() {
+  if (!D) return;
+  const s = D.summary || {};
+  const prods = D.products || [];
+
+  // Filter for LOST products and sort by lost_score descending to get the top 10
+  const lostProds = prods.filter(p => p.status === 'LOST')
+                         .sort((a, b) => (b.lost_score || 0) - (a.lost_score || 0));
+  const top10 = lostProds.slice(0, 10);
+
+  const top10Rows = top10.map((p, idx) => {
+    return `<tr style="border-bottom:1px solid #e2e8f0">` +
+      `<td style="padding:6px;text-align:center">${idx + 1}</td>` +
+      `<td style="padding:6px;font-family:monospace">${p.parcode}</td>` +
+      `<td style="padding:6px;white-space:normal;max-width:220px;word-break:break-all">${p.name || '—'}</td>` +
+      `<td style="padding:6px">${p.group || '—'}</td>` +
+      `<td style="padding:6px;text-align:right">${fmt(p.max_qty)}</td>` +
+      `<td style="padding:6px;text-align:right;font-weight:600">${fmt(p.lost_score)}</td>` +
+      `</tr>`;
+  }).join('');
+
+  const title = '📊 รายงานสรุปสำหรับผู้บริหาร (EXECUTIVE BOARD REPORT)';
+  const html = '<div style="font-family:\'Sarabun\',sans-serif;color:#1e293b;padding:10px;line-height:1.6;">' +
+    '<div style="text-align:center;margin-bottom:20px;border-bottom:2px solid #0f172a;padding-bottom:10px;">' +
+    '<h2 style="font-size:18px;font-weight:700;margin-bottom:4px;">รายงานสรุปสำหรับผู้บริหาร (EXECUTIVE BOARD REPORT)</h2>' +
+    '<p style="font-size:13px;color:#475569;margin-bottom:4px;">รายงานวิเคราะห์สินค้าขาดหาย (Lost & Stale Products) และแผนงานควบคุมสต๊อกขาดมือ</p>' +
+    '<p style="font-size:12px;font-weight:700;color:#0f172a;">ข้อมูล ณ วันที่ ' + (D.generated || '—') + '</p>' +
+    '</div>' +
+    
+    '<div style="margin-bottom:20px;">' +
+    '<h3 style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:8px;border-left:4px solid #e11d48;padding-left:8px;">1. สถานะสินค้าคงคลังและรายการสินค้าขาดหาย (Lost & Stale Product Report)</h3>' +
+    '<p style="font-size:12px;margin-bottom:10px;">สรุปสถานะรายการสินค้าสะสมในระบบ มีจำนวนสินค้าคงคลังและรายการที่หยุดการเคลื่อนไหวดังนี้:</p>' +
+    '<table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:10px;margin-bottom:10px;">' +
+    '<tr style="background:#f1f5f9;border-bottom:2px solid #cbd5e1;"><th style="padding:6px;text-align:left">ดัชนีชี้วัด (KPI)</th><th style="padding:6px;text-align:right">จำนวนรายการ (SKU)</th><th style="padding:6px;text-align:left">คำจำกัดความ / ความหมาย</th></tr>' +
+    '<tr style="border-bottom:1px solid #e2e8f0"><td style="padding:6px;font-weight:600">🟢 Active Products</td><td style="padding:6px;text-align:right">' + fmt(s.active) + '</td><td style="padding:6px">มียอดขายเคลื่อนไหวในปีปัจจุบัน (2026)</td></tr>' +
+    '<tr style="border-bottom:1px solid #e2e8f0"><td style="padding:6px;font-weight:600;color:#ea580c">🟡 Stale Products</td><td style="padding:6px;text-align:right;color:#ea580c">' + fmt(s.stale) + '</td><td style="padding:6px">มียอดขายปี 2025 แต่ไม่มีการขายในปี 2026 (เสี่ยงสูญเสียยอดขาย)</td></tr>' +
+    '<tr style="border-bottom:1px solid #e2e8f0"><td style="padding:6px;font-weight:600;color:#dc2626">🔴 Lost Products</td><td style="padding:6px;text-align:right;color:#dc2626">' + fmt(s.lost) + '</td><td style="padding:6px">ไม่มียอดขายตั้งแต่ปี 2025 เป็นต้นไป (สินค้าหายถาวรจากหน้าร้าน)</td></tr>' +
+    '<tr style="border-bottom:1px solid #e2e8f0"><td style="padding:6px;font-weight:600;color:#7c3aed">⚠️ Peak Qty (Lost)</td><td style="padding:6px;text-align:right;color:#7c3aed">' + fmt(s.qty_lost_peak) + '</td><td style="padding:6px">ยอดรวมจำนวนจำหน่ายสูงสุดต่อปี ของสินค้ากลุ่ม Lost ก่อนการหายไป</td></tr>' +
+    '</table>' +
+    '</div>' +
+    
+    '<div style="margin-bottom:20px;">' +
+    '<h3 style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:8px;border-left:4px solid #e11d48;padding-left:8px;">2. รายการสินค้าสูญเสียยอดขายสูงสุด 10 อันดับแรก (Top 10 Lost Products by Impact)</h3>' +
+    '<table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:10px;">' +
+    '<tr style="background:#f1f5f9;border-bottom:2px solid #cbd5e1;"><th style="padding:6px;text-align:center">#</th><th style="padding:6px;text-align:left">Parcode</th><th style="padding:6px;text-align:left">รายการสินค้า</th><th style="padding:6px;text-align:left">กลุ่มสินค้า</th><th style="padding:6px;text-align:right">Peak Qty/ปี</th><th style="padding:6px;text-align:right">Lost Score</th></tr>' +
+    top10Rows +
+    '</table>' +
+    '</div>' +
+ 
+    '<div style="margin-bottom:20px;">' +
+    '<h3 style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:8px;border-left:4px solid #e11d48;padding-left:8px;">3. แผนปฏิบัติการฟื้นฟูสินค้าขาดมือ (Stockout Recovery Action Plan)</h3>' +
+    '<ul style="font-size:12px;padding-left:20px;margin-bottom:10px;">' +
+    '<li><b>Priority Replenishment:</b> จัดระดับความสำคัญในการดึงสินค้าที่หาย (Lost) กลับมาจำหน่าย โดยเริ่มประสานงานจากกลุ่มสินค้าที่มี Lost Score สูงสุด 10 อันดับแรกก่อน เนื่องจากส่งผลกระทบต่อยอดขายสูงที่สุด</li>' +
+    '<li><b>WMS Safety Stock Adjustments:</b> กำหนดและทบทวนเกณฑ์สต๊อกขั้นต่ำ (Safety Stock Buffer) ในระบบ WMS ใหม่ เพื่อรักษาสมดุลคลังสินค้าและป้องกันสินค้าขาดมือ (Stockout) ในอนาคต</li>' +
+    '<li><b>Purchasing & Supplier Alignment:</b> มอบหมายทีมจัดซื้อเร่งเคลียร์สถานะกับ Supplier สำหรับสินค้ากลุ่ม Lost ที่ขาดหายไปนานกว่า 1 ปี เพื่อหาทางระบุสาเหตุ (เช่น เลิกผลิต หรือปัญหาการกระจายสินค้า)</li>' +
+    '</ul>' +
+    '</div>' +
+ 
+    '<div style="margin-bottom:20px;">' +
+    '<h3 style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:8px;border-left:4px solid #e11d48;padding-left:8px;">4. การวัดผลและกรอบเวลาการฟื้นฟู (KPIs & Recovery Timeline)</h3>' +
+    '<ol style="font-size:12px;padding-left:20px;margin-bottom:10px;">' +
+    '<li><b>Recovery Window:</b> กำหนดระยะเวลาเป้าหมายในการกู้คืน SKU ที่ขาดหายไป ให้กลับมาเคลื่อนไหวภายใน 30-45 วันทำการ</li>' +
+    '<li><b>Lost Sales Rate Monitoring:</b> มอบหมายผู้จัดการเขต (DM) และฝ่ายวิเคราะห์สินค้า ติดตามอัตราการขาดมือของสินค้ากลุ่ม Core List และรายงานผลต่อฝ่ายบริหารเป็นรายสัปดาห์</li>' +
+    '</ol>' +
+    '</div>' +
+    
+    '<div style="text-align:right;margin-top:20px;border-top:1px solid #cbd5e1;padding-top:10px;">' +
+    '<button class="ai-btn" style="background:#475569;" onclick="window.print()">🖨️ พิมพ์รายงาน</button>' +
+    '</div>' +
+    '</div>';
+    
+  openAi(title, html);
+}
 
 init();
 </script>
