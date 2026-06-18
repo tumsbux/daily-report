@@ -110,6 +110,21 @@ tr:last-child td{border-bottom:none}
 .aibtn:hover{background:#4338ca}.aibtn:disabled{background:#a5b4fc;cursor:not-allowed}
 .aibtn.dark{background:#0f172a}.aibtn.dark:hover{background:#1e293b}
 .aiout{background:#f8faff;border:1px solid #e0e7ff;border-radius:8px;padding:11px 14px;font-size:12px;line-height:1.7;white-space:pre-wrap;width:100%;display:none}
+
+/* ── EXEC REPORT MODAL ─ */
+.fexec-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2000;align-items:center;justify-content:center;padding:20px}
+.fexec-modal.open{display:flex}
+.fexec-modal-body{background:#fff;border-radius:14px;max-width:760px;width:100%;max-height:88vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.3);animation:fexecSlide .25s ease-out}
+@keyframes fexecSlide{from{transform:translateY(-16px);opacity:0}to{transform:translateY(0);opacity:1}}
+.fexec-modal-head{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid #e5e7eb;background:linear-gradient(135deg,#fff1f2,#fee2e2);border-radius:14px 14px 0 0}
+.fexec-modal-head h3{font-size:15px;font-weight:800;color:#991b1b;margin:0}
+.fexec-close{background:none;border:none;font-size:22px;cursor:pointer;color:#94a3b8;padding:0 4px}
+.fexec-close:hover{color:#1e293b}
+#fexec-modal-content{padding:18px 20px;font-size:13px;line-height:1.7;color:#1e293b;font-family:'Segoe UI',Tahoma,sans-serif}
+@media print{body>*{display:none!important}body>#fexec-modal,body>#fexec-modal *{display:block!important;visibility:visible!important}
+  #fexec-modal{position:absolute;left:0;top:0;width:100%;height:auto;background:none!important;display:block!important}
+  .fexec-modal-body{box-shadow:none!important;max-height:none!important;overflow:visible!important;width:100%!important;max-width:none!important}
+  .fexec-close{display:none!important}}
 </style>
 </head>
 <body>
@@ -119,6 +134,8 @@ tr:last-child td{border-bottom:none}
   <h1>Fraud Detection Dashboard</h1>
   <span id="nav-chips"></span>
   <div class="nav-r">
+  <button onclick="openFraudExecReport()" style="background:linear-gradient(135deg,#e11d48,#be123c);color:#fff;border:none;border-radius:6px;padding:5px 13px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:5px;flex-shrink:0;white-space:nowrap">📋 Executive Report</button>
+  
     <span class="nav-date" id="nav-date"></span>
     <a href="index.html" class="nav-link">← Hub</a>
   </div>

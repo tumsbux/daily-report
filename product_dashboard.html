@@ -115,6 +115,21 @@ tbody tr:hover{background:#f8f9ff}
   .sc-val{font-size:15px}
   nav h1{font-size:12px}
 }
+
+/* ── EXEC REPORT MODAL ─ */
+.exec-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2000;align-items:center;justify-content:center;padding:20px}
+.exec-modal.open{display:flex}
+.exec-modal-body{background:#fff;border-radius:14px;max-width:760px;width:100%;max-height:88vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.3);animation:execSlide .25s ease-out}
+@keyframes execSlide{from{transform:translateY(-16px);opacity:0}to{transform:translateY(0);opacity:1}}
+.exec-modal-head{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid #e5e7eb;background:linear-gradient(135deg,#fff1f2,#fef3c7);border-radius:14px 14px 0 0}
+.exec-modal-head h3{font-size:15px;font-weight:800;color:#991b1b;margin:0}
+.exec-close{background:none;border:none;font-size:22px;cursor:pointer;color:#94a3b8;padding:0 4px}
+.exec-close:hover{color:#1e293b}
+#exec-modal-content{padding:18px 20px;font-size:13px;line-height:1.7;color:#1e293b;font-family:'Noto Sans Thai',Sarabun,sans-serif}
+@media print{body>*{display:none!important}body>#exec-modal,body>#exec-modal *{display:block!important;visibility:visible!important}
+  #exec-modal{position:absolute;left:0;top:0;width:100%;height:auto;background:none!important;display:block!important}
+  .exec-modal-body{box-shadow:none!important;max-height:none!important;overflow:visible!important;width:100%!important;max-width:none!important}
+  .exec-close,.exec-btn{display:none!important}}
 </style>
 </head>
 <body>
@@ -123,6 +138,8 @@ tbody tr:hover{background:#f8f9ff}
   <span class="chip" id="nav-month"></span>
   <span class="chip" id="nav-sku"></span>
   <div class="nav-r">
+    <button onclick="openExecReport()" style="background:linear-gradient(135deg,#e11d48,#be123c);color:#fff;border:none;border-radius:6px;padding:5px 13px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:5px;flex-shrink:0">📋 Executive Report</button>
+  
     <span class="nav-date" id="nav-date"></span>
     <a class="hub-btn" href="index.html">← Hub</a>
   </div>
@@ -790,6 +807,144 @@ function sortProd(col,th){
   if(sa) sa.className='sa '+(prodSortDir===1?'asc':'desc');
   applyAll();
 }
+
+function openExecReport() {
+  var d = D || {};
+  var prods = d.products || [];
+  var days = d.days_elapsed || 30;
+  var month = d.month26 || '';
+  var fmtN = function(n){ return n==null?'—':Math.round(n).toLocaleString('th-TH'); };
+  var fmtP = function(n){ return n==null?'—':n.toFixed(1)+'%'; };
+
+  var totSales = prods.reduce(function(s,p){ return s+(p.s26||0); }, 0);
+  var totGP    = prods.reduce(function(s,p){ return s+(p.gp26||0); }, 0);
+  var gpPct    = totSales ? (totGP/totSales*100) : 0;
+  var skuCount = prods.filter(function(p){ return (p.s26||0)>0; }).length;
+
+  var typeMap = {};
+  prods.forEach(function(p){
+    var t = p.type_desc || p.type || 'ไม่ระบุ';
+    if(!typeMap[t]) typeMap[t]={sales:0,gp:0,s25:0};
+    typeMap[t].sales += p.s26||0;
+    typeMap[t].gp   += p.gp26||0;
+    typeMap[t].s25  += p.s25||0;
+  });
+  var typeArr = Object.keys(typeMap).map(function(t){
+    var v=typeMap[t]; var gp=v.sales?(v.gp/v.sales*100):0;
+    return {name:t,sales:v.sales,gp:v.gp,gp_pct:gp,s25:v.s25};
+  }).filter(function(x){ return x.sales>0; }).sort(function(a,b){return b.sales-a.sales;});
+  var top5 = typeArr.slice(0,5);
+  var bot5 = typeArr.slice().sort(function(a,b){return a.gp_pct-b.gp_pct;}).filter(function(x){return x.sales>50000;}).slice(0,5);
+  var yoyDrop = typeArr.filter(function(x){
+    var yoy=x.s25?((x.sales-x.s25)/x.s25*100):null;
+    return yoy!=null&&x.s25>500000&&yoy<0;
+  }).sort(function(a,b){
+    var ya=a.s25?((a.sales-a.s25)/a.s25*100):0;
+    var yb=b.s25?((b.sales-b.s25)/b.s25*100):0;
+    return ya-yb;
+  }).slice(0,5);
+
+  var oosList = prods.filter(function(p){
+    if(!(p.onhand>0)) return false;
+    var rate=(p.q26||0)/(days||1);
+    if(!rate) return false;
+    return Math.round(p.onhand/rate)<=14;
+  }).sort(function(a,b){
+    var ra=(a.q26||0)/(days||1),rb=(b.q26||0)/(days||1);
+    return (ra?(a.onhand/ra):99999)-(rb?(b.onhand/rb):99999);
+  }).slice(0,8);
+
+  var html='<div style="font-family:\'Noto Sans Thai\',Sarabun,sans-serif;color:#1e293b;line-height:1.65">'+
+    '<div style="text-align:center;margin-bottom:18px;border-bottom:2px solid #0f172a;padding-bottom:10px">'+
+    '<h2 style="font-size:17px;font-weight:800;margin-bottom:4px">รายงานสรุปสำหรับผู้บริหาร — Product Dashboard</h2>'+
+    '<p style="font-size:12px;color:#475569">EXECUTIVE BOARD REPORT · '+month+' · ข้อมูล '+days+' วัน</p>'+
+    '</div>';
+
+  html+='<div style="margin-bottom:18px">'+
+    '<h3 style="font-size:13px;font-weight:700;border-left:4px solid #6366f1;padding-left:8px;margin-bottom:8px">1. ภาพรวมยอดขายและกำไรขั้นต้น (MTD)</h3>'+
+    '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px">'+
+    '<div style="background:#f0f9ff;border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:#0369a1;font-weight:700;margin-bottom:4px">ยอดขาย MTD</div><div style="font-size:16px;font-weight:800">฿'+fmtN(totSales)+'</div></div>'+
+    '<div style="background:#f0fdf4;border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:#15803d;font-weight:700;margin-bottom:4px">กำไรขั้นต้น</div><div style="font-size:16px;font-weight:800">฿'+fmtN(totGP)+'</div></div>'+
+    '<div style="background:#fef3c7;border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:#92400e;font-weight:700;margin-bottom:4px">GP%</div><div style="font-size:16px;font-weight:800">'+fmtP(gpPct)+'</div></div>'+
+    '<div style="background:#faf5ff;border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:#6b21a8;font-weight:700;margin-bottom:4px">SKU ที่ขายได้</div><div style="font-size:16px;font-weight:800">'+fmtN(skuCount)+'</div></div>'+
+    '</div></div>';
+
+  html+='<div style="margin-bottom:18px">'+
+    '<h3 style="font-size:13px;font-weight:700;border-left:4px solid #6366f1;padding-left:8px;margin-bottom:8px">2. Top 5 ประเภทสินค้า ตามยอดขาย MTD</h3>'+
+    '<table style="width:100%;font-size:12px;border-collapse:collapse"><tr style="background:#f8fafc">'+
+    '<th style="padding:6px 8px;text-align:left">ประเภทสินค้า</th><th style="padding:6px 8px;text-align:right">ยอดขาย (฿)</th>'+
+    '<th style="padding:6px 8px;text-align:right">กำไร (฿)</th><th style="padding:6px 8px;text-align:right">GP%</th></tr>';
+  top5.forEach(function(t){
+    var c=t.gp_pct>=35?'#16a34a':t.gp_pct>=28?'#d97706':'#dc2626';
+    html+='<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:5px 8px">'+t.name+'</td>'+
+      '<td style="padding:5px 8px;text-align:right">฿'+fmtN(t.sales)+'</td>'+
+      '<td style="padding:5px 8px;text-align:right">฿'+fmtN(t.gp)+'</td>'+
+      '<td style="padding:5px 8px;text-align:right;font-weight:700;color:'+c+'">'+t.gp_pct.toFixed(1)+'%</td></tr>';
+  });
+  html+='</table></div>';
+
+  if(oosList.length){
+    html+='<div style="margin-bottom:18px">'+
+      '<h3 style="font-size:13px;font-weight:700;border-left:4px solid #e11d48;padding-left:8px;margin-bottom:8px">3. สินค้าเสี่ยงขาดสต็อก (Days-until-OOS ≤ 14 วัน)</h3>'+
+      '<table style="width:100%;font-size:12px;border-collapse:collapse"><tr style="background:#fef2f2">'+
+      '<th style="padding:6px 8px;text-align:left">บาร์โค้ด</th><th style="padding:6px 8px;text-align:left">ชื่อสินค้า</th>'+
+      '<th style="padding:6px 8px;text-align:right">Onhand</th><th style="padding:6px 8px;text-align:right">วันเหลือ</th></tr>';
+    oosList.forEach(function(p){
+      var rate=(p.q26||0)/(days||1);var dd=rate?Math.round(p.onhand/rate):999;
+      var c=dd<=7?'#dc2626':'#d97706';
+      html+='<tr style="border-bottom:1px solid #f1f5f9">'+
+        '<td style="padding:5px 8px;font-family:monospace;font-size:11px">'+(p.barcode||p.iprod)+'</td>'+
+        '<td style="padding:5px 8px">'+(p.name||'').substring(0,30)+'</td>'+
+        '<td style="padding:5px 8px;text-align:right">'+fmtN(p.onhand)+'</td>'+
+        '<td style="padding:5px 8px;text-align:right;font-weight:800;color:'+c+'">'+dd+'</td></tr>';
+    });
+    html+='</table></div>';
+  }
+
+  if(yoyDrop.length){
+    html+='<div style="margin-bottom:18px">'+
+      '<h3 style="font-size:13px;font-weight:700;border-left:4px solid #d97706;padding-left:8px;margin-bottom:8px">4. ประเภทสินค้าที่ยอดขายลดลง YoY</h3>'+
+      '<table style="width:100%;font-size:12px;border-collapse:collapse"><tr style="background:#fef3c7">'+
+      '<th style="padding:6px 8px;text-align:left">ประเภท</th><th style="padding:6px 8px;text-align:right">ยอด 2025 (฿)</th>'+
+      '<th style="padding:6px 8px;text-align:right">ยอด 2026 (฿)</th><th style="padding:6px 8px;text-align:right">YoY%</th></tr>';
+    yoyDrop.forEach(function(x){
+      var yoy=x.s25?((x.sales-x.s25)/x.s25*100):0;
+      html+='<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:5px 8px">'+x.name+'</td>'+
+        '<td style="padding:5px 8px;text-align:right">฿'+fmtN(x.s25)+'</td>'+
+        '<td style="padding:5px 8px;text-align:right">฿'+fmtN(x.sales)+'</td>'+
+        '<td style="padding:5px 8px;text-align:right;font-weight:700;color:#dc2626">'+yoy.toFixed(1)+'%</td></tr>';
+    });
+    html+='</table></div>';
+  }
+
+  html+='<div style="margin-bottom:18px">'+
+    '<h3 style="font-size:13px;font-weight:700;border-left:4px solid #e11d48;padding-left:8px;margin-bottom:8px">5. แผนปฏิบัติการ (Management Action Plan)</h3>'+
+    '<ol style="font-size:12px;padding-left:20px">'+
+    '<li><b>Replenishment:</b> สั่งซื้อสินค้า OOS ≤ 7 วันทันที — ให้ฝ่ายจัดซื้อ expedite order ก่อนสิ้นสัปดาห์</li>'+
+    '<li><b>Category Review:</b> ประเภทที่ GP% ต่ำกว่า 28% ทบทวน pricing strategy หรือลด assortment</li>'+
+    '<li><b>YoY Recovery:</b> ประเภทที่ยอดขายลดลง >15% YoY — สอบถาม DM เหตุผล แล้ววางแผน recovery</li>'+
+    '<li><b>GP Improvement:</b> ผลักดันยอดขายกลุ่ม Core (เครื่องครัว/เครื่องนอน/เครื่องเขียน) ที่ GP สูง</li>'+
+    '</ol></div>';
+
+  html+='<div style="text-align:right;border-top:1px solid #e2e8f0;padding-top:10px">'+
+    '<button onclick="window.print()" style="background:#475569;color:#fff;border:none;border-radius:18px;padding:6px 16px;font-size:12px;font-weight:600;cursor:pointer">🖨️ พิมพ์รายงาน</button>'+
+    '</div></div>';
+
+  document.getElementById('exec-modal-title').textContent='📋 รายงานสรุปผู้บริหาร — Product Dashboard ('+month+')';
+  document.getElementById('exec-modal-content').innerHTML=html;
+  document.getElementById('exec-modal').classList.add('open');
+}
+function closeExecReport(){ document.getElementById('exec-modal').classList.remove('open'); }
 </script>
+
+<div class="exec-modal" id="exec-modal" onclick="if(event.target.id==='exec-modal')closeExecReport()">
+  <div class="exec-modal-body">
+    <div class="exec-modal-head">
+      <h3 id="exec-modal-title">📋 รายงานสรุปสำหรับผู้บริหาร</h3>
+      <button class="exec-close" onclick="closeExecReport()">✕</button>
+    </div>
+    <div id="exec-modal-content"></div>
+  </div>
+</div>
 </body>
 </html>
