@@ -23,7 +23,7 @@
   - ⚠️ Antigravity ก็ใช้ push — rotate แล้วแจ้งทั้ง 2 agents / อัปเดต config ที่ Antigravity ใช้ด้วย
   - size: XS
 
-- [ ] 🔐 **ย้าย SSH creds ออกจาก VM scripts** — `run_vm_command.py` / `check_vm_status.py` / `push_to_vm.py` / `upload_test.py` ใน `F:\lost-Product` ฝัง password (ยังไม่หลุดขึ้น repo แต่อยู่ใน working copy ของ repo public) → ย้ายเป็น config แยกแบบ `db_config.json` หรือย้าย scripts ไป `F:\co work dashboard\` — พ่วง: SSH+MySQL password หลุดในแชท Cowork 2026-06-12 → แจ้ง IT rotate ถ้ากังวล — size: XS
+- [x] 🔐 **ย้าย SSH creds ออกจาก VM scripts** — ย้าย connection details ไปโหลดจาก `db_config.json` แทน และทำแบบเดียวกันใน `F:\co work dashboard\push_to_vm.py` เรียบร้อย — size: XS
 
 - [ ] 🖥️ **ขอ IT ตั้ง restart policy ให้ VM container** (`agent-ab-sandbox`) — `start_services.py` ไม่มี auto-restart (container ไม่มี cron/systemd) ตายแล้วต้อง start มือ — ถามด้วยว่า endpoint นี้ใครเป็นคน setup (ไม่มี ADR) — size: XS
 
