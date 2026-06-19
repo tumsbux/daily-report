@@ -204,6 +204,21 @@ tr.click:hover .arrow{color:var(--accent);}
 .gd-lbl{font-size:10px;color:#64748b;margin-top:2px;}
 .gd-sub{font-size:11px;color:#475569;margin-top:8px;text-align:center;}
 @media(max-width:700px){.exec-grid{grid-template-columns:1fr;}}
+
+/* ── SALES EXEC REPORT MODAL ─ */
+.sexec-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:3000;align-items:center;justify-content:center;padding:20px}
+.sexec-modal.open{display:flex}
+.sexec-modal-body{background:#fff;border-radius:16px;max-width:800px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 28px 70px rgba(0,0,0,.35);animation:sexecSlide .25s ease-out}
+@keyframes sexecSlide{from{transform:translateY(-18px);opacity:0}to{transform:translateY(0);opacity:1}}
+.sexec-modal-head{display:flex;justify-content:space-between;align-items:center;padding:16px 22px;border-bottom:1px solid #e5e7eb;background:linear-gradient(135deg,#0f172a,#1e3a5f);border-radius:16px 16px 0 0}
+.sexec-modal-head h3{font-size:15px;font-weight:800;color:#fff;margin:0}
+.sexec-close-btn{background:rgba(255,255,255,.15);border:none;font-size:20px;cursor:pointer;color:#fff;padding:2px 8px;border-radius:6px}
+.sexec-close-btn:hover{background:rgba(255,255,255,.3)}
+#sexec-modal-content{padding:20px 22px;font-size:13px;line-height:1.7;color:#1e293b;font-family:'Noto Sans Thai',Sarabun,'Segoe UI',sans-serif}
+@media print{body>*{display:none!important}body>#sexec-modal,body>#sexec-modal *{display:block!important;visibility:visible!important}
+  #sexec-modal{position:absolute;left:0;top:0;width:100%;height:auto;background:none!important;display:block!important}
+  .sexec-modal-body{box-shadow:none!important;max-height:none!important;overflow:visible!important;width:100%!important;max-width:none!important}
+  .sexec-close-btn{display:none!important}}
 </style>
 </head>
 <body>
@@ -212,7 +227,7 @@ tr.click:hover .arrow{color:var(--accent);}
   <div class="breadcrumb" id="bc"></div>
   <div class="topdate" id="topdate">มิถุนายน 2026<br>MTD: 1–<span id="td-days">17</span> มิ.ย.</div>
   <button class="rpt-nav-btn" onclick="goExec()">📊 Executive</button> <button class="rpt-nav-btn" onclick="goReport()">📋 รายงาน</button>
-  <a href="index.html" class="rpt-nav-btn" style="text-decoration:none">← Hub</a>
+  <button onclick="openSalesExecReport()" style="background:linear-gradient(135deg,#e11d48,#be123c);color:#fff;border:none;border-radius:6px;padding:5px 14px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:5px">📋 Executive Report</button> <a href="index.html" class="rpt-nav-btn" style="text-decoration:none">← Hub</a>
 </div>
 <div class="main" id="app"></div>
 
