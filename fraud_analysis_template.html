@@ -1380,7 +1380,7 @@ function openFraudExecReport(){
     topStores.forEach(function(s){
       var lc=s.level==='HIGH'?'#dc2626':s.level==='MEDIUM'?'#d97706':'#16a34a';
       html+='<tr style="border-bottom:1px solid #f1f5f9">'
-        +'<td style="padding:5px 8px;font-weight:600">'+s.whs+' '+(s.name||s.store_name||'')+'</td>'
+        +'<td style="padding:5px 8px;font-weight:600">'+(s.code||s.whs||'')+' '+(s.name||s.store_name||'')+'</td>'
         +'<td style="padding:5px 8px">'+(s.dm_name||s.dm||'--')+'</td>'
         +'<td style="padding:5px 8px;text-align:right;font-weight:800;color:'+lc+'">'+(s.score||0).toFixed(0)+'</td>'
         +'<td style="padding:5px 8px;text-align:right">'+(s.ret_rate!=null?s.ret_rate.toFixed(1)+'%':'--')+'</td>'
