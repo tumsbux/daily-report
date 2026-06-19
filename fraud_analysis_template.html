@@ -110,6 +110,21 @@ tr:last-child td{border-bottom:none}
 .aibtn:hover{background:#4338ca}.aibtn:disabled{background:#a5b4fc;cursor:not-allowed}
 .aibtn.dark{background:#0f172a}.aibtn.dark:hover{background:#1e293b}
 .aiout{background:#f8faff;border:1px solid #e0e7ff;border-radius:8px;padding:11px 14px;font-size:12px;line-height:1.7;white-space:pre-wrap;width:100%;display:none}
+
+/* ── EXEC REPORT MODAL ─ */
+.fexec-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2000;align-items:center;justify-content:center;padding:20px}
+.fexec-modal.open{display:flex}
+.fexec-modal-body{background:#fff;border-radius:14px;max-width:760px;width:100%;max-height:88vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.3);animation:fexecSlide .25s ease-out}
+@keyframes fexecSlide{from{transform:translateY(-16px);opacity:0}to{transform:translateY(0);opacity:1}}
+.fexec-modal-head{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid #e5e7eb;background:linear-gradient(135deg,#fff1f2,#fee2e2);border-radius:14px 14px 0 0}
+.fexec-modal-head h3{font-size:15px;font-weight:800;color:#991b1b;margin:0}
+.fexec-close{background:none;border:none;font-size:22px;cursor:pointer;color:#94a3b8;padding:0 4px}
+.fexec-close:hover{color:#1e293b}
+#fexec-modal-content{padding:18px 20px;font-size:13px;line-height:1.7;color:#1e293b;font-family:'Segoe UI',Tahoma,sans-serif}
+@media print{body>*{display:none!important}body>#fexec-modal,body>#fexec-modal *{display:block!important;visibility:visible!important}
+  #fexec-modal{position:absolute;left:0;top:0;width:100%;height:auto;background:none!important;display:block!important}
+  .fexec-modal-body{box-shadow:none!important;max-height:none!important;overflow:visible!important;width:100%!important;max-width:none!important}
+  .fexec-close{display:none!important}}
 </style>
 </head>
 <body>
@@ -119,6 +134,8 @@ tr:last-child td{border-bottom:none}
   <h1>Fraud Detection Dashboard</h1>
   <span id="nav-chips"></span>
   <div class="nav-r">
+  <button onclick="openFraudExecReport()" style="background:linear-gradient(135deg,#e11d48,#be123c);color:#fff;border:none;border-radius:6px;padding:5px 13px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:5px;flex-shrink:0;white-space:nowrap">&#128203; Executive Report</button>
+  
     <span class="nav-date" id="nav-date"></span>
     <a href="index.html" class="nav-link">← Hub</a>
   </div>
@@ -1300,6 +1317,123 @@ function soReasonRowClick(tr){
 }
 
 setMonthAll('ALL');
+
+function openFraudExecReport(){
+  var gen=D.generated||'';
+  var allData=(D.data&&D.data['ALL'])?D.data['ALL']:{};
+  var stats=allData.stats||{};
+  var rtu=allData.rtu||[];
+  var stores=allData.stores||[];
+  var fmtN=function(n){return n==null?'--':Math.round(n).toLocaleString('th-TH');};
+  var highStores=stores.filter(function(s){return s.level==='HIGH';});
+  var medStores=stores.filter(function(s){return s.level==='MEDIUM';});
+  var lowStores=stores.filter(function(s){return s.level==='LOW';});
+  var totalRet=stats.total_amount||0;
+  var nightAmt=stats.night_amount||0;
+  var nightPct=totalRet?(nightAmt/totalRet*100):0;
+  var topStores=stores.slice().sort(function(a,b){return(b.score||0)-(a.score||0);}).slice(0,5);
+  var topRtu=rtu.slice(0,5);
+  var rmMap={};
+  stores.forEach(function(s){
+    var rm=s.rm_name||s.rm||'ไม่ระบุ';
+    if(!rmMap[rm])rmMap[rm]={stores:0,high:0,med:0,ret:0};
+    rmMap[rm].stores++;if(s.level==='HIGH')rmMap[rm].high++;if(s.level==='MEDIUM')rmMap[rm].med++;
+    rmMap[rm].ret+=s.ret_mtd||0;
+  });
+  var rmArr=Object.keys(rmMap).sort().map(function(rm){var v=rmMap[rm];return{name:rm,stores:v.stores,high:v.high,med:v.med,ret:v.ret};});
+  var html='<div style="font-family:\'Segoe UI\',Tahoma,sans-serif;color:#1e293b;line-height:1.65">'
+    +'<div style="text-align:center;margin-bottom:18px;border-bottom:2px solid #0f172a;padding-bottom:10px">'
+    +'<h2 style="font-size:17px;font-weight:800;margin-bottom:4px">รายงานสรุปสำหรับผู้บริหาร — Loss Prevention &amp; Fraud Risk</h2>'
+    +'<p style="font-size:12px;color:#475569">EXECUTIVE BOARD REPORT · สร้างเมื่อ '+gen+'</p>'
+    +'</div>';
+  html+='<div style="margin-bottom:18px">'
+    +'<h3 style="font-size:13px;font-weight:700;border-left:4px solid #dc2626;padding-left:8px;margin-bottom:8px">1. ภาพรวมความเสี่ยงทุจริตหน้าร้าน</h3>'
+    +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px">'
+    +'<div style="background:#fee2e2;border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:#991b1b;font-weight:700;margin-bottom:4px">HIGH RISK สาขา</div><div style="font-size:22px;font-weight:800;color:#dc2626">'+highStores.length+'</div></div>'
+    +'<div style="background:#fef3c7;border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:#92400e;font-weight:700;margin-bottom:4px">MEDIUM RISK สาขา</div><div style="font-size:22px;font-weight:800;color:#d97706">'+medStores.length+'</div></div>'
+    +'<div style="background:#dcfce7;border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:#166534;font-weight:700;margin-bottom:4px">LOW RISK สาขา</div><div style="font-size:22px;font-weight:800;color:#16a34a">'+lowStores.length+'</div></div>'
+    +'</div>'
+    +'<p style="font-size:12px;margin-bottom:4px">รวมมูลค่าคืนสินค้า MTD: <b>฿'+fmtN(totalRet)+'</b> · พนักงาน Return flags: <b>'+fmtN(stats.unique_rtu||0)+' คน</b></p>'
+    +'<p style="font-size:12px;margin-bottom:4px">Return ช่วงดึก (22:00-05:00): <b>฿'+fmtN(nightAmt)+'</b> ('+nightPct.toFixed(1)+'% ของทั้งหมด)</p>'
+    +'</div>';
+  if(rmArr.length){
+    html+='<div style="margin-bottom:18px">'
+      +'<h3 style="font-size:13px;font-weight:700;border-left:4px solid #dc2626;padding-left:8px;margin-bottom:8px">2. สรุปความเสี่ยงรายภูมิภาค (RM)</h3>'
+      +'<table style="width:100%;font-size:12px;border-collapse:collapse"><tr style="background:#fef2f2">'
+      +'<th style="padding:6px 8px;text-align:left">RM</th><th style="padding:6px 8px;text-align:right">สาขา</th>'
+      +'<th style="padding:6px 8px;text-align:right">HIGH</th><th style="padding:6px 8px;text-align:right">MED</th><th style="padding:6px 8px;text-align:right">Return MTD (฿)</th></tr>';
+    rmArr.forEach(function(rm){
+      html+='<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:5px 8px;font-weight:600">'+rm.name+'</td>'
+        +'<td style="padding:5px 8px;text-align:right">'+rm.stores+'</td>'
+        +'<td style="padding:5px 8px;text-align:right;color:#dc2626;font-weight:700">'+rm.high+'</td>'
+        +'<td style="padding:5px 8px;text-align:right;color:#d97706;font-weight:700">'+rm.med+'</td>'
+        +'<td style="padding:5px 8px;text-align:right;font-weight:600">฿'+fmtN(rm.ret)+'</td></tr>';
+    });
+    html+='</table></div>';
+  }
+  if(topStores.length){
+    html+='<div style="margin-bottom:18px">'
+      +'<h3 style="font-size:13px;font-weight:700;border-left:4px solid #dc2626;padding-left:8px;margin-bottom:8px">3. Loss Prevention Watchlist — Top 5 สาขาเสี่ยงสูง</h3>'
+      +'<table style="width:100%;font-size:12px;border-collapse:collapse"><tr style="background:#fef2f2">'
+      +'<th style="padding:6px 8px;text-align:left">ร้าน</th><th style="padding:6px 8px;text-align:left">DM</th>'
+      +'<th style="padding:6px 8px;text-align:right">Score</th><th style="padding:6px 8px;text-align:right">Return%</th><th style="padding:6px 8px;text-align:right">Return MTD (฿)</th></tr>';
+    topStores.forEach(function(s){
+      var lc=s.level==='HIGH'?'#dc2626':s.level==='MEDIUM'?'#d97706':'#16a34a';
+      html+='<tr style="border-bottom:1px solid #f1f5f9">'
+        +'<td style="padding:5px 8px;font-weight:600">'+s.whs+' '+(s.name||s.store_name||'')+'</td>'
+        +'<td style="padding:5px 8px">'+(s.dm_name||s.dm||'--')+'</td>'
+        +'<td style="padding:5px 8px;text-align:right;font-weight:800;color:'+lc+'">'+(s.score||0).toFixed(0)+'</td>'
+        +'<td style="padding:5px 8px;text-align:right">'+(s.ret_rate!=null?s.ret_rate.toFixed(1)+'%':'--')+'</td>'
+        +'<td style="padding:5px 8px;text-align:right;font-weight:600">฿'+fmtN(s.ret_mtd)+'</td></tr>';
+    });
+    html+='</table></div>';
+  }
+  if(topRtu.length){
+    html+='<div style="margin-bottom:18px">'
+      +'<h3 style="font-size:13px;font-weight:700;border-left:4px solid #d97706;padding-left:8px;margin-bottom:8px">4. พนักงานที่มีความเสี่ยงสูง (Watchlist)</h3>'
+      +'<table style="width:100%;font-size:12px;border-collapse:collapse"><tr style="background:#fef3c7">'
+      +'<th style="padding:6px 8px;text-align:left">พนักงาน</th><th style="padding:6px 8px;text-align:left">ร้าน</th><th style="padding:6px 8px;text-align:left">DM</th>'
+      +'<th style="padding:6px 8px;text-align:right">Returns</th><th style="padding:6px 8px;text-align:right">มูลค่า (฿)</th><th style="padding:6px 8px;text-align:right">Score</th></tr>';
+    topRtu.forEach(function(r){
+      var sc=r.fraud_score||0;var sc_c=sc>=60?'#dc2626':sc>=40?'#d97706':'#16a34a';
+      html+='<tr style="border-bottom:1px solid #f1f5f9">'
+        +'<td style="padding:5px 8px;font-weight:600">'+(r.fullname||r.rtuname)+' <span style="color:#94a3b8;font-size:10px">('+r.rtuname+')</span></td>'
+        +'<td style="padding:5px 8px">'+r.whs+' '+(r.store_name||'')+'</td>'
+        +'<td style="padding:5px 8px">'+(r.dm||'--')+'</td>'
+        +'<td style="padding:5px 8px;text-align:right">'+fmtN(r.returns)+'</td>'
+        +'<td style="padding:5px 8px;text-align:right;font-weight:600">฿'+fmtN(r.amount)+'</td>'
+        +'<td style="padding:5px 8px;text-align:right;font-weight:800;color:'+sc_c+'">'+sc.toFixed(1)+'</td></tr>';
+    });
+    html+='</table></div>';
+  }
+  html+='<div style="margin-bottom:18px">'
+    +'<h3 style="font-size:13px;font-weight:700;border-left:4px solid #dc2626;padding-left:8px;margin-bottom:8px">5. แผนปฏิบัติการ Loss Prevention</h3>'
+    +'<ol style="font-size:12px;padding-left:20px">'
+    +'<li><b>POS Security:</b> ล็อกสิทธิ์พนักงาน Fraud Score ≥ 60 ทันที + เปิด Dual-Authorization สำหรับการยกเลิกบิล/คืนสินค้ามูลค่าสูง</li>'
+    +'<li><b>CCTV Investigation:</b> สั่งกู้ไฟล์กล้อง CCTV ย้อนหลัง 30 วัน สำหรับ HIGH RISK stores ทุกสาขา</li>'
+    +'<li><b>Night Return Monitor:</b> Return ช่วงดึก '+nightPct.toFixed(1)+'% — ตั้ง alert อัตโนมัติเมื่อมี return หลัง 20:00 น.</li>'
+    +'<li><b>Audit Report:</b> DM ทุกท่านส่งรายงานติดตาม HIGH/MEDIUM risk stores ภายใน 5 วันทำการ</li>'
+    +'</ol></div>';
+  html+='<div style="text-align:right;border-top:1px solid #e2e8f0;padding-top:10px">'
+    +'<button onclick="window.print()" style="background:#475569;color:#fff;border:none;border-radius:18px;padding:6px 16px;font-size:12px;font-weight:600;cursor:pointer">&#128424;&#65039; พิมพ์รายงาน</button>'
+    +'</div></div>';
+  document.getElementById('fexec-modal-title').textContent='📋 รายงานสรุปผู้บริหาร — Fraud Dashboard';
+  document.getElementById('fexec-modal-content').innerHTML=html;
+  document.getElementById('fexec-modal').classList.add('open');
+}
+function closeFraudExecReport(){document.getElementById('fexec-modal').classList.remove('open');}
+
 </script>
+
+<div class="fexec-modal" id="fexec-modal" onclick="if(event.target.id==='fexec-modal')closeFraudExecReport()">
+  <div class="fexec-modal-body">
+    <div class="fexec-modal-head">
+      <h3 id="fexec-modal-title">&#128203; รายงานสรุปสำหรับผู้บริหาร — Fraud Dashboard</h3>
+      <button class="fexec-close" onclick="closeFraudExecReport()">&#10005;</button>
+    </div>
+    <div id="fexec-modal-content"></div>
+  </div>
+</div>
+
 </body>
 </html>

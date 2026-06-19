@@ -8,6 +8,8 @@ import csv, json, re, os, glob, sys, argparse, subprocess, shutil, tempfile, uui
 from collections import defaultdict
 from datetime import date, datetime
 
+sys.stdout.reconfigure(encoding='utf-8')
+
 # CONFIG
 FOLDER         = os.path.dirname(os.path.abspath(__file__))
 DASHBOARD_FILE = os.path.join(FOLDER, 'sales_dashboard_v8.html')

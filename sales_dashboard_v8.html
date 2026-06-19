@@ -1117,6 +1117,172 @@ function render(){
 updateTopDate();
 goHome();
 if(typeof Analytics!=='undefined')Analytics.dashboardViewed(D);
+
+function openSalesExecReport(){
+  var S=D.summary||{};
+  var RM=D.rm||[];
+  var DM=D.dm||[];
+  var days=S.days_elapsed||1;
+  var month=S.month_name||'';
+  var fmtN=function(n){return n==null?'—':Math.round(n).toLocaleString('th-TH');};
+  var fmtM=function(n){return n==null?'—':(n/1e6).toFixed(2)+' ล้าน';};
+  var fmtP=function(n){return n==null?'—':(n>0?'+':'')+n.toFixed(1)+'%';};
+
+  // ── KPI ──────────────────────────────────────────────────────────────────
+  var totSales=S.total_mtd||0;
+  var totProj=S.total_proj||0;
+  var totTarget=S.total_target||0;
+  var totMtdTarget=S.total_mtd_target||0;
+  var totGP=S.total_gp_mtd||0;
+  var gpPct=S.total_gp_pct||0;
+  var pctTgt=S.total_pct_target||0;
+  var projYoY=S.total_proj_yoy||0;
+  var txnYoY=S.total_txn_yoy||0;
+  var taYoY=S.total_ticket_avg_yoy||0;
+  var ticketAvg=S.total_ticket_avg||0;
+  var storeCnt=S.store_cnt||0;
+
+  // ── RM Summary ────────────────────────────────────────────────────────────
+  var rmSorted=[].concat(RM).sort(function(a,b){return (b.proj_yoy||0)-(a.proj_yoy||0);});
+  var rmByTarget=[].concat(RM).sort(function(a,b){return (b.pct_target||0)-(a.pct_target||0);});
+
+  // ── DM Top/Bottom ─────────────────────────────────────────────────────────
+  var dmSorted=[].concat(DM).sort(function(a,b){return (b.proj_yoy||0)-(a.proj_yoy||0);});
+  var top3DM=dmSorted.slice(0,3);
+  var bot3DM=dmSorted.slice().reverse().slice(0,3);
+
+  // ── At-risk (below target) ─────────────────────────────────────────────────
+  var atRisk=DM.filter(function(d){return (d.pct_target||0)<100;}).sort(function(a,b){return (a.pct_target||0)-(b.pct_target||0);}).slice(0,5);
+
+  // ── Build HTML ────────────────────────────────────────────────────────────
+  var gCls=function(v){return v>=0?'#16a34a':'#dc2626';};
+  var html='<div style="font-family:\'Noto Sans Thai\',Sarabun,\'Segoe UI\',sans-serif;color:#1e293b;line-height:1.65">';
+
+  // Header
+  html+='<div style="text-align:center;margin-bottom:18px;border-bottom:2px solid #0f172a;padding-bottom:12px">'
+    +'<h2 style="font-size:18px;font-weight:800;margin-bottom:4px;color:#0f172a">รายงานสรุปสำหรับผู้บริหาร — Sales Performance</h2>'
+    +'<p style="font-size:12px;color:#475569">EXECUTIVE BOARD REPORT · '+month+' · ข้อมูล '+days+' วัน ('+storeCnt+' สาขา)</p>'
+    +'</div>';
+
+  // Section 1 — KPI Overview
+  html+='<div style="margin-bottom:18px">'
+    +'<h3 style="font-size:13px;font-weight:700;border-left:4px solid #0f172a;padding-left:8px;margin-bottom:10px">1. ภาพรวม KPI ยอดขาย MTD</h3>'
+    +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px">'
+    +'<div style="background:#eff6ff;border-radius:10px;padding:12px;text-align:center;border-top:3px solid #3b82f6"><div style="font-size:10px;color:#1d4ed8;font-weight:700;margin-bottom:4px">ยอดขาย MTD</div><div style="font-size:15px;font-weight:800;color:#0f172a">฿'+fmtN(totSales)+'</div><div style="font-size:10px;color:#64748b">Proj: ฿'+fmtN(totProj)+'</div></div>'
+    +'<div style="background:#f0fdf4;border-radius:10px;padding:12px;text-align:center;border-top:3px solid #22c55e"><div style="font-size:10px;color:#15803d;font-weight:700;margin-bottom:4px">vs เป้าเดือน</div><div style="font-size:15px;font-weight:800;color:'+gCls(pctTgt-100)+'">'+pctTgt.toFixed(1)+'%</div><div style="font-size:10px;color:#64748b">เป้า: ฿'+fmtN(totMtdTarget)+'</div></div>'
+    +'<div style="background:#fef3c7;border-radius:10px;padding:12px;text-align:center;border-top:3px solid #f59e0b"><div style="font-size:10px;color:#92400e;font-weight:700;margin-bottom:4px">YoY Projected</div><div style="font-size:15px;font-weight:800;color:'+gCls(projYoY)+'">'+fmtP(projYoY)+'</div><div style="font-size:10px;color:#64748b">เทียบมิ.ย. 2568</div></div>'
+    +'<div style="background:#faf5ff;border-radius:10px;padding:12px;text-align:center;border-top:3px solid #a855f7"><div style="font-size:10px;color:#6b21a8;font-weight:700;margin-bottom:4px">GP% (Avg GP)</div><div style="font-size:15px;font-weight:800;color:#0f172a">'+gpPct.toFixed(1)+'%</div><div style="font-size:10px;color:#64748b">฿'+fmtN(totGP)+'</div></div>'
+    +'</div>'
+    +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">'
+    +'<div style="background:#f8fafc;border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:#64748b;font-weight:700;margin-bottom:3px">Avg Ticket</div><div style="font-size:14px;font-weight:800">฿'+fmtN(ticketAvg)+'</div><div style="font-size:10px;color:'+gCls(taYoY)+'">'+fmtP(taYoY)+' YoY</div></div>'
+    +'<div style="background:#f8fafc;border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:#64748b;font-weight:700;margin-bottom:3px">Transaction YoY</div><div style="font-size:14px;font-weight:800;color:'+gCls(txnYoY)+'">'+fmtP(txnYoY)+'</div><div style="font-size:10px;color:#64748b">'+fmtN(S.total_txn||0)+' รายการ</div></div>'
+    +'<div style="background:#f8fafc;border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:#64748b;font-weight:700;margin-bottom:3px">Daily Sales Rate</div><div style="font-size:14px;font-weight:800">฿'+fmtN(S.total_daily||0)+'</div><div style="font-size:10px;color:#64748b">ต่อวัน</div></div>'
+    +'</div></div>';
+
+  // Section 2 — RM Summary
+  html+='<div style="margin-bottom:18px">'
+    +'<h3 style="font-size:13px;font-weight:700;border-left:4px solid #0f172a;padding-left:8px;margin-bottom:8px">2. สรุปผลงานรายภูมิภาค (RM)</h3>'
+    +'<table style="width:100%;font-size:12px;border-collapse:collapse"><tr style="background:#f8fafc">'
+    +'<th style="padding:7px 8px;text-align:left">RM</th>'
+    +'<th style="padding:7px 8px;text-align:right">ยอดขาย MTD</th>'
+    +'<th style="padding:7px 8px;text-align:right">vs เป้า%</th>'
+    +'<th style="padding:7px 8px;text-align:right">YoY Proj%</th>'
+    +'<th style="padding:7px 8px;text-align:right">GP%</th>'
+    +'<th style="padding:7px 8px;text-align:right">Ticket Avg</th></tr>';
+  RM.forEach(function(r){
+    var tgc=(r.pct_target||0)>=100?'#16a34a':'#dc2626';
+    var yc=(r.proj_yoy||0)>=0?'#16a34a':'#dc2626';
+    html+='<tr style="border-bottom:1px solid #f1f5f9">'
+      +'<td style="padding:6px 8px;font-weight:700">'+r.rm+'<div style="font-size:10px;color:#64748b;font-weight:400">'+( r.rm_name||'')+' ('+( r.cnt||0)+' สาขา)</div></td>'
+      +'<td style="padding:6px 8px;text-align:right;font-weight:600">฿'+fmtN(r.sales_mtd)+'</td>'
+      +'<td style="padding:6px 8px;text-align:right;font-weight:700;color:'+tgc+'">'+( r.pct_target||0).toFixed(1)+'%</td>'
+      +'<td style="padding:6px 8px;text-align:right;font-weight:700;color:'+yc+'">'+(r.proj_yoy>=0?'+':'')+( r.proj_yoy||0).toFixed(1)+'%</td>'
+      +'<td style="padding:6px 8px;text-align:right">'+( r.gp_pct||0).toFixed(1)+'%</td>'
+      +'<td style="padding:6px 8px;text-align:right">฿'+fmtN(r.ticket_avg)+'</td></tr>';
+  });
+  html+='</table></div>';
+
+  // Section 3 — Top/Bottom DM
+  html+='<div style="margin-bottom:18px;display:grid;grid-template-columns:1fr 1fr;gap:12px">';
+
+  // Top DM
+  html+='<div><h3 style="font-size:12px;font-weight:700;border-left:4px solid #16a34a;padding-left:8px;margin-bottom:8px">3a. DM ยอดเยี่ยม (YoY%)</h3>'
+    +'<table style="width:100%;font-size:11px;border-collapse:collapse"><tr style="background:#f0fdf4">'
+    +'<th style="padding:5px 7px;text-align:left">DM</th><th style="padding:5px 7px;text-align:right">YoY%</th><th style="padding:5px 7px;text-align:right">vs เป้า%</th></tr>';
+  top3DM.forEach(function(d){
+    html+='<tr style="border-bottom:1px solid #f1f5f9">'
+      +'<td style="padding:5px 7px;font-weight:600">'+d.dm_name+'<div style="font-size:10px;color:#64748b">'+d.rm+'</div></td>'
+      +'<td style="padding:5px 7px;text-align:right;font-weight:700;color:#16a34a">+'+(d.proj_yoy||0).toFixed(1)+'%</td>'
+      +'<td style="padding:5px 7px;text-align:right">'+( d.pct_target||0).toFixed(1)+'%</td></tr>';
+  });
+  html+='</table></div>';
+
+  // Bottom DM
+  html+='<div><h3 style="font-size:12px;font-weight:700;border-left:4px solid #dc2626;padding-left:8px;margin-bottom:8px">3b. DM ต้องการการสนับสนุน</h3>'
+    +'<table style="width:100%;font-size:11px;border-collapse:collapse"><tr style="background:#fef2f2">'
+    +'<th style="padding:5px 7px;text-align:left">DM</th><th style="padding:5px 7px;text-align:right">YoY%</th><th style="padding:5px 7px;text-align:right">vs เป้า%</th></tr>';
+  bot3DM.forEach(function(d){
+    var yc=(d.proj_yoy||0)>=0?'#16a34a':'#dc2626';
+    html+='<tr style="border-bottom:1px solid #f1f5f9">'
+      +'<td style="padding:5px 7px;font-weight:600">'+d.dm_name+'<div style="font-size:10px;color:#64748b">'+d.rm+'</div></td>'
+      +'<td style="padding:5px 7px;text-align:right;font-weight:700;color:'+yc+'">'+(d.proj_yoy>=0?'+':'')+( d.proj_yoy||0).toFixed(1)+'%</td>'
+      +'<td style="padding:5px 7px;text-align:right">'+( d.pct_target||0).toFixed(1)+'%</td></tr>';
+  });
+  html+='</table></div></div>';
+
+  // Section 4 — At-risk stores
+  if(atRisk.length){
+    html+='<div style="margin-bottom:18px">'
+      +'<h3 style="font-size:13px;font-weight:700;border-left:4px solid #f59e0b;padding-left:8px;margin-bottom:8px">4. DM ที่ยอดขายต่ำกว่าเป้า (ต้องเร่งปิด MTD)</h3>'
+      +'<table style="width:100%;font-size:12px;border-collapse:collapse"><tr style="background:#fef3c7">'
+      +'<th style="padding:6px 8px;text-align:left">DM</th><th style="padding:6px 8px;text-align:left">RM</th>'
+      +'<th style="padding:6px 8px;text-align:right">ยอดขาย MTD</th><th style="padding:6px 8px;text-align:right">vs เป้า%</th>'
+      +'<th style="padding:6px 8px;text-align:right">ขาดเป้า (฿)</th></tr>';
+    atRisk.forEach(function(d){
+      var gap=(d.mtd_target||0)-(d.sales_mtd||0);
+      html+='<tr style="border-bottom:1px solid #f1f5f9">'
+        +'<td style="padding:5px 8px;font-weight:600">'+d.dm_name+'</td>'
+        +'<td style="padding:5px 8px;color:#64748b">'+d.rm+'</td>'
+        +'<td style="padding:5px 8px;text-align:right">฿'+fmtN(d.sales_mtd)+'</td>'
+        +'<td style="padding:5px 8px;text-align:right;font-weight:700;color:#dc2626">'+( d.pct_target||0).toFixed(1)+'%</td>'
+        +'<td style="padding:5px 8px;text-align:right;font-weight:700;color:#d97706">-฿'+fmtN(gap)+'</td></tr>';
+    });
+    html+='</table></div>';
+  }
+
+  // Section 5 — Action Plan
+  var growthRM=[].concat(RM).sort(function(a,b){return (b.proj_yoy||0)-(a.proj_yoy||0);})[0]||{};
+  var riskRM=[].concat(RM).sort(function(a,b){return (a.proj_yoy||0)-(b.proj_yoy||0);})[0]||{};
+  html+='<div style="margin-bottom:18px">'
+    +'<h3 style="font-size:13px;font-weight:700;border-left:4px solid #e11d48;padding-left:8px;margin-bottom:8px">5. แผนปฏิบัติการเชิงกลยุทธ์ (Management Action Plan)</h3>'
+    +'<ol style="font-size:12px;padding-left:20px;margin-bottom:8px">'
+    +'<li><b>Growth Engine — '+( growthRM.rm||'RM')+':</b> YoY Proj +'+( growthRM.proj_yoy||0).toFixed(1)+'% — Push aggressively เพื่อดึง market share เพิ่ม; จัด mega-promotion ช่วงปิดเดือน</li>'
+    +'<li><b>At-Risk Recovery:</b> DM ที่ยอดต่ำกว่าเป้า '+atRisk.length+' ท่าน — ให้ทำ Action Plan ส่ง RM ภายใน 24 ชม. พร้อม daily check-in จนสิ้นเดือน</li>'
+    +'<li><b>Avg Ticket:</b> ปัจจุบัน ฿'+fmtN(ticketAvg)+' (YoY '+fmtP(taYoY)+') — ฝึก Upsell/Cross-sell; กำหนด minimum basket target รายร้าน</li>'
+    +'<li><b>GP% Management:</b> รักษา GP ไม่ต่ำกว่า 33% — ทบทวน discount policy รายสาขาที่ GP% ต่ำกว่า 32%</li>'
+    +'</ol></div>';
+
+  html+='<div style="text-align:right;border-top:1px solid #e2e8f0;padding-top:10px;margin-top:4px">'
+    +'<button onclick="window.print()" style="background:#0f172a;color:#fff;border:none;border-radius:18px;padding:7px 18px;font-size:12px;font-weight:600;cursor:pointer">🖨️ พิมพ์รายงาน</button>'
+    +'</div></div>';
+
+  document.getElementById('sexec-modal-title').textContent='📋 รายงานสรุปสำหรับผู้บริหาร — Sales Dashboard ('+month+')';
+  document.getElementById('sexec-modal-content').innerHTML=html;
+  document.getElementById('sexec-modal').classList.add('open');
+}
+function closeSalesExecReport(){document.getElementById('sexec-modal').classList.remove('open');}
+
 </script>
+
+<div class="sexec-modal" id="sexec-modal" onclick="if(event.target.id==='sexec-modal')closeSalesExecReport()">
+  <div class="sexec-modal-body">
+    <div class="sexec-modal-head">
+      <h3 id="sexec-modal-title">📋 รายงานสรุปสำหรับผู้บริหาร — Sales Dashboard</h3>
+      <button class="sexec-close-btn" onclick="closeSalesExecReport()">✕</button>
+    </div>
+    <div id="sexec-modal-content"></div>
+  </div>
+</div>
+
 </body>
 </html>

@@ -4,7 +4,8 @@ inject_fraud_only.py
 Reads fraud_data.json and injects it into fraud_dashboard.html, then pushes to GitHub.
 Run: py inject_fraud_only.py
 """
-import os, json, re, subprocess, tempfile, uuid, shutil
+import os, sys, json, re, subprocess, tempfile, uuid, shutil
+sys.stdout.reconfigure(encoding='utf-8')
 
 FOLDER     = os.path.dirname(os.path.abspath(__file__))
 FRAUD_FILE = os.path.join(FOLDER, 'fraud_dashboard.html')
