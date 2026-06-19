@@ -7,9 +7,6 @@
 - Main: `tumsbux/daily-report` → https://tumsbux.github.io/daily-report/
 - Lost Product: `tumsbux/lost-Product` → https://tumsbux.github.io/lost-Product/
 
-> **เก่า 73KB:** ดู [`CLAUDE.old.md`](./CLAUDE.old.md) (backup ก่อนแตกย่อย — 2026-06-08)
-> **Lost Product มี docs แยก** ที่ `F:\lost-Product\` (mirror ของไฟล์เหล่านี้ — sync ล่าสุด 2026-06-12 PM6)
-
 ---
 
 ## 📂 Documentation (โหลดเฉพาะที่ต้องใช้)
@@ -31,7 +28,7 @@
 ## 🤝 Multi-Agent Collaboration (สำคัญ! เพิ่ม 2026-06-10)
 
 User ทำงาน Dashboard ด้วย **2 agents** ขนานกัน:
-1. **Claude (Cowork mode)** — Opus 4.7 / Sonnet 4.6
+1. **Claude (Cowork mode)** — Opus 4.7 / Sonnet 4.6 — ตัวที่กำลังอ่านอันนี้
 2. **Antigravity (Gemini 3 Flash)** — Google Antigravity IDE — แก้ dashboard ตัวเดียวกัน
 
 **กฎ collab:**
@@ -59,12 +56,14 @@ User ทำงาน Dashboard ด้วย **2 agents** ขนานกัน:
 
 ระบบ Dashboard อัปเดตอัตโนมัติทุกวัน **08:30 Bangkok** ผ่าน **GitHub Actions** (ไม่ต้องเปิด laptop)
 
-**Daily pipeline (07:30–09:30 BKK multi-cron):**
-1. `rebuild_fraud_analysis.py --no-push` → builds fraud_data.json *(continue-on-error)*
-2. `build_product_data_mysql.py --no-push` → builds product_data.json *(continue-on-error)*
-3. `build_lost_product_data.py` → builds lost_product_data.json *(continue-on-error)*
-4. push_lost_data → push JSON ไป tumsbux/lost-Product repo
-5. `update_dashboard.py` → updates sales + injects fraud/product → pushes daily-report
+**Daily pipeline (single cron 08:30 BKK — `30 1 * * *` UTC):**
+1. Restore cache from orphan branch `cache`
+2. `rebuild_fraud_analysis.py --no-push` → builds fraud_data.json *(continue-on-error)*
+3. `build_product_data_mysql.py --no-push` → builds product_data.json *(continue-on-error)*
+4. `build_lost_product_data.py` → builds lost_product_data.json *(continue-on-error)*
+5. push_lost_data → push JSON ไป tumsbux/lost-Product repo
+6. `update_dashboard.py` → updates sales + injects fraud/product → pushes daily-report
+7. Push cache → orphan branch `cache` (force, single commit)
 
 **Manual run (Windows):**
 ```powershell
@@ -96,7 +95,7 @@ User ทำงาน Dashboard ด้วย **2 agents** ขนานกัน:
 
 ---
 
-## 🟡 Pending Approval (updated 2026-06-12 PM6)
+## 🟡 Pending Approval (updated 2026-06-14)
 
 - **Phase IR (Incremental Refresh)** — สถานะจริงหลัง Claude ตรวจ code 2026-06-11:
   - ✅ **IR-A (Lost Product)** — implemented + accepted (ADR `[2026-06-10]`, Parquet cache)
@@ -104,9 +103,20 @@ User ทำงาน Dashboard ด้วย **2 agents** ขนานกัน:
   - ✅ **User accept แบบมีเงื่อนไข (2026-06-11 PM)** — fraud cache lag ✅ document-only / verify onhand ✅ deployed / **repo bloat ✅ deployed 2026-06-12 PM7** (orphan branch `cache` + force-push): main `d57451ee` + branch `cache` `b42be68c` (11 ไฟล์) + main cleaned `dd6fb478` — **3 เงื่อนไขเคลียร์ครบ** เหลือ verify GHA รุ่งขึ้น (step Restore/Push cache เขียว) แล้วปลดล็อกขยาย IR
 - ✅ **Compact JSON encoding — DEPLOYED 2026-06-12 PM**: verify บน Windows ผ่าน (49.5 MB, schema 2, dashboard render ปกติ) + pushed **daily-report `858db387`** + **lost-Product `fdeacd1`** — **🔓 Antigravity ปลดล็อก lost-product builder/frontend แล้ว** — ✅ `build_grouped_with_barcodes.py` verified จบ PM7: รันจริงบน Windows ทั้ง v1/v2 parity เป๊ะ + xlsx saved
 - 🔌 **MySQL MCP — ✅ ใช้งานได้แล้ว (2026-06-12 PM5):** account `agent-102` READ-only — tools `mcp__mysql__execute_sql / get_schema_info / get_table_sample` ใช้ได้ใน Cowork — verify ผ่านครบ (dim_branch 203 / cross-DB / READ-only denied) — root cause 2 ชั้น: (1) Store version ใช้ config ที่ `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\` (2) ต้อง Quit จาก tray จริง (เช็ค `Get-Process *claude*` ว่าง) MCP ใหม่ถึงโหลด (ดู Gotchas.md + Architecture.md §MySQL MCP) — **password ห้าม commit ลง repo**
-- 🖥️ **VM Dashboard Mirror (`agent-ab-sandbox.tjinternal.com:48081`) — identify + กู้คืนแล้ว 2026-06-12 PM5:** container mirror dashboards, sync จาก GitHub ทุก 10 นาที — service ตาย 11 มิ.ย. → restart แล้ว (ops คู่มือใน How_To_Modify_Dashboards.md §4b, ADR post-hoc ใน Decisions.md) — **ค้าง:** ขอ IT restart policy + ย้าย SSH creds ออกจาก `run_vm_command.py` และเพื่อน (ฝัง password, ยังไม่หลุดขึ้น repo — ดู Roadmap "Now") — data ปัจจุบันวัน 11/30 (manual update 2026-06-12 20:02 หลัง push v2 พ่วงไฟล์เก่าทับ — ดู Gotchas)
-- 📝 **Push mechanics:** `F:\co work dashboard\` **ไม่ใช่ git clone** — push daily-report ผ่าน GitHub API scripts (`push_py_to_github.py` ทั้ง list / `push_v2_schema.py` เลือกไฟล์) ส่วน lost-Product ใช้ `push_lost_data.ps1` (temp clone) — `F:\lost-Product-git\` มี stale `index.lock` ค้าง (2026-06-12) ใช้งานไม่ได้จนกว่าจะลบ
+- 🖥️ **VM Dashboard Mirror (`agent-ab-sandbox.tjinternal.com:48081`) — identify + กู้คืนแล้ว 2026-06-12 PM5:** container mirror dashboards, sync จาก GitHub ทุก 10 นาที — service ตาย 11 มิ.ย. → restart แล้ว (ops คู่มือใน How_To_Modify_Dashboards.md §4b, ADR post-hoc ใน Decisions.md) — ✅ SSH creds ย้ายออกจาก scripts แล้ว 2026-06-13 (อ่านจาก `db_config.json`) — **ค้าง:** ขอ IT restart policy เท่านั้น — data ปัจจุบันวัน 11/30 (manual update 2026-06-12 20:02 หลัง push v2 พ่วงไฟล์เก่าทับ — ดู Gotchas)
+- 📝 **Push mechanics:** `F:\co work dashboard\` **ไม่ใช่ git clone** — push daily-report ผ่าน GitHub API scripts (`push_files_api.py` เลือกไฟล์ / `push_py_to_github.py` hardcoded list) ส่วน lost-Product ใช้ `push_lost_data.ps1` (temp clone) — `F:\lost-Product-git\` มี stale `index.lock` ค้าง (2026-06-12) ใช้งานไม่ได้จนกว่าจะลบ
+  - ⚠️ **`push_py_to_github.py` อันตราย** — hardcoded list รวม `.github/workflows/daily-update.yml` → ถ้า local เก่ากว่า GitHub จะทับ! ใช้ `push_files_api.py` แทนเสมอ (ดู Gotchas)
+  - ✅ **PAT ปัจจุบัน (`dashboard-bot-4`, classic, repo+workflow scope)** — push `.github/workflows/` ได้ผ่าน script ปกติ — อัปเดต local `db_config.json` + VM + GHA secret แล้ว (2026-06-14)
+
+- 🏪 **กิจกรรมธงฟ้า Dashboard (`tumsbux/thongfah-dashboard`) — deployed 2026-06-14:**
+  - URL: `https://tumsbux.github.io/thongfah-dashboard/`
+  - Scripts: `F:\lost-Product\thongfah_dashboard\` — `index.html`, `data.json` (160,753 rows, 45.3MB), `build_data.py`, `push_data_json.ps1`, `push_thongfah_update.py`
+  - Fixed: grand total %GP + tfoot alignment + SQL GROUP BY error + index.html truncation
+  - Added: date range filter, DT=14, GHA-compatible `build_data.py`
+  - ✅ **GitHub Actions LIVE (2026-06-14):** Secrets (MYSQL_HOST/PORT/USER/PASSWORD) + `daily-update.yml` + Workflow permissions (R/W) → Daily Thongfah Update #1 succeeded (168,753 rows) — อัปเดตอัตโนมัติทุก 08:35 BKK
+  - Push data.json: ใช้ `push_data_json.ps1` (git clone) — Contents API ปฏิเสธไฟล์ > 50MB
+  - คู่มือ: `F:\lost-Product\คู่มือ_Dashboard_ธงฟ้า.docx`
 
 ---
 
-_Last updated: 2026-06-12_
+_Last updated: 2026-06-19_

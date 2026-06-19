@@ -3,6 +3,20 @@
 > งานที่ทำเสร็จ — เรียงจากใหม่ → เก่า
 > Format: [Keep a Changelog](https://keepachangelog.com/)
 
+## [2026-06-19] Bugfix: Non-clickable "Executive Report" button & template store count sync (Antigravity)
+
+### Fixed
+- **Dashboard "Executive Report" Button**: Fixed a critical condition-checking bug in all patch files (`patch_exec_sales.py`, `patch_exec_fraud.py`, `patch_exec_product.py`, and `patch_exec_fraud_template.py`) where injecting the button (which contains the string `onclick="openSalesExecReport()"`) caused subsequent checks for JavaScript functions and modal HTML to falsely trigger "already present" skips. Updated checks to target class selectors, ID attributes, and function declarations specifically.
+- **HTML Modal String Collision**: Fixed a JS syntax error in `fraud_analysis_template.html` and `fraud_dashboard.html` where injecting modal HTML using simple `.replace('</body>')` matched a string literal within a print function (`+'</body></html>';`) instead of the true closing tag. Fixed by using `.rfind('</body>')` to locate the true end-of-file closing tag.
+- **Fraud Executive Report Store Counts**: Fixed a bug where the counts of HIGH/MEDIUM/LOW risk stores in the Fraud Executive Report modal showed `0` (even though the main page showed correct numbers). The modal's JS function expected `D.store_risk` (top-level key) but was reading from `allData.stores` (which was undefined due to the builder outputting `store` singular without risk levels). Updated JavaScript to read from `D.store_risk || D.sr || []`.
+
+### Deployed
+- Commits pushed to GitHub main branch:
+  - Updated `fraud_analysis_template.html` template.
+  - Re-run `update_dashboard.py` and `inject_fraud_only.py` to regenerate dashboards.
+  - Pushed template and updated patch/updater scripts via `py push_py_to_github.py`.
+  - Triggered and verified successful run of `daily-update.yml` GHA pipeline (Run ID: 27805001440).
+
 ## [2026-06-15] Phase C+D: fixes + GHA weekly-rebuild (Claude)
 
 ### Fixed
