@@ -1323,7 +1323,7 @@ function openFraudExecReport(){
   var allData=(D.data&&D.data['ALL'])?D.data['ALL']:{};
   var stats=allData.stats||{};
   var rtu=allData.rtu||[];
-  var stores=allData.stores||[];
+  var stores=D.store_risk||D.sr||[];
   var fmtN=function(n){return n==null?'--':Math.round(n).toLocaleString('th-TH');};
   var highStores=stores.filter(function(s){return s.level==='HIGH';});
   var medStores=stores.filter(function(s){return s.level==='MEDIUM';});
