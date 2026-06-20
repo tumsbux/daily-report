@@ -705,20 +705,36 @@ def push_github(cfg):
 
 # ── Auto-detect max available day in fact_sales ───────────────────────────────
 def detect_max_day(conn):
-    """Query fact_sales for the latest day with data in the current month/year."""
+    """Query fact_sales for the latest day with data in the current month/year.
+    Retry logic: if detected day < today-1 (expected), wait 60s and retry
+    up to 2 times — handles timing when fact_sales data is still loading.
+    """
+    import time
     end_date26 = f'{YEAR26}-{MONTH:02d}-{DAYS_26:02d}'
-    cur = conn.cursor()
-    cur.execute(f"""
-        SELECT MAX(DAY(sodate))
-        FROM fact_sales
-        WHERE sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
-          AND solinetype NOT IN ('C', 'R')
-          AND sotowhs REGEXP '^[0-9]+$'
-          AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
-    """)
-    row = cur.fetchone()
-    cur.close()
-    return int(row[0]) if row and row[0] else 1
+    expected_day = max(1, date.today().day - 1)
+    max_retries = 2
+
+    for attempt in range(max_retries + 1):
+        cur = conn.cursor()
+        cur.execute(f"""
+            SELECT MAX(DAY(sodate))
+            FROM fact_sales
+            WHERE sodate BETWEEN '{YEAR26}-{MONTH:02d}-01' AND '{end_date26}'
+              AND solinetype NOT IN ('C', 'R')
+              AND sotowhs REGEXP '^[0-9]+$'
+              AND CAST(sotowhs AS UNSIGNED) BETWEEN 1 AND 500
+        """)
+        row = cur.fetchone()
+        cur.close()
+        detected = int(row[0]) if row and row[0] else 1
+
+        if detected >= expected_day or attempt == max_retries:
+            if detected < expected_day:
+                print(f'  WARN: detect_max_day={detected} < expected={expected_day} after {max_retries} retries')
+            return detected
+
+        print(f'  detect_max_day={detected} < expected={expected_day} — retry {attempt+1}/{max_retries} in 60s...')
+        time.sleep(60)
 
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
