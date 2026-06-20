@@ -5,6 +5,26 @@
 
 ---
 
+## [2026-06-20] detect_max_day retry logic — product builder timing fix
+
+**Status:** Accepted
+
+**Context:** GHA pipeline รัน steps ตามลำดับ: fraud → product → lost-product → update_dashboard. ทุก step query `MAX(DAY(sodate))` จาก fact_sales เพื่อหา days_elapsed. พบว่า product builder (step 2) อาจ query ก่อนที่ data ของวันล่าสุดจะโหลดเสร็จ ทำให้ได้ max_day ต่ำกว่าจริง ขณะที่ update_dashboard (step 4) รันทีหลังไม่กี่นาทีได้ค่าถูก
+
+**Decision:** เพิ่ม retry loop ใน `build_product_data_mysql.py` → `detect_max_day()`:
+- เปรียบเทียบ detected day กับ `today.day - 1` (expected)
+- ถ้าน้อยกว่า → รอ 60 วินาที แล้ว retry (สูงสุด 2 ครั้ง)
+- ถ้ายังน้อยกว่าหลัง retry ครบ → ใช้ค่าที่ได้ + print WARN
+
+**Consequences:**
+- ✅ แก้ timing mismatch ระหว่าง product กับ sales dashboard
+- ✅ worst case เพิ่มเวลารัน 2 นาที (ยังอยู่ใน timeout 10 min)
+- ⚠️ `update_dashboard.py` มี fallback `max(1, today.day-1)` อยู่แล้ว ไม่ต้องเพิ่ม retry
+
+**Commit:** `7e698af7` (Claude, 2026-06-20)
+
+---
+
 ## [2026-06-04] GitHub Actions — Multi-cron 5 slots 07:30-09:30 BKK
 
 **Status:** Accepted
@@ -377,6 +397,37 @@ Phase IR ทำให้ GHA daily run ต้อง persist cache ข้าม r
 
 ---
 
+## [2026-06-19] ยอดขายสุทธิ = SUM(net_sales_amt) ห้ามหัก prorated_discount ซ้ำ
+
+**Status:** ✅ Accepted
+
+**Context:**
+รายงานเปรียบเทียบ bld_acc vs fact_sales ฉบับเดิม (Google Sheet `comparison_blh_bld_vs_fact_sales`) มี **2 BUGs**:
+1. ใช้ `SUM(net_sales_amt - prorated_discount)` → หักส่วนลดซ้ำ เพราะ `net_sales_amt = solineamt - prorated_discount` อยู่แล้ว → ตัวเลข 34,083,851 ผิด
+2. นับส่วนลดรวม 390,752 = บวก sodisc + sodisc_bill + sodisc_score ซ้ำ → จริงคือ 195,376 (sodisc = rollup ของ breakdown)
+
+ฉบับแก้ไข (`bill_level_comparison`) ยืนยัน:
+- ข้อมูล 99.95% ตรงสมบูรณ์ (231,088 บิล, 1-7 ม.ค. 2025)
+- ผลต่าง 110,228 ฿ = prorated_discount (185K) + sotype=3 (75K) + rounding (207 ฿)
+- **ไม่มี data mismatch จริงแม้แต่บิลเดียว**
+
+**Decision:**
+1. **ใช้ `SUM(net_sales_amt)` เป็นยอดขายสุทธิจาก fact_sales** — ห้ามหักอะไรเพิ่ม
+2. **ใช้ fact_sales เป็นแหล่งข้อมูลหลักสำหรับ GP%** — bld_acc ขาดส่วนลดบิล → GP สูงเกิน ~0.37%
+3. ทุก query/measure/DAX ที่ยังใช้ `net_sales_amt - prorated_discount` ต้องแก้เป็น `net_sales_amt`
+4. `sodisc` ใช้ตัวเดียวเป็น total discount — ห้ามบวก breakdown ซ้ำ
+
+**Consequences:**
+- ✅ GP% ถูกต้อง (33.61% จาก fact_sales แทน 33.25% ที่คิดซ้ำ / 33.98% จาก bld_acc ที่ขาดส่วนลด)
+- ✅ แก้ SQL ในรายงานเดิม + Column_Reference.xlsx + Power BI measures
+- ⚠️ ตัวเลข GP ที่เคยรายงานไปแล้ว (ถ้ามี) อาจต้อง restate
+
+**References:**
+- Google Sheet: `bill_level_comparison` (ฉบับแก้ไข, 6 sheets)
+- Google Sheet: `comparison_blh_bld_vs_fact_sales` (ฉบับเดิม มี bug — อ้างอิงได้แค่ benchmark GP% + column mapping)
+
+---
+
 ## 📚 Superseded
 
 - ~~`solinetype = 'N'` filter~~ (pre-2026-05-31) → `solinetype NOT IN ('C','R')` to match mobile app
@@ -386,4 +437,4 @@ Phase IR ทำให้ GHA daily run ต้อง persist cache ข้าม r
 
 ---
 
-_Last updated: 2026-06-12_
+_Last updated: 2026-06-19_

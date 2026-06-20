@@ -4,6 +4,20 @@
 
 ---
 
+### ⚠️ Product dashboard days_elapsed ไม่ตรงกับ Sales dashboard (พบ 2026-06-20)
+
+**Symptom:** Product dashboard แสดง 1–18 มิ.ย. ขณะที่ Sales/Fraud/Hub แสดง 1–19 มิ.ย. ทั้งที่รันใน GHA run เดียวกัน
+
+**Root cause:** `build_product_data_mysql.py` รัน**ก่อน** `update_dashboard.py` ใน pipeline. เมื่อ fact_sales data ของวันล่าสุดยังโหลดไม่เสร็จ → product builder query ได้ max_day ต่ำกว่าจริง → update_dashboard รันทีหลังได้ค่าถูก
+
+**Fix:** เพิ่ม retry logic ใน `detect_max_day()` — ถ้า detected < expected (today-1) รอ 60s แล้ว retry สูงสุด 2 ครั้ง (commit `7e698af7`)
+
+**Rule:** ถ้าเพิ่ม builder script ใหม่ที่ใช้ `detect_max_day` pattern → ต้องมี retry หรือ fallback เสมอ
+
+**Tags:** `#pipeline` `#timing` `#product-builder`
+
+---
+
 ### ⚠️ GitHub Contents API ปฏิเสธไฟล์ใหญ่ > ~50MB (พบ 2026-06-14)
 
 **Symptom:** `push_to_github.py` อัปโหลดไฟล์ผ่าน GitHub Contents API → error 422 `"Sorry, the file is too large to be processed."`
@@ -529,6 +543,12 @@ sodisc = sodisc_bill + sodisc_coupon + sodisc_perc + sodisc_score
 - **Trap:** ก่อนหน้านี้คิดว่า 5 subs (รวม bath) เป็น parallel channels → ผิด, double-count ~29% ของบิล
 - **ใช้ `sodisc` ตัวเดียวเพียงพอ** สำหรับ Total Discount
 
+**Update 2026-06-19 — confirmed via bill-level comparison (231,088 บิล, ม.ค. 2025):**
+- sodisc จริง = 195,376 ฿/สัปดาห์ (**ไม่ใช่ 390,752** ที่รายงานเดิมบวกซ้ำ)
+- prorated_discount (fact_sales) = sodisc ปันส่วนลงรายสินค้า — ยืนยัน 100% ทุกบิลที่มีส่วนลด
+- `net_sales_amt = solineamt - prorated_discount` (ยืนยัน 100% ทุก row)
+- **ใช้ `SUM(net_sales_amt)` เป็นยอดขายสุทธิจริง** — ห้ามหัก prorated_discount ซ้ำอีก (ดู Gotcha ถัดไป)
+
 **Power BI DAX (correct):**
 ```dax
 total disc = SUM('blh_acc'[sodisc])    -- ✅ rollup, ใช้ตัวเดียวพอ
@@ -546,6 +566,36 @@ total disc = SUM('blh_acc'[sodisc])    -- ✅ rollup, ใช้ตัวเด�
 - Probe `information_schema.COLUMNS` เสมอ ก่อนใช้ column ที่ไม่คุ้น
 
 **Tags:** `#sql` `#mypos` `#dbml-trap` `#discount`
+
+---
+
+### ⚠️ SUM(net_sales_amt - prorated_discount) หักส่วนลดซ้ำ — ยอดขายผิด 185K/สัปดาห์ (พบ 2026-06-19)
+
+**Symptom:**
+รายงานเปรียบเทียบ bld_acc vs fact_sales แสดงยอดขาย fact_sales = 34,083,851 ฿ (7 วัน) ต่ำกว่าความเป็นจริง ~185K ฿ → GP% ผิดเป็น 33.25% (จริง 33.61%)
+
+**Root cause:**
+`SUM(net_sales_amt - prorated_discount)` **หักซ้ำ** เพราะ:
+- `net_sales_amt = solineamt - prorated_discount` อยู่แล้ว (ยืนยัน 100% ทุก row)
+- หัก prorated_discount อีกครั้ง = double-subtract → ยอดต่ำเกิน 185,121 ฿
+
+**ตัวเลขจริง (1-7 ม.ค. 2025):**
+- ❌ `SUM(net_sales_amt - prorated_discount)` = 34,083,851 ← **ผิด**
+- ✅ `SUM(net_sales_amt)` = 34,268,972 ← **ถูก**
+
+**Fix:**
+```sql
+-- ✅ ถูก
+SELECT SUM(net_sales_amt) AS net_sales FROM fact_sales;
+-- ❌ ผิด — ห้ามใช้!
+SELECT SUM(net_sales_amt - prorated_discount) AS net_sales FROM fact_sales;
+```
+
+**Avoid:** ทุก query / measure / DAX ที่ใช้ `net_sales_amt` ห้ามหักอะไรเพิ่ม — มันคือยอดสุทธิจริงแล้ว ตรวจ Power BI measures + SQL ใน scripts ทั้งหมด
+
+**Related:** รายงาน Google Sheet เดิม (`comparison_blh_bld_vs_fact_sales`) ยังมี bug ที่ 2 — sodisc บวกซ้ำ (195,376 × 2 = 390,752) ดู ADR [2026-06-19] + Gotcha "sodisc เป็น bill-level"
+
+**Tags:** `#sql` `#fact-sales` `#double-subtract` `#discount` `#gp`
 
 ---
 
@@ -686,4 +736,4 @@ py push_files_api.py fraud_data.json -m "fix(fraud): correct time HH:MM"
 
 ---
 
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-19_

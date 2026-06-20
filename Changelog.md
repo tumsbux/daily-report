@@ -3,6 +3,43 @@
 > งานที่ทำเสร็จ — เรียงจากใหม่ → เก่า
 > Format: [Keep a Changelog](https://keepachangelog.com/)
 
+## [2026-06-20] Fix: detect_max_day retry logic for product builder (Claude)
+
+### Problem
+- Product dashboard แสดง 1–18 มิ.ย. ขณะที่ Sales/Fraud/Hub แสดง 1–19 มิ.ย.
+- Root cause: `build_product_data_mysql.py` รันก่อน `update_dashboard.py` ใน GHA pipeline — ตอน product builder query fact_sales ได้ max_day=18 (data วัน 19 ยังโหลดไม่เสร็จ) แต่ update_dashboard รันทีหลังไม่กี่นาทีได้ max_day=19
+
+### Fixed
+- เพิ่ม **retry logic** ใน `detect_max_day()` — ถ้า detected day < `today.day - 1` (expected) จะรอ 60 วินาทีแล้ว retry สูงสุด 2 ครั้ง
+- Commit: `7e698af7` → push via `push_files_api.py`
+- GHA run #125 verified — Product dashboard อัปเป็น 1–19/30 ✅
+
+### Note for Antigravity
+- ถ้าแก้ `build_product_data_mysql.py` ให้รักษา retry logic ใน `detect_max_day()` ไว้
+- `update_dashboard.py` มี fallback `max(1, today.day - 1)` อยู่แล้ว ไม่ต้องแก้
+
+---
+
+## [2026-06-19] Bill-Level Comparison Analysis — corrected report + docs update (Claude)
+
+### Analyzed
+- **Bill-level comparison** (Google Sheet `bill_level_comparison`): 231,088 bills, 1-7 Jan 2025
+- พบ **2 BUGs ในรายงานเดิม** (`comparison_blh_bld_vs_fact_sales`):
+  1. `SUM(net_sales_amt - prorated_discount)` หักส่วนลดซ้ำ (net_sales_amt หัก prorated ไว้แล้ว)
+  2. sodisc 390,752 คิดซ้ำ (จริง = 195,376 — sodisc เป็น rollup ไม่ใช่ channel แยก)
+- **ยืนยัน data quality 99.95%** — ผลต่างทั้งหมดอธิบายได้ (prorated_discount + sotype=3 + rounding)
+- Correct net sales = `SUM(net_sales_amt)` ไม่ต้องหักอะไรเพิ่ม
+- Benchmark GP%: ร้าน 33.61% (ดี — CPALL 29%, Makro 16-19%, Walmart 24.9%, 7-11 JP 32%)
+
+### Updated
+- **Architecture.md**: เพิ่ม §Bill-Level Comparison (ตัวเลข, สาเหตุผลต่าง, data quality, SQL ที่ถูก/ผิด, BUG report) + แก้ §Sales Data Source Verification (solineamt ≠ net_sales_amt)
+- **Decisions.md**: ADR [2026-06-19] — SUM(net_sales_amt) เป็น correct formula, fact_sales เป็น primary source
+- **Gotchas.md**: เพิ่ม gotcha double-subtraction bug + update sodisc entry ด้วยตัวเลขยืนยัน
+- **Roadmap.md**: เพิ่ม action items จาก analysis (GP% control, discount blocking, category management, margin dashboard)
+- **CLAUDE.md**: เพิ่ม §Data Quality Rules + reference ไปยัง Google Sheets + Column_Reference
+
+---
+
 ## [2026-06-19] Bugfix: Non-clickable "Executive Report" button & template store count sync (Antigravity)
 
 ### Fixed
