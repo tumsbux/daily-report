@@ -22,6 +22,8 @@
 | [Skill.md](./Skill.md) | บทเรียนส่วนตัว (Edit tool, probe-first, etc.) | ทบทวนเอง |
 | [How_To_Modify_Dashboards.md](./How_To_Modify_Dashboards.md) | คู่มือ user สำหรับแก้ UI/ETL/deploy | คนใหม่เริ่มงาน |
 | [Column_Reference.xlsx](./Column_Reference.xlsx) | **Quick reference card** — ยอดขาย/ส่วนลด/GP/cost columns + DAX measures + SQL patterns | งาน Power BI / สร้าง measure ใหม่ |
+| Google: `bill_level_comparison` | **ฉบับแก้ไข** — bld_acc vs fact_sales 231K bills, correct SQL, discount structure, data quality 99.95% | งาน GP / SQL / discount |
+| Google: `comparison_blh_bld_vs_fact_sales` | ฉบับเดิม (⚠️ SQL มี bug) — ใช้ได้แค่ benchmark GP%, column mapping, action plan | อ้างอิง benchmark เท่านั้น |
 
 ---
 
@@ -39,6 +41,22 @@ User ทำงาน Dashboard ด้วย **2 agents** ขนานกัน:
 - **Roadmap.md "Now" section** = source of truth สำหรับ in-flight work — ห้าม start งานที่ agent อื่น claim ไว้
 - **CLAUDE.md** (ไฟล์นี้) = primary doc, ทั้ง 2 agents อ่าน
 - **ถ้าเจอ commit ไม่รู้จัก:** อ่าน Decisions.md + Changelog.md ก่อนเสมอ
+
+## 🔒 Verification Gates (จาก AI DevKit concept — เพิ่ม 2026-06-20)
+
+**Rule 1 — No "done" without evidence:**
+ทุก Roadmap item ก่อน mark ✅ ต้องมี verification evidence:
+- Pipeline change → GHA run log หรือ manual Windows test output
+- Dashboard change → screenshot หรือ verify step ใน bash
+- SQL change → query result จาก MySQL MCP
+ห้าม assume จากการที่ code ดูถูกต้อง
+
+**Rule 2 — Plan-first, no-code-before-approval:**
+ทั้ง Claude และ Antigravity: ถ้างานมี architectural impact (ใหม่, เปลี่ยน pipeline, schema, caching) ต้อง:
+1. Draft plan ใน Decisions.md (ADR)
+2. **STOP — รอ user confirm ก่อน**
+3. ห้าม implement จนกว่าจะได้รับการ approve
+Reason: Antigravity IR-B/C/D incident 2026-06-10
 
 ---
 
@@ -83,6 +101,14 @@ User ทำงาน Dashboard ด้วย **2 agents** ขนานกัน:
 - **rebuild_fraud_analysis.py ต้องรันก่อน update_dashboard.py**
 - **Two folders for lost-Product:** `F:\lost-Product\` = Cowork working copy (no .git), `F:\lost-Product-git\` = real git clone — edits ต้อง sync ทั้งสอง หรือทำใน `-git\` แล้ว copy กลับ
 
+### 📊 Data Quality Rules (เพิ่ม 2026-06-19 — จาก Bill-Level Comparison Analysis)
+
+- **ยอดขายสุทธิ = `SUM(net_sales_amt)`** — ห้ามหัก `prorated_discount` ซ้ำ (มันหักไว้แล้ว)
+- **❌ `SUM(net_sales_amt - prorated_discount)` = ผิด** — หักซ้ำ ยอดห่าง ~185K/สัปดาห์
+- **`sodisc` = rollup** ไม่ใช่ channel แยก — `sodisc = sodisc_bill + sodisc_score + sodisc_coupon + sodisc_perc` — ห้ามบวกซ้ำ
+- **fact_sales = primary source for GP%** — bld_acc ขาดส่วนลดบิล → GP สูงเกิน ~0.37%
+- **Ref:** Google Sheets `bill_level_comparison` (ฉบับแก้ไข) + ADR [2026-06-19] + Architecture.md §Bill-Level Comparison
+
 ---
 
 ## 🚀 Daily Workflow
@@ -119,4 +145,4 @@ User ทำงาน Dashboard ด้วย **2 agents** ขนานกัน:
 
 ---
 
-_Last updated: 2026-06-19_
+_Last updated: 2026-06-23_

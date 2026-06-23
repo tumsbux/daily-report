@@ -3,6 +3,13 @@
 > งานที่ทำเสร็จ — เรียงจากใหม่ → เก่า
 > Format: [Keep a Changelog](https://keepachangelog.com/)
 
+## [2026-06-23] Trigger lost-Product Daily GP Analysis Rebuild automatically (Antigravity)
+
+### Fixed
+- **📅 GP Analysis Dashboard Auto-Update**: Resolved the issue where the GP Analysis dashboard was showing June 1-21 instead of June 1-22 because GitHub Actions' native scheduler on `tumsbux/lost-Product` was severely delayed or skipped.
+- **⚙️ Cross-Repository Trigger**: Added a workflow step using `curl` at the end of the `daily-update.yml` workflow in `daily-report` repository. This step uses the `GH_PAT` secret to programmatically trigger the `Daily GP Analysis Rebuild` workflow in the `lost-Product` repository via `workflow_dispatch` immediately after the daily dashboard updates complete.
+- **🚀 Manual Trigger**: Manually triggered the GP Analysis rebuild, updating the live dashboard to correctly display the data for **June 1-22** (วัน 1-22).
+
 ## [2026-06-20] Fix: detect_max_day retry logic for product builder (Claude)
 
 ### Problem
