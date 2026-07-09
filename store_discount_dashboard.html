@@ -306,25 +306,44 @@ function renderProductLevel(dateStr){
   document.getElementById('tableTitle').textContent =
     `รายการสินค้า — สาขา ${state.store} ${DATA.branches[state.store]?.name || ''} · linetype ${state.linetype}`;
   const thead = document.getElementById('theadRow');
-  thead.innerHTML = `<th>บาร์โค้ด</th><th style="text-align:left">ชื่อสินค้า</th><th>จำนวนขาย</th><th>ราคาเต็ม</th><th>ราคาลด</th><th>ราคาขายสุทธิ</th>`;
+  thead.innerHTML = `<th>บาร์โค้ด</th><th style="text-align:left">ชื่อสินค้า</th><th>จำนวนขาย</th><th>ราคาเต็ม</th><th>ราคาลด</th><th>ราคาขายสุทธิ</th><th>เทียบเมื่อวาน</th>`;
   const tbody = document.getElementById('tbodyRows');
   tbody.style.cursor = 'default';
 
   if (!PRODUCTS_DATA){
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--muted)">กำลังโหลดข้อมูลสินค้า...</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--muted)">กำลังโหลดข้อมูลสินค้า...</td></tr>`;
     document.getElementById('emptyMsg').style.display = 'none';
     ensureProductsLoaded();
     return;
   }
-  if (PRODUCTS_DATA.date !== dateStr){
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--muted)">รายละเอียดสินค้ามีเฉพาะวันล่าสุด (${PRODUCTS_DATA.date}) — เปลี่ยนวันที่เป็นวันนั้นเพื่อดู</td></tr>`;
+  if (!PRODUCTS_DATA.days[dateStr]){
+    const have = PRODUCTS_DATA.dates.join(', ');
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--muted)">รายละเอียดสินค้ามีเฉพาะวันล่าสุด (${have}) — เปลี่ยนวันที่เป็นวันใดวันหนึ่งด้านบนเพื่อดู</td></tr>`;
     document.getElementById('emptyMsg').style.display = 'none';
     return;
   }
-  const items = (PRODUCTS_DATA.stores[state.store] || []).filter(p => p.linetype === state.linetype)
+  const items = (PRODUCTS_DATA.days[dateStr][state.store] || []).filter(p => p.linetype === state.linetype)
                 .sort((a,b) => b.discount - a.discount);
+
+  // day-on-day comparison: find yesterday's entry for the same product, if available
+  const dates = DATA._dates;
+  const curIdx = dates.indexOf(dateStr);
+  const prevDateStr = curIdx > 0 ? dates[curIdx-1] : null;
+  const prevItems = (prevDateStr && PRODUCTS_DATA.days[prevDateStr]) ? (PRODUCTS_DATA.days[prevDateStr][state.store] || []) : [];
+  const prevByIprod = {};
+  prevItems.forEach(p => { if (p.linetype === state.linetype) prevByIprod[p.iprod] = p; });
+
   document.getElementById('emptyMsg').style.display = items.length ? 'none' : '';
-  tbody.innerHTML = items.map(p => `
+  tbody.innerHTML = items.map(p => {
+    const prev = prevByIprod[p.iprod];
+    let deltaHtml = '-';
+    if (prev && prev.discount > 0){
+      const d = (p.discount - prev.discount) / prev.discount;
+      deltaHtml = `<span style="color:${d>=0?'var(--red)':'var(--green)'}">${d>=0?'▲':'▼'} ${pct(Math.abs(d))}</span>`;
+    } else if (prev){
+      deltaHtml = '<span style="color:var(--muted)">-</span>';
+    }
+    return `
     <tr>
       <td>${p.barcode}</td>
       <td style="text-align:left">${p.name}</td>
@@ -332,7 +351,9 @@ function renderProductLevel(dateStr){
       <td>${fmt(p.list_amt)}</td>
       <td>${fmt(p.discount)}</td>
       <td>${fmt(p.net_sales)}</td>
-    </tr>`).join('');
+      <td>${deltaHtml}</td>
+    </tr>`;
+  }).join('');
 }
 
 function renderBreadcrumb(){
@@ -492,11 +513,11 @@ function downloadCSV(){
   const dateStr = dates[state.dateIdx];
 
   if (state.level === 'product'){
-    if (!PRODUCTS_DATA || PRODUCTS_DATA.date !== dateStr){
+    if (!PRODUCTS_DATA || !PRODUCTS_DATA.days[dateStr]){
       alert('รายละเอียดสินค้ามีเฉพาะวันล่าสุด — ยังโหลดไม่เสร็จหรือวันที่ไม่ตรง');
       return;
     }
-    const items = (PRODUCTS_DATA.stores[state.store] || []).filter(p => p.linetype === state.linetype);
+    const items = (PRODUCTS_DATA.days[dateStr][state.store] || []).filter(p => p.linetype === state.linetype);
     const header = ['barcode','name','qty','list_amt','discount','net_sales'];
     const lines = [header.join(',')];
     items.forEach(p => {

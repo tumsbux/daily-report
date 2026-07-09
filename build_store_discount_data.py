@@ -71,6 +71,7 @@ SCHEMA = 2  # v2: dropped store_discount column (bill-ratio method) — dashboar
             # derives discount = list_amt - net_sales and classifies store vs
             # marketing by solinetype key (O/P/Y = store) at read time
 WINDOW_DAYS_DEFAULT = 92  # ~3 months rolling
+PRODUCTS_DAYS_KEPT = 2    # store_discount_products.json: today + yesterday only
 
 
 def load_branches() -> dict:
@@ -215,29 +216,33 @@ def build(days_arg: int | None, single_day: str | None, push: bool):
     print(f'[build_store_discount_data] wrote {OUT_FILE} ({size:,} bytes, '
           f'{len(merged_days)} days, {len(branches)} branches)')
 
-    # Product-level detail (barcode/name/qty/price) — latest day only, overwritten
-    # each run (not accumulated — see query_product_detail docstring).
-    latest_day_str = max(merged_days.keys()) if merged_days else None
-    if latest_day_str:
+    # Product-level detail (barcode/name/qty/price) — latest PRODUCTS_DAYS_KEPT
+    # days only (default 2: today + yesterday, so the UI can show day-on-day
+    # comparison at product level too), fully overwritten each run — not
+    # accumulated onto the 92-day history (see query_product_detail docstring).
+    recent_day_strs = sorted(merged_days.keys())[-PRODUCTS_DAYS_KEPT:] if merged_days else []
+    if recent_day_strs:
         conn2 = get_conn()
-        latest_day = datetime.strptime(latest_day_str, '%Y-%m-%d').date()
-        product_stores = query_product_detail(conn2, latest_day)
+        products_days = {}
+        for d_str in recent_day_strs:
+            d = datetime.strptime(d_str, '%Y-%m-%d').date()
+            products_days[d_str] = query_product_detail(conn2, d)
         conn2.close()
         products_output = {
-            'schema': 1,
-            'date': latest_day_str,
+            'schema': 2,
+            'dates': recent_day_strs,
             'generated_at': datetime.now().isoformat(timespec='seconds'),
-            'stores': product_stores,
+            'days': products_days,
         }
         psize = safe_write_json(PRODUCTS_OUT_FILE, products_output)
         print(f'[build_store_discount_data] wrote {PRODUCTS_OUT_FILE} ({psize:,} bytes, '
-              f'{len(product_stores)} stores, date={latest_day_str})')
+              f'dates={recent_day_strs})')
     else:
         print('[build_store_discount_data] no days in output — skipping product detail')
 
     if push:
         push_github(OUT_FILE, 'store_discount_data.json')
-        if latest_day_str:
+        if recent_day_strs:
             push_github(PRODUCTS_OUT_FILE, 'store_discount_products.json')
 
 
