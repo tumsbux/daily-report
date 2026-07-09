@@ -103,7 +103,7 @@
   <div class="footnote">
     หมายเหตุ: "ส่วนลดที่สาขากดเอง" = ยอดส่วนต่างจากราคาปกติเฉพาะรายการที่มี linetype = O, P หรือ Y
     (ตัวจำแนกที่ยืนยันจากผู้ใช้งานจริง) รายการ linetype อื่นทั้งหมดถือเป็น "การตลาด/โปรอัตโนมัติ" (ราคาสมาชิก/โปรที่ระบบตั้งไว้)
-    และแสดงแยกไว้เป็นข้อมูลอ้างอิงเท่านั้น ไม่รวมในเป้าหมายหลักของแดชบอร์ดนี้ &middot; ตัด linetype C (ของแถม มูลค่า 0) ออกทั้งหมด
+    และแสดงแยกไว้เป็นข้อมูลอ้างอิงเท่านั้น ไม่รวมในเป้าหมายหลักของแดชบอร์ดนี้ &middot; ตัด linetype C (ของแถม) และ F (สินค้าสมนาคุณ) ออกทั้งหมด — ไม่นับ GP%
     &middot; เกณฑ์สี GP%: 🔴 &lt;10% &nbsp; 🟡 10–20% &nbsp; 🟢 &gt;20%
     &middot; อัปเดตอัตโนมัติทุกวัน 08:30 น. &middot; เก็บย้อนหลัง 92 วัน
   </div>
@@ -132,6 +132,7 @@ async function ensureProductsLoaded(){
 function fmt(n, d=0){ return Number(n).toLocaleString('th-TH', {minimumFractionDigits:d, maximumFractionDigits:d}); }
 function pct(n){ return (Number(n)*100).toFixed(1) + '%'; }
 function gpClass(gp){ if (gp < 0.10) return 'gp-red'; if (gp < 0.20) return 'gp-yellow'; return 'gp-green'; }
+function fmtDate(iso){ if (!iso) return iso; const [y,m,d] = iso.split('-'); return `${d}-${m}-${y}`; }
 
 async function init(){
   const res = await fetch(DATA_URL);
@@ -139,12 +140,12 @@ async function init(){
   const dates = Object.keys(DATA.days).sort();
   DATA._dates = dates;
   document.getElementById('genInfo').textContent =
-    `อัปเดตล่าสุด ${DATA.generated_at} · ข้อมูล ${dates[0]} ถึง ${dates[dates.length-1]} (${dates.length} วัน) · ${Object.keys(DATA.branches).length} สาขา`;
+    `อัปเดตล่าสุด ${DATA.generated_at} · ข้อมูล ${fmtDate(dates[0])} ถึง ${fmtDate(dates[dates.length-1])} (${dates.length} วัน) · ${Object.keys(DATA.branches).length} สาขา`;
 
   const sel = document.getElementById('dateSelect');
   dates.slice().reverse().forEach((d, i) => {
     const opt = document.createElement('option');
-    opt.value = dates.length-1-i; opt.textContent = d;
+    opt.value = dates.length-1-i; opt.textContent = fmtDate(d);
     sel.appendChild(opt);
   });
   sel.value = dates.length - 1;
@@ -174,8 +175,9 @@ function toggleMode(){
 // marketing/member-price promo. 'P' only ever occurs at whs '901' (special
 // channel, not a real 1-500 store) so in practice only O/Y show up here.
 const STORE_LINETYPES = new Set(['O','P','Y']);
-// linetype 'C' = ของแถม/free-gift line (มูลค่า 0 เสมอ) — ตัดออกทั้งหมดตามที่ user แจ้ง
-const EXCLUDED_LINETYPES = new Set(['C']);
+// linetype 'C' = ของแถม/free-gift (มูลค่า 0 เสมอ), 'F' = สินค้าสมนาคุณ/premium
+// (ราคาเต็มมีแต่ขายจริง 0 บาท ทำให้ GP% บิดเบือนรุนแรง เช่น -239900%) — ตัดทั้งคู่ออกตามที่ user แจ้ง
+const EXCLUDED_LINETYPES = new Set(['C', 'F']);
 
 function emptyAgg(){ return { qty:0, cost:0, net_sales:0, list_amt:0, store_discount:0, marketing_discount:0 }; }
 function addAgg(a, whsData){
@@ -317,7 +319,7 @@ function renderProductLevel(dateStr){
     return;
   }
   if (!PRODUCTS_DATA.days[dateStr]){
-    const have = PRODUCTS_DATA.dates.join(', ');
+    const have = PRODUCTS_DATA.dates.map(fmtDate).join(', ');
     tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--muted)">รายละเอียดสินค้ามีเฉพาะวันล่าสุด (${have}) — เปลี่ยนวันที่เป็นวันใดวันหนึ่งด้านบนเพื่อดู</td></tr>`;
     document.getElementById('emptyMsg').style.display = 'none';
     return;
@@ -476,7 +478,7 @@ function renderTrend(){
   // product-level has no 92-day history (only latest day) — fall back to the
   // store's linetype-level trend instead of trying to aggregate 'product'
   const groupBy = state.level === 'product' ? 'linetype' : currentGroupBy();
-  const labels = dates;
+  const labels = dates.map(fmtDate);
   const discSeries = [];
   const gpSeries = [];
   for (const d of dates){
