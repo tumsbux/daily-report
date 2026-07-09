@@ -49,6 +49,9 @@ Join: เหลือแค่ `fact_sales.iprod = dim_product.iprod` (+ `dim_br
 
 **เพิ่ม level ที่ 4: คลิกสาขา → แยกตาม Linetype (2026-07-09):** เดิม drill-down หยุดที่ระดับสาขา (ภาพรวม→RM→DM→Store) user ขอให้คลิกสาขาแล้วเห็น breakdown ตาม linetype ของสาขานั้นต่อ — เพิ่ม `state.store` + `groupBy='linetype'` ใน `aggregateForDate()`, breadcrumb เพิ่ม crumb "สาขา: ...", ตารางหลักเปลี่ยนเป็นแสดงต่อ linetype (พร้อม tag 🏪 สาขา / 📢 การตลาด) เมื่อ drill ถึงระดับนี้ ซ่อน panel breakdown ล่างสุดที่ซ้ำซ้อน
 
+**เพิ่ม level ที่ 5: คลิก linetype → รายการสินค้า (2026-07-09):** user ขอ column: บาร์โค้ด, ชื่อสินค้า, จำนวนขาย, ราคาเต็ม, ราคาลด, ราคาขายสุทธิ ต่อสินค้า — ข้อมูลระดับนี้ (store × product × linetype) ใหญ่เกินกว่าจะเก็บ 92 วันย้อนหลังแบบ `store_discount_data.json` (ลองแล้ว 1 วันเดียวได้ ~50K แถว / 11.7MB) จึงแยกไฟล์ใหม่ **`store_discount_products.json`** เก็บเฉพาะ**วันล่าสุดวันเดียว** (overwrite ทุกวัน ไม่สะสมประวัติ) — โหลดแบบ lazy (fetch เฉพาะตอนคลิกลึกถึงระดับนี้ครั้งแรก ไม่โหลดพร้อมหน้าแรก) query: `fact_sales JOIN dim_product` (ชื่อ+ราคา) + subquery `dim_item_barcode` (barcode, `baractive='Y'`) กรองสาขา 1-500 — เพิ่ม `query_product_detail()` ใน `build_store_discount_data.py` รันทุกครั้งที่ build (backfill/incremental) โดยใช้วันล่าสุดใน `merged_days` เสมอ, push แยกไฟล์ผ่าน `push_github()` (refactor ให้รับ path+filename เป็นพารามิเตอร์ ใช้ได้กับทั้งสองไฟล์)
+- ถ้าผู้ใช้เลือกดูวันที่เก่ากว่าวันล่าสุด แล้ว drill ถึงระดับสินค้า จะโชว์ข้อความแจ้งว่ามีแค่วันล่าสุด (ไม่มี fallback ไปวันอื่น)
+
 **GP% color threshold:** 🔴 <10%　🟡 10–20%　🟢 >20% (คำนวณหลังหักเฉพาะส่วนลดสาขา ไม่รวมคูปอง/คะแนน/เปอร์เซ็นต์การตลาด)
 
 **Hierarchy drill-down:** ภาพรวม → RM → DM → Store (คลิก drill ลง) + breakdown ตาม `solinetype` ในทุก level + เทียบวันนี้ vs เมื่อวาน

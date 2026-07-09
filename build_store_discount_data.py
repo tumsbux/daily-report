@@ -65,6 +65,7 @@ from lib.db import get_conn, get_config          # noqa: E402
 from lib.safe_write import safe_write_json        # noqa: E402
 
 OUT_FILE = os.path.join(FOLDER, 'store_discount_data.json')
+PRODUCTS_OUT_FILE = os.path.join(FOLDER, 'store_discount_products.json')
 BRANCH_CACHE = os.path.join(FOLDER, 'dim_cache.json')
 SCHEMA = 2  # v2: dropped store_discount column (bill-ratio method) — dashboard now
             # derives discount = list_amt - net_sales and classifies store vs
@@ -122,6 +123,52 @@ def query_range(conn, start_date: date, end_date_excl: date) -> dict:
     return days
 
 
+def query_product_detail(conn, target_date: date) -> dict:
+    """Product-level detail (barcode, name, qty, unit price, discount, net sales)
+    for ONE day only, per store. This is the 'drill into a store's linetype ->
+    per-product' view added 2026-07-09. Kept separate from store_discount_data.json
+    (which is aggregated, 92-day rolling) because per-product-per-store detail is
+    much bigger — only the latest day is kept, overwritten daily, not accumulated.
+    """
+    sql = """
+        SELECT LPAD(s.sotowhs,3,'0') AS whs, s.iprod, s.solinetype AS linetype,
+          SUM(s.net_qty) AS qty, SUM(s.net_sales_amt) AS net_sales,
+          SUM(dp.ipunit3 * s.net_qty) AS list_amt, dp.ipunit3 AS unit_price, dp.idesc AS name,
+          (SELECT MIN(b.barcode) FROM dim_item_barcode b WHERE b.parcode = s.iprod AND b.baractive='Y') AS barcode
+        FROM fact_sales s
+        JOIN dim_product dp ON dp.iprod = s.iprod
+        WHERE s.sodate >= %s AND s.sodate < %s
+          AND s.sotowhs REGEXP '^[0-9]+$'
+          AND CAST(s.sotowhs AS UNSIGNED) BETWEEN 1 AND 500
+        GROUP BY whs, s.iprod, linetype, dp.ipunit3, dp.idesc
+    """
+    start = target_date.isoformat()
+    end_excl = (target_date + timedelta(days=1)).isoformat()
+    cur = conn.cursor()
+    cur.execute(sql, (start, end_excl))
+    stores: dict = {}
+    n = 0
+    for whs, iprod, linetype, qty, net_sales, list_amt, unit_price, name, barcode in cur:
+        n += 1
+        bucket = stores.setdefault(whs, [])
+        list_amt = float(list_amt or 0)
+        net_sales = float(net_sales or 0)
+        bucket.append({
+            'iprod': iprod,
+            'barcode': barcode or iprod,
+            'name': name or iprod,
+            'linetype': linetype or '?',
+            'qty': round(float(qty or 0), 2),
+            'unit_price': round(float(unit_price or 0), 2),
+            'list_amt': round(list_amt, 2),
+            'net_sales': round(net_sales, 2),
+            'discount': round(list_amt - net_sales, 2),
+        })
+    cur.close()
+    print(f'      {n:,} (store, product, linetype) rows for product detail on {target_date.isoformat()}')
+    return stores
+
+
 def merge_days(existing: dict, fresh: dict, window_days: int) -> dict:
     """Merge fresh day-buckets into existing, then trim to rolling window."""
     merged = dict(existing)
@@ -168,11 +215,33 @@ def build(days_arg: int | None, single_day: str | None, push: bool):
     print(f'[build_store_discount_data] wrote {OUT_FILE} ({size:,} bytes, '
           f'{len(merged_days)} days, {len(branches)} branches)')
 
+    # Product-level detail (barcode/name/qty/price) — latest day only, overwritten
+    # each run (not accumulated — see query_product_detail docstring).
+    latest_day_str = max(merged_days.keys()) if merged_days else None
+    if latest_day_str:
+        conn2 = get_conn()
+        latest_day = datetime.strptime(latest_day_str, '%Y-%m-%d').date()
+        product_stores = query_product_detail(conn2, latest_day)
+        conn2.close()
+        products_output = {
+            'schema': 1,
+            'date': latest_day_str,
+            'generated_at': datetime.now().isoformat(timespec='seconds'),
+            'stores': product_stores,
+        }
+        psize = safe_write_json(PRODUCTS_OUT_FILE, products_output)
+        print(f'[build_store_discount_data] wrote {PRODUCTS_OUT_FILE} ({psize:,} bytes, '
+              f'{len(product_stores)} stores, date={latest_day_str})')
+    else:
+        print('[build_store_discount_data] no days in output — skipping product detail')
+
     if push:
-        push_github(output)
+        push_github(OUT_FILE, 'store_discount_data.json')
+        if latest_day_str:
+            push_github(PRODUCTS_OUT_FILE, 'store_discount_products.json')
 
 
-def push_github(_output):
+def push_github(local_path, repo_filename):
     from lib.db import github_token, github_repo
     import base64
     import urllib.request
@@ -183,10 +252,10 @@ def push_github(_output):
         print('[build_store_discount_data] no github_token in db_config.json — skip push')
         return
 
-    with open(OUT_FILE, 'rb') as f:
+    with open(local_path, 'rb') as f:
         content_b64 = base64.b64encode(f.read()).decode('ascii')
 
-    api_base = f'https://api.github.com/repos/{repo}/contents/store_discount_data.json'
+    api_base = f'https://api.github.com/repos/{repo}/contents/{repo_filename}'
     req = urllib.request.Request(api_base, headers={
         'Authorization': f'token {token}',
         'Accept': 'application/vnd.github+json',
@@ -199,7 +268,7 @@ def push_github(_output):
         pass
 
     payload = {
-        'message': f'Update store_discount_data.json ({datetime.now().isoformat(timespec="seconds")})',
+        'message': f'Update {repo_filename} ({datetime.now().isoformat(timespec="seconds")})',
         'content': content_b64,
     }
     if sha:
@@ -214,7 +283,7 @@ def push_github(_output):
         })
     with urllib.request.urlopen(req2) as resp:
         result = json.loads(resp.read())
-        print(f'[build_store_discount_data] pushed: {result.get("commit", {}).get("sha", "?")}')
+        print(f'[build_store_discount_data] pushed {repo_filename}: {result.get("commit", {}).get("sha", "?")}')
 
 
 def main():

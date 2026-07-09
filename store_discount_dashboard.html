@@ -111,9 +111,23 @@
 
 <script>
 const DATA_URL = 'store_discount_data.json';
+const PRODUCTS_DATA_URL = 'store_discount_products.json';
 let DATA = null;
-let state = { level: 'rm', rm: null, dm: null, store: null, mode: 'daily', dateIdx: 0 };
+let PRODUCTS_DATA = null;
+let productsLoading = false;
+let state = { level: 'rm', rm: null, dm: null, store: null, linetype: null, mode: 'daily', dateIdx: 0 };
 let trendChart = null;
+
+async function ensureProductsLoaded(){
+  if (PRODUCTS_DATA || productsLoading) return;
+  productsLoading = true;
+  try {
+    const res = await fetch(PRODUCTS_DATA_URL);
+    PRODUCTS_DATA = await res.json();
+  } catch(e) { console.error('load products failed', e); }
+  productsLoading = false;
+  if (state.level === 'product') render();
+}
 
 function fmt(n, d=0){ return Number(n).toLocaleString('th-TH', {minimumFractionDigits:d, maximumFractionDigits:d}); }
 function pct(n){ return (Number(n)*100).toFixed(1) + '%'; }
@@ -258,6 +272,7 @@ function currentGroupBy(){
   if (state.level === 'rm') return 'rm';
   if (state.level === 'dm') return 'dm';
   if (state.level === 'linetype') return 'linetype';
+  if (state.level === 'product') return 'product';
   return 'store';
 }
 
@@ -267,6 +282,13 @@ function render(){
   const prevStr = state.dateIdx > 0 ? dates[state.dateIdx-1] : null;
 
   renderBreadcrumb();
+
+  if (state.level === 'product'){
+    document.getElementById('summaryCards').innerHTML = '';
+    document.getElementById('linetypePanel').style.display = 'none';
+    renderProductLevel(dateStr);
+    return;
+  }
 
   const groupBy = currentGroupBy();
   const rows = aggregateForDate(dateStr, groupBy);
@@ -280,6 +302,39 @@ function render(){
   if (groupBy !== 'linetype') renderLinetype(dateStr);
 }
 
+function renderProductLevel(dateStr){
+  document.getElementById('tableTitle').textContent =
+    `รายการสินค้า — สาขา ${state.store} ${DATA.branches[state.store]?.name || ''} · linetype ${state.linetype}`;
+  const thead = document.getElementById('theadRow');
+  thead.innerHTML = `<th>บาร์โค้ด</th><th style="text-align:left">ชื่อสินค้า</th><th>จำนวนขาย</th><th>ราคาเต็ม</th><th>ราคาลด</th><th>ราคาขายสุทธิ</th>`;
+  const tbody = document.getElementById('tbodyRows');
+  tbody.style.cursor = 'default';
+
+  if (!PRODUCTS_DATA){
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--muted)">กำลังโหลดข้อมูลสินค้า...</td></tr>`;
+    document.getElementById('emptyMsg').style.display = 'none';
+    ensureProductsLoaded();
+    return;
+  }
+  if (PRODUCTS_DATA.date !== dateStr){
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--muted)">รายละเอียดสินค้ามีเฉพาะวันล่าสุด (${PRODUCTS_DATA.date}) — เปลี่ยนวันที่เป็นวันนั้นเพื่อดู</td></tr>`;
+    document.getElementById('emptyMsg').style.display = 'none';
+    return;
+  }
+  const items = (PRODUCTS_DATA.stores[state.store] || []).filter(p => p.linetype === state.linetype)
+                .sort((a,b) => b.discount - a.discount);
+  document.getElementById('emptyMsg').style.display = items.length ? 'none' : '';
+  tbody.innerHTML = items.map(p => `
+    <tr>
+      <td>${p.barcode}</td>
+      <td style="text-align:left">${p.name}</td>
+      <td>${fmt(p.qty,2)}</td>
+      <td>${fmt(p.list_amt)}</td>
+      <td>${fmt(p.discount)}</td>
+      <td>${fmt(p.net_sales)}</td>
+    </tr>`).join('');
+}
+
 function renderBreadcrumb(){
   const bc = document.getElementById('breadcrumb');
   bc.innerHTML = '';
@@ -291,23 +346,31 @@ function renderBreadcrumb(){
   };
   const sep = () => { const s = document.createElement('span'); s.textContent = '›'; return s; };
 
-  bc.appendChild(mk('ภาพรวม (RM)', () => { state.level='rm'; state.rm=null; state.dm=null; state.store=null; render(); }, state.level==='rm'));
+  // each ancestor crumb, when clicked, navigates to the listing at that crumb's
+  // own level; it's shown as plain (non-clickable) text only when we're already
+  // viewing exactly that level.
+  bc.appendChild(mk('ภาพรวม (RM)', () => { state.level='rm'; state.rm=null; state.dm=null; state.store=null; state.linetype=null; render(); }, state.level==='rm'));
   if (state.rm){
     bc.appendChild(sep());
     const rmName = Object.values(DATA.branches).find(b=>b.rm_code===state.rm)?.rm || state.rm;
-    bc.appendChild(mk(`RM: ${rmName}`, () => { state.level='dm'; state.dm=null; state.store=null; render(); },
-      state.level==='dm' || state.level==='store' || state.level==='linetype'));
+    bc.appendChild(mk(`RM: ${rmName}`, () => { state.level='dm'; state.dm=null; state.store=null; state.linetype=null; render(); },
+      state.level==='dm'));
   }
   if (state.dm){
     bc.appendChild(sep());
     const dmName = Object.values(DATA.branches).find(b=>b.dm_code===state.dm)?.dm || state.dm;
-    bc.appendChild(mk(`DM: ${dmName}`, () => { state.level='store'; state.store=null; render(); },
-      state.level==='store' || state.level==='linetype'));
+    bc.appendChild(mk(`DM: ${dmName}`, () => { state.level='store'; state.store=null; state.linetype=null; render(); },
+      state.level==='store'));
   }
   if (state.store){
     bc.appendChild(sep());
     const storeB = DATA.branches[state.store] || {};
-    bc.appendChild(mk(`สาขา: ${state.store} ${storeB.name || ''}`, () => { state.level='store'; render(); }, true));
+    bc.appendChild(mk(`สาขา: ${state.store} ${storeB.name || ''}`, () => { state.level='linetype'; state.linetype=null; render(); },
+      state.level==='linetype'));
+  }
+  if (state.linetype){
+    bc.appendChild(sep());
+    bc.appendChild(mk(`Linetype: ${state.linetype}`, () => { state.level='product'; render(); }, true));
   }
 }
 
@@ -368,13 +431,13 @@ function renderTable(rows, prevMap, groupBy){
   tbody.querySelectorAll('tr').forEach(tr => {
     tr.addEventListener('click', () => {
       const key = tr.dataset.key;
-      if (groupBy === 'rm'){ state.level='dm'; state.rm=key; state.dm=null; state.store=null; render(); }
-      else if (groupBy === 'dm'){ state.level='store'; state.dm=key; state.store=null; render(); }
-      else if (groupBy === 'store'){ state.level='linetype'; state.store=key; render(); }
-      // linetype level: leaf, no further drill
+      if (groupBy === 'rm'){ state.level='dm'; state.rm=key; state.dm=null; state.store=null; state.linetype=null; render(); }
+      else if (groupBy === 'dm'){ state.level='store'; state.dm=key; state.store=null; state.linetype=null; render(); }
+      else if (groupBy === 'store'){ state.level='linetype'; state.store=key; state.linetype=null; render(); }
+      else if (groupBy === 'linetype'){ state.level='product'; state.linetype=key; render(); }
     });
   });
-  tbody.style.cursor = groupBy === 'linetype' ? 'default' : 'pointer';
+  tbody.style.cursor = groupBy === 'product' ? 'default' : 'pointer';
 }
 
 function renderLinetype(dateStr){
@@ -389,7 +452,9 @@ function renderLinetype(dateStr){
 
 function renderTrend(){
   const dates = DATA._dates;
-  const groupBy = currentGroupBy();
+  // product-level has no 92-day history (only latest day) — fall back to the
+  // store's linetype-level trend instead of trying to aggregate 'product'
+  const groupBy = state.level === 'product' ? 'linetype' : currentGroupBy();
   const labels = dates;
   const discSeries = [];
   const gpSeries = [];
@@ -425,6 +490,27 @@ function renderTrend(){
 function downloadCSV(){
   const dates = DATA._dates;
   const dateStr = dates[state.dateIdx];
+
+  if (state.level === 'product'){
+    if (!PRODUCTS_DATA || PRODUCTS_DATA.date !== dateStr){
+      alert('รายละเอียดสินค้ามีเฉพาะวันล่าสุด — ยังโหลดไม่เสร็จหรือวันที่ไม่ตรง');
+      return;
+    }
+    const items = (PRODUCTS_DATA.stores[state.store] || []).filter(p => p.linetype === state.linetype);
+    const header = ['barcode','name','qty','list_amt','discount','net_sales'];
+    const lines = [header.join(',')];
+    items.forEach(p => {
+      lines.push([p.barcode, `"${(p.name||'').replace(/"/g,'""')}"`, p.qty, p.list_amt.toFixed(2), p.discount.toFixed(2), p.net_sales.toFixed(2)].join(','));
+    });
+    const blob = new Blob(['﻿' + lines.join('\n')], { type:'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `store_discount_products_${state.store}_${state.linetype}_${dateStr}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    return;
+  }
+
   const groupBy = currentGroupBy();
   const rows = aggregateForDate(dateStr, groupBy);
   const header = ['label','list_amt','store_discount','disc_pct','actual_price','gp_pct','qty'];
