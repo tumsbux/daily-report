@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>แดชบอร์ดปรับลดราคาโดยสาขา</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js"></script>
+<style>
+  :root {
+    --red: #e5484d; --red-bg: #ffe8e8;
+    --yellow: #f5a623; --yellow-bg: #fff6e0;
+    --green: #2fa84f; --green-bg: #e6f7ea;
+    --border: #e2e2e2; --muted: #767676;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: 'Segoe UI', 'Sarabun', Tahoma, sans-serif; margin:0; background:#f7f8fa; color:#222; }
+  header { background:#1f2937; color:#fff; padding:16px 24px; }
+  header h1 { margin:0; font-size:20px; }
+  header .sub { font-size:12px; color:#c8ccd2; margin-top:4px; }
+  .wrap { max-width:1400px; margin:0 auto; padding:20px; }
+  .toolbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:16px; }
+  .btn { background:#fff; border:1px solid var(--border); border-radius:8px; padding:8px 14px;
+         cursor:pointer; font-size:13px; color:#333; }
+  .btn:hover { background:#f0f0f0; }
+  .btn.active { background:#1f2937; color:#fff; border-color:#1f2937; }
+  .breadcrumb { display:flex; gap:6px; align-items:center; font-size:13px; color:var(--muted); flex-wrap:wrap; }
+  .breadcrumb span.crumb { cursor:pointer; color:#2563eb; }
+  .breadcrumb span.crumb:hover { text-decoration:underline; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:18px; }
+  .card { background:#fff; border:1px solid var(--border); border-radius:10px; padding:14px; }
+  .card .label { font-size:12px; color:var(--muted); margin-bottom:6px; }
+  .card .value { font-size:20px; font-weight:600; }
+  .card .delta { font-size:12px; margin-top:4px; }
+  .delta.up { color:var(--red); } .delta.down { color:var(--green); }
+  table { width:100%; border-collapse:collapse; background:#fff; border-radius:10px; overflow:hidden; }
+  th, td { padding:9px 12px; text-align:right; border-bottom:1px solid var(--border); font-size:13px; white-space:nowrap; }
+  th { background:#f0f1f3; text-align:right; font-weight:600; color:#444; }
+  th:first-child, td:first-child { text-align:left; }
+  tbody tr { cursor:pointer; }
+  tbody tr:hover { background:#f5f8ff; }
+  .gp-pill { display:inline-block; padding:2px 8px; border-radius:12px; font-weight:600; font-size:12px; }
+  .gp-red { background:var(--red-bg); color:var(--red); }
+  .gp-yellow { background:var(--yellow-bg); color:#b8790a; }
+  .gp-green { background:var(--green-bg); color:var(--green); }
+  .panel { background:#fff; border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:18px; }
+  .panel h3 { margin:0 0 10px 0; font-size:15px; }
+  .linetype-row { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+  .lt-chip { background:#f0f1f3; border-radius:8px; padding:6px 10px; font-size:12px; }
+  select, input[type=date] { padding:7px 10px; border:1px solid var(--border); border-radius:8px; font-size:13px; }
+  .empty { padding:30px; text-align:center; color:var(--muted); }
+  .footnote { font-size:11px; color:var(--muted); margin-top:10px; line-height:1.6; }
+  #chartWrap { max-width:100%; }
+</style>
+</head>
+<body>
+<header>
+  <h1>แดชบอร์ดปรับลดราคาโดยสาขา (ไม่รวมโปรโมชั่นส่วนกลาง)</h1>
+  <div class="sub" id="genInfo">กำลังโหลดข้อมูล...</div>
+</header>
+<div class="wrap">
+
+  <div class="toolbar">
+    <button class="btn active" id="btnDaily">รายวัน</button>
+    <button class="btn" id="btnTrend">แนวโน้ม 3 เดือน</button>
+    <select id="dateSelect"></select>
+    <button class="btn" id="btnDownload">⬇ ดาวน์โหลด CSV</button>
+  </div>
+
+  <div class="breadcrumb" id="breadcrumb"></div>
+
+  <div class="cards" id="summaryCards"></div>
+
+  <div class="panel" id="tablePanel">
+    <h3 id="tableTitle">ภาพรวมตาม RM</h3>
+    <table id="mainTable">
+      <thead><tr id="theadRow"></tr></thead>
+      <tbody id="tbodyRows"></tbody>
+    </table>
+    <div class="empty" id="emptyMsg" style="display:none">ไม่มีข้อมูลสำหรับวันที่เลือก</div>
+  </div>
+
+  <div class="panel" id="linetypePanel">
+    <h3>แยกตามประเภทสินค้า (linetype) ของ selection ปัจจุบัน</h3>
+    <div class="linetype-row" id="linetypeRow"></div>
+  </div>
+
+  <div class="panel" id="trendPanel" style="display:none">
+    <h3 id="trendTitle">แนวโน้มย้อนหลัง 3 เดือน</h3>
+    <div id="chartWrap"><canvas id="trendChart" height="90"></canvas></div>
+  </div>
+
+  <div class="footnote">
+    หมายเหตุ: "ส่วนลดที่สาขากดเอง" = ยอดส่วนต่างจากราคาปกติเฉพาะรายการที่มี linetype = O, P หรือ Y
+    (ตัวจำแนกที่ยืนยันจากผู้ใช้งานจริง) รายการ linetype อื่นทั้งหมดถือเป็น "การตลาด/โปรอัตโนมัติ" (ราคาสมาชิก/โปรที่ระบบตั้งไว้)
+    และแสดงแยกไว้เป็นข้อมูลอ้างอิงเท่านั้น ไม่รวมในเป้าหมายหลักของแดชบอร์ดนี้
+    &middot; เกณฑ์สี GP%: 🔴 &lt;10% &nbsp; 🟡 10–20% &nbsp; 🟢 &gt;20%
+    &middot; อัปเดตอัตโนมัติทุกวัน 08:30 น. &middot; เก็บย้อนหลัง 92 วัน
+  </div>
+</div>
+
+<script>
+const DATA_URL = 'store_discount_data.json';
+let DATA = null;
+let state = { level: 'rm', rm: null, dm: null, mode: 'daily', dateIdx: 0 };
+let trendChart = null;
+
+function fmt(n, d=0){ return Number(n).toLocaleString('th-TH', {minimumFractionDigits:d, maximumFractionDigits:d}); }
+function pct(n){ return (Number(n)*100).toFixed(1) + '%'; }
+function gpClass(gp){ if (gp < 0.10) return 'gp-red'; if (gp < 0.20) return 'gp-yellow'; return 'gp-green'; }
+
+async function init(){
+  const res = await fetch(DATA_URL);
+  DATA = await res.json();
+  const dates = Object.keys(DATA.days).sort();
+  DATA._dates = dates;
+  document.getElementById('genInfo').textContent =
+    `อัปเดตล่าสุด ${DATA.generated_at} · ข้อมูล ${dates[0]} ถึง ${dates[dates.length-1]} (${dates.length} วัน) · ${Object.keys(DATA.branches).length} สาขา`;
+
+  const sel = document.getElementById('dateSelect');
+  dates.slice().reverse().forEach((d, i) => {
+    const opt = document.createElement('option');
+    opt.value = dates.length-1-i; opt.textContent = d;
+    sel.appendChild(opt);
+  });
+  sel.value = dates.length - 1;
+  state.dateIdx = dates.length - 1;
+  sel.addEventListener('change', () => { state.dateIdx = Number(sel.value); render(); });
+
+  document.getElementById('btnDaily').addEventListener('click', () => { state.mode='daily'; toggleMode(); });
+  document.getElementById('btnTrend').addEventListener('click', () => { state.mode='trend'; toggleMode(); });
+  document.getElementById('btnDownload').addEventListener('click', downloadCSV);
+
+  render();
+}
+
+function toggleMode(){
+  document.getElementById('btnDaily').classList.toggle('active', state.mode==='daily');
+  document.getElementById('btnTrend').classList.toggle('active', state.mode==='trend');
+  document.getElementById('tablePanel').style.display = state.mode==='daily' ? '' : 'none';
+  document.getElementById('linetypePanel').style.display = state.mode==='daily' ? '' : 'none';
+  document.getElementById('trendPanel').style.display = state.mode==='trend' ? '' : 'none';
+  document.getElementById('dateSelect').style.display = state.mode==='daily' ? '' : 'none';
+  if (state.mode==='trend') renderTrend(); else render();
+}
+
+// ---- aggregation helpers ----
+// Classifier confirmed by user (2026-07-09): solinetype O/P/Y = store-initiated
+// discount (cashier/store adjusts price); every other linetype = automatic
+// marketing/member-price promo. 'P' only ever occurs at whs '901' (special
+// channel, not a real 1-500 store) so in practice only O/Y show up here.
+const STORE_LINETYPES = new Set(['O','P','Y']);
+
+function emptyAgg(){ return { qty:0, cost:0, net_sales:0, list_amt:0, store_discount:0, marketing_discount:0 }; }
+function addAgg(a, whsData){
+  for (const lt in whsData){
+    const [qty,cost,net_sales,list_amt] = whsData[lt];
+    const discount = list_amt - net_sales;
+    a.qty += qty; a.cost += cost; a.net_sales += net_sales; a.list_amt += list_amt;
+    if (STORE_LINETYPES.has(lt)) a.store_discount += discount;
+    else a.marketing_discount += discount;
+  }
+}
+function deriveMetrics(a){
+  const actual = a.list_amt - a.store_discount;   // hypothetical price with only store-discount removed
+  const gp = actual > 0 ? (actual - a.cost) / actual : 0;
+  const discPct = a.list_amt > 0 ? a.store_discount / a.list_amt : 0;
+  return { ...a, actual_price: actual, gp, disc_pct: discPct };
+}
+
+function storesForScope(){
+  // returns list of store codes matching current rm/dm filter
+  const stores = [];
+  for (const code in DATA.branches){
+    const b = DATA.branches[code];
+    if (state.rm && b.rm_code !== state.rm) continue;
+    if (state.dm && b.dm_code !== state.dm) continue;
+    stores.push(code);
+  }
+  return stores;
+}
+
+function aggregateForDate(dateStr, groupBy){
+  // groupBy: 'rm' | 'dm' | 'store'
+  const dayData = DATA.days[dateStr] || {};
+  const groups = {}; // key -> {label, agg}
+  const scopeStores = new Set(storesForScope());
+  for (const whs in dayData){
+    if (!scopeStores.has(whs)) continue;
+    const b = DATA.branches[whs] || {};
+    let key, label;
+    if (groupBy === 'rm'){ key = b.rm_code || '?'; label = b.rm || '(ไม่ระบุ RM)'; }
+    else if (groupBy === 'dm'){ key = b.dm_code || '?'; label = b.dm || '(ไม่ระบุ DM)'; }
+    else { key = whs; label = `${whs} ${b.name || ''}`; }
+    if (!groups[key]) groups[key] = { key, label, agg: emptyAgg() };
+    addAgg(groups[key].agg, dayData[whs]);
+  }
+  return Object.values(groups).map(g => ({ key:g.key, label:g.label, ...deriveMetrics(g.agg) }))
+                .sort((a,b) => b.store_discount - a.store_discount);
+}
+
+function linetypeBreakdown(dateStr){
+  const dayData = DATA.days[dateStr] || {};
+  const scopeStores = new Set(storesForScope());
+  const lt = {};
+  for (const whs in dayData){
+    if (!scopeStores.has(whs)) continue;
+    for (const l in dayData[whs]){
+      if (!lt[l]) lt[l] = emptyAgg();
+      const [qty,cost,net_sales,list_amt] = dayData[whs][l];
+      const discount = list_amt - net_sales;
+      lt[l].qty += qty; lt[l].cost += cost; lt[l].net_sales += net_sales; lt[l].list_amt += list_amt;
+      if (STORE_LINETYPES.has(l)) lt[l].store_discount += discount;
+      else lt[l].marketing_discount += discount;
+      lt[l]._own_discount = (lt[l]._own_discount || 0) + discount; // this linetype's own total discount
+    }
+  }
+  return Object.entries(lt).map(([k,v]) => ({
+      linetype:k, isStore: STORE_LINETYPES.has(k), discount: v._own_discount,
+      ...deriveMetrics(v)
+    }))
+    .sort((a,b) => b.discount - a.discount);
+}
+
+// ---- rendering ----
+function currentGroupBy(){
+  if (state.level === 'rm') return 'rm';
+  if (state.level === 'dm') return 'dm';
+  return 'store';
+}
+
+function render(){
+  const dates = DATA._dates;
+  const dateStr = dates[state.dateIdx];
+  const prevStr = state.dateIdx > 0 ? dates[state.dateIdx-1] : null;
+
+  renderBreadcrumb();
+
+  const groupBy = currentGroupBy();
+  const rows = aggregateForDate(dateStr, groupBy);
+  const prevRows = prevStr ? aggregateForDate(prevStr, groupBy) : [];
+  const prevMap = {}; prevRows.forEach(r => prevMap[r.key] = r);
+
+  renderSummaryCards(rows, prevRows);
+  renderTable(rows, prevMap, groupBy);
+  renderLinetype(dateStr);
+}
+
+function renderBreadcrumb(){
+  const bc = document.getElementById('breadcrumb');
+  bc.innerHTML = '';
+  const mk = (label, onClick, isLast) => {
+    const s = document.createElement('span');
+    s.textContent = label;
+    if (!isLast){ s.className = 'crumb'; s.onclick = onClick; }
+    return s;
+  };
+  const sep = () => { const s = document.createElement('span'); s.textContent = '›'; return s; };
+
+  bc.appendChild(mk('ภาพรวม (RM)', () => { state.level='rm'; state.rm=null; state.dm=null; render(); }, state.level==='rm'));
+  if (state.rm){
+    bc.appendChild(sep());
+    const rmName = Object.values(DATA.branches).find(b=>b.rm_code===state.rm)?.rm || state.rm;
+    bc.appendChild(mk(`RM: ${rmName}`, () => { state.level='dm'; state.dm=null; render(); }, state.level==='dm' || state.level==='store'));
+  }
+  if (state.dm){
+    bc.appendChild(sep());
+    const dmName = Object.values(DATA.branches).find(b=>b.dm_code===state.dm)?.dm || state.dm;
+    bc.appendChild(mk(`DM: ${dmName}`, () => { state.level='store'; render(); }, true));
+  }
+}
+
+function renderSummaryCards(rows, prevRows){
+  const tot = rows.reduce((acc,r) => { acc.list_amt+=r.list_amt; acc.store_discount+=r.store_discount; acc.marketing_discount+=r.marketing_discount; acc.actual_price+=r.actual_price; acc.cost+=r.cost; return acc; }, {list_amt:0,store_discount:0,marketing_discount:0,actual_price:0,cost:0});
+  const prevTot = prevRows.reduce((acc,r) => { acc.store_discount+=r.store_discount; return acc; }, {store_discount:0});
+  const gp = tot.actual_price>0 ? (tot.actual_price - tot.cost)/tot.actual_price : 0;
+  const discPct = tot.list_amt>0 ? tot.store_discount/tot.list_amt : 0;
+  const mktPct = tot.list_amt>0 ? tot.marketing_discount/tot.list_amt : 0;
+  const deltaPct = prevTot.store_discount>0 ? (tot.store_discount - prevTot.store_discount)/prevTot.store_discount : null;
+
+  const cards = [
+    { label:'ราคาปกติรวม (list price)', value: fmt(tot.list_amt) + ' ฿' },
+    { label:'ส่วนลดที่สาขากดเอง (O/P/Y)', value: fmt(tot.store_discount) + ' ฿',
+      delta: deltaPct!==null ? `${deltaPct>=0?'▲':'▼'} ${pct(Math.abs(deltaPct))} vs วันก่อนหน้า` : '', deltaUp: deltaPct>=0 },
+    { label:'ส่วนลดการตลาด/โปรอัตโนมัติ (อ้างอิง)', value: fmt(tot.marketing_discount) + ' ฿ (' + pct(mktPct) + ')' },
+    { label:'ราคาขายจริง (หลังหักเฉพาะส่วนลดสาขา)', value: fmt(tot.actual_price) + ' ฿' },
+    { label:'% ลดจากสาขา', value: pct(discPct) },
+    { label:'GP% คงเหลือ (หักเฉพาะสาขา)', value: pct(gp) },
+  ];
+  document.getElementById('summaryCards').innerHTML = cards.map(c => `
+    <div class="card">
+      <div class="label">${c.label}</div>
+      <div class="value">${c.value}</div>
+      ${c.delta ? `<div class="delta ${c.deltaUp?'up':'down'}">${c.delta}</div>` : ''}
+    </div>`).join('');
+}
+
+function renderTable(rows, prevMap, groupBy){
+  const titleMap = { rm:'ภาพรวมตาม RM', dm:'รายเขต (DM)', store:'รายสาขา' };
+  document.getElementById('tableTitle').textContent = titleMap[groupBy];
+
+  const thead = document.getElementById('theadRow');
+  thead.innerHTML = `<th>${groupBy==='store'?'สาขา':groupBy==='dm'?'DM':'RM'}</th>
+    <th>ราคาปกติ</th><th>ส่วนลดสาขา</th><th>%ลด</th><th>ราคาขายจริง</th><th>GP%</th><th>เทียบวันก่อน</th>`;
+
+  const tbody = document.getElementById('tbodyRows');
+  document.getElementById('emptyMsg').style.display = rows.length ? 'none' : '';
+  tbody.innerHTML = rows.map(r => {
+    const prev = prevMap[r.key];
+    let deltaHtml = '-';
+    if (prev && prev.store_discount > 0){
+      const d = (r.store_discount - prev.store_discount) / prev.store_discount;
+      deltaHtml = `<span style="color:${d>=0?'var(--red)':'var(--green)'}">${d>=0?'▲':'▼'} ${pct(Math.abs(d))}</span>`;
+    }
+    return `<tr data-key="${r.key}">
+      <td>${r.label}</td>
+      <td>${fmt(r.list_amt)}</td>
+      <td>${fmt(r.store_discount)}</td>
+      <td>${pct(r.disc_pct)}</td>
+      <td>${fmt(r.actual_price)}</td>
+      <td><span class="gp-pill ${gpClass(r.gp)}">${pct(r.gp)}</span></td>
+      <td>${deltaHtml}</td>
+    </tr>`;
+  }).join('');
+
+  tbody.querySelectorAll('tr').forEach(tr => {
+    tr.addEventListener('click', () => {
+      const key = tr.dataset.key;
+      if (groupBy === 'rm'){ state.level='dm'; state.rm=key; state.dm=null; render(); }
+      else if (groupBy === 'dm'){ state.level='store'; state.dm=key; render(); }
+      // store level: no further drill
+    });
+  });
+}
+
+function renderLinetype(dateStr){
+  const rows = linetypeBreakdown(dateStr);
+  document.getElementById('linetypeRow').innerHTML = rows.map(r => `
+    <div class="lt-chip" style="border-left:3px solid ${r.isStore ? 'var(--red)' : '#9aa0a6'}">
+      <b>${r.linetype}</b> ${r.isStore ? '🏪 สาขา' : '📢 การตลาด'} · ลด ${fmt(r.discount)}฿
+      (${pct(r.list_amt>0 ? r.discount/r.list_amt : 0)}) ·
+      <span class="gp-pill ${gpClass(r.gp)}" style="margin-left:4px">GP ${pct(r.gp)}</span>
+    </div>`).join('') || '<span style="color:var(--muted)">ไม่มีข้อมูล</span>';
+}
+
+function renderTrend(){
+  const dates = DATA._dates;
+  const groupBy = currentGroupBy();
+  const labels = dates;
+  const discSeries = [];
+  const gpSeries = [];
+  for (const d of dates){
+    const rows = aggregateForDate(d, groupBy);
+    const tot = rows.reduce((acc,r) => { acc.store_discount+=r.store_discount; acc.actual_price+=r.actual_price; acc.cost+=r.cost; return acc; }, {store_discount:0, actual_price:0, cost:0});
+    discSeries.push(Math.round(tot.store_discount));
+    gpSeries.push(tot.actual_price>0 ? Math.round((tot.actual_price-tot.cost)/tot.actual_price*1000)/10 : 0);
+  }
+  const title = state.dm ? 'DM ที่เลือก' : state.rm ? 'RM ที่เลือก' : 'ภาพรวมทั้งหมด';
+  document.getElementById('trendTitle').textContent = `แนวโน้ม 92 วันล่าสุด — ${title}`;
+
+  const ctx = document.getElementById('trendChart');
+  if (trendChart) trendChart.destroy();
+  trendChart = new Chart(ctx, {
+    data: {
+      labels,
+      datasets: [
+        { type:'bar', label:'ส่วนลดสาขา (บาท)', data:discSeries, backgroundColor:'#e5484d88', yAxisID:'y' },
+        { type:'line', label:'GP% คงเหลือ', data:gpSeries, borderColor:'#2fa84f', yAxisID:'y1', tension:0.25 },
+      ]
+    },
+    options: {
+      responsive:true,
+      scales:{
+        y:{ position:'left', title:{display:true, text:'ส่วนลดสาขา (฿)'} },
+        y1:{ position:'right', title:{display:true, text:'GP%'}, grid:{drawOnChartArea:false} },
+      }
+    }
+  });
+}
+
+function downloadCSV(){
+  const dates = DATA._dates;
+  const dateStr = dates[state.dateIdx];
+  const groupBy = currentGroupBy();
+  const rows = aggregateForDate(dateStr, groupBy);
+  const header = ['label','list_amt','store_discount','disc_pct','actual_price','gp_pct','qty'];
+  const lines = [header.join(',')];
+  rows.forEach(r => {
+    lines.push([r.label, r.list_amt.toFixed(2), r.store_discount.toFixed(2), (r.disc_pct*100).toFixed(2), r.actual_price.toFixed(2), (r.gp*100).toFixed(2), r.qty].join(','));
+  });
+  const blob = new Blob(['﻿' + lines.join('\n')], { type:'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `store_discount_${dateStr}_${groupBy}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+init();
+</script>
+</body>
+</html>

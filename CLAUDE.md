@@ -9,6 +9,27 @@
 
 ---
 
+## 🗜️ Headroom — Context Compression (เพิ่ม 2026-06-25)
+
+ติดตั้งแล้ว — ลด token ที่ส่งให้ LLM ได้ 60–95% โดยไม่เปลี่ยนคำตอบ
+
+**Scripts:**
+- `headroom_install.bat` — รันครั้งเดียวเพื่อ install + setup MCP + copy scripts ไป projects อื่น
+- `headroom_start.bat` — เปิด Claude Code พร้อม compression (ทุก project มีไฟล์นี้)
+- `F:\facebook\headroom_start.bat` — สำหรับ facebook project
+
+**วิธีใช้:**
+1. รัน `headroom_install.bat` ครั้งแรกครั้งเดียว → restart Claude
+2. ถ้าใช้ Claude Code CLI: ดับเบิลคลิก `headroom_start.bat` ใน folder นั้นแทนการเปิด claude ตรงๆ
+3. MCP tools (`headroom_compress`, `headroom_retrieve`, `headroom_stats`) จะพร้อมใช้ใน Cowork หลัง restart
+
+**Projects ที่ integrate แล้ว:**
+- `F:\co work dashboard\` — ✅
+- `F:\facebook\` — ✅
+- `F:\lost-Product\`, `F:\lost-Product-git\`, `F:\lost-Product\thongfah_dashboard\` — auto-copy เมื่อรัน install bat
+
+---
+
 ## 📂 Documentation (โหลดเฉพาะที่ต้องใช้)
 
 | ไฟล์ | เนื้อหา | โหลดเมื่อ |
@@ -120,6 +141,14 @@ Reason: Antigravity IR-B/C/D incident 2026-06-10
 5. **ไฟล์ไหนยาวเกิน ~300 บรรทัด** → พิจารณาแตกย่อย
 
 ---
+
+## 🟡 Pending Approval (updated 2026-07-09)
+
+- 🆕 **Store Price-Discount Dashboard — built, NOT pushed yet (2026-07-09):** `build_store_discount_data.py` + `store_discount_dashboard.html` + `store_discount_data.json` (92d backfill) พร้อมแล้วใน `F:\co work dashboard\`, เพิ่ม step ใน `daily-update.yml` แล้ว, ADR ใน Decisions.md `[2026-07-09]` — **ต้องรันบน Windows:**
+  ```
+  py push_files_api.py build_store_discount_data.py store_discount_data.json store_discount_dashboard.html .github/workflows/daily-update.yml Decisions.md CLAUDE.md Changelog.md -m "feat: add store price-discount dashboard"
+  ```
+  (Cowork sandbox เข้า `api.github.com` ไม่ได้ — 403 บน tunnel — ต่างจาก MySQL MCP ที่ใช้ได้)
 
 ## 🟡 Pending Approval (updated 2026-06-14)
 

@@ -3,6 +3,25 @@
 > งานที่ทำเสร็จ — เรียงจากใหม่ → เก่า
 > Format: [Keep a Changelog](https://keepachangelog.com/)
 
+## [2026-07-09] New: Store Price-Discount Dashboard (Claude, Cowork)
+
+### Added
+- **`build_store_discount_data.py`** — builder ใหม่ ดึงส่วนลดที่**สาขากดเองท้ายบิลเท่านั้น** (ไม่รวมคูปอง/แลกคะแนน/โปรโมชั่น% จากส่วนกลาง, ไม่รวมราคาโปร/สมาชิกอัตโนมัติ `sopricdisc`) — สูตร: `prorated_discount × (sodisc_bill/sodisc)` join `fact_sales` + `fact_bill_header` + `dim_product` (ราคาปกติ = `ipunit3`)
+- **`store_discount_dashboard.html`** — drill-down ภาพรวม→RM→DM→Store, breakdown ตาม linetype, เทียบวันก่อนหน้า, ปุ่มสลับ trend ย้อนหลัง 92 วัน, ปุ่มดาวน์โหลด CSV, สีเตือน GP% (แดง<10% / เหลือง10-20% / เขียว>20%)
+- **`store_discount_data.json`** — backfill ย้อนหลัง 92 วัน (2026-04-08 → 2026-07-08) แล้ว 89,850 แถว 3.8MB
+- เพิ่ม step `Build store discount data` ใน `.github/workflows/daily-update.yml` ต่อจาก build lost product (continue-on-error: true)
+
+### Verified
+- sum(line_store_discount) ช่วง 14 วันล่าสุด = 176,356 บาท เทียบ `fact_bill_header.sodisc_bill` จริง = 224,283 บาท (~79% ตรงกัน — ส่วนต่างจาก bill คืนสินค้า/void ที่ join ไม่ครบ ยอมรับได้ระดับ trend dashboard)
+
+### Known limitation
+- **ยังไม่ได้ push ขึ้น GitHub** — sandbox ของ Cowork เข้า `api.github.com` ไม่ได้ (403 บน tunnel) ต้องรัน `push_files_api.py` บน Windows เพื่อ publish จริง (ดู "งานที่เหลือ" ด้านล่าง)
+- ไม่มีคอลัมน์ "ภาค" แยกจาก RM ในระบบ — ใช้ RM เป็น level บนสุดแทน
+
+### Fixed (same day, after user correction)
+- **เปลี่ยนตัวจำแนกสาขา vs การตลาดเป็น `solinetype`** — user ยืนยันตรงๆ ว่า linetype `O`, `P`, `Y` = สาขากดเอง ที่เหลือ = การตลาด/โปรอัตโนมัติ (คนละกลไกกับ `sodisc_bill/sodisc` ที่ใช้ตอนแรก) แก้ `build_store_discount_data.py` (ตัด join `fact_bill_header` ทิ้ง, schema v2) และ `store_discount_dashboard.html` (คำนวณ store vs marketing discount จาก linetype key ตอน render) — verify แล้วตรงกับข้อมูลเดิมที่ backfill ไว้ (ไม่ต้อง rebuild JSON) — ดู Decisions.md `[2026-07-09]` ฉบับ FINAL
+- **แก้ Edit tool truncation** บน `store_discount_dashboard.html` (18KB, โดนตัดกลาง JS ตอนใช้ Edit หลายรอบ) — เขียนใหม่เต็มไฟล์ด้วย Write tool ครั้งเดียวแทน + verify ด้วย Read tool (bash mount ใน sandbox มี stale cache ไม่สะท้อนไฟล์จริง — ใช้ Read tool เป็น ground truth)
+
 ## [2026-06-23] Trigger lost-Product Daily GP Analysis Rebuild automatically (Antigravity)
 
 ### Fixed

@@ -123,6 +123,12 @@ jobs:
         timeout-minutes: 15
         run: python build_lost_product_data.py ${{ env.FULL_REFRESH_FLAG }}
 
+      - name: Build store discount data (store-driven price adjustments)
+        if: steps.guard.outputs.skip != 'true'
+        continue-on-error: true
+        timeout-minutes: 15
+        run: python build_store_discount_data.py --days 92
+
       - name: Push lost-Product dashboard and data to tumsbux/lost-Product repo
         if: steps.guard.outputs.skip != 'true'
         continue-on-error: true

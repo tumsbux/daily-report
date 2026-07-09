@@ -5,6 +5,62 @@
 
 ---
 
+## [2026-07-09] Store Price-Discount Dashboard — NEW dashboard
+
+**Status:** Accepted (2026-07-09) — user confirmed data mapping + proration method + GP color thresholds
+
+**Context:** User ต้องการแดชบอร์ดใหม่ติดตามการปรับลดราคาที่ "สาขา" กดเอง (ไม่รวมส่วนลดที่ส่วนกลาง/การตลาดสั่ง) โชว์ราคาปกติ vs ราคาที่ปรับลดจริง vs GP% ที่เหลือ แยกภาค/เขต/สาขา อัปเดตทุกวัน + ย้อนหลัง 3 เดือน
+
+**การสำรวจ schema จริง (2026-07-09) พบว่าสมมติฐานแรกผิด — แก้ไขแล้ว:**
+- `sodisc_bill` / `sodisc_coupon` / `sodisc_perc` / `sodisc_score` อยู่ใน **`fact_bill_header`** (ระดับบิล) **ไม่ใช่ `fact_sales`**
+- `fact_sales.prorated_discount` = ส่วนลดรวม**ทุกประเภท**ปันส่วนลงรายการแล้ว (ยืนยันด้วย query จริงว่า `SUM(prorated_discount) ต่อบิล = fact_bill_header.sodisc` เป๊ะ — ไม่ใช่แค่ `sodisc_bill`)
+- ราคาปกติ (list price) = `dim_product.ipunit3` (join ผ่าน `iprod`)
+- RM/DM/ภาค mapping = `dim_branch` (คอลัมน์ `rm_code/rm`, `dm_code/dm`; ไม่มีคอลัมน์ "ภาค" ตรงๆ — ใช้ `prvn_name`/`rm` เป็น grouping ระดับบนสุดแทน หรือสร้าง mapping ภาค←RM เพิ่มถ้ามี)
+
+**Decision — วิธีคำนวณส่วนลดเฉพาะสาขา (line-level) — FINAL แก้ไขครั้งที่ 2 (2026-07-09):**
+
+user ยืนยันตรงๆ ว่าตัวจำแนก "สาขากดเอง" vs "การตลาด" คือ **`fact_sales.solinetype`**:
+- `solinetype IN ('O','P','Y')` → **สาขากดเอง** (คลิกปรับราคา/ส่วนลดเองที่หน้าร้าน)
+- `solinetype` อื่นๆ ทั้งหมด (N, Q, D, J, H, Z, S, F, B, C, U, ...) → **ลดตามการตลาด/โปรอัตโนมัติ** (ราคาสมาชิก/โปรที่ระบบตั้งไว้ล่วงหน้า)
+
+ไม่ต้อง join `fact_bill_header` อีกต่อไป (bill-level `sodisc_bill/sodisc` ratio ที่ใช้ก่อนหน้านี้ยกเลิก — เป็นคนละกลไกกับที่ user ต้องการ) สูตรใหม่ง่ายกว่าเดิมมาก:
+
+```
+list_price_line   = dim_product.ipunit3 × fact_sales.net_qty     -- ยืนยันแล้ว sopricunit == ipunit3 ทุกแถว
+line_discount     = list_price_line − fact_sales.net_sales_amt   -- ส่วนต่างเต็มจำนวนของบรรทัดนั้น (รวม sopricdisc + prorated ถ้ามี)
+line_is_store     = fact_sales.solinetype IN ('O','P','Y')
+store_discount    = SUM(line_discount) WHERE line_is_store
+marketing_discount= SUM(line_discount) WHERE NOT line_is_store
+actual_price_line = list_price_line − line_discount   (ใช้ store_discount อย่างเดียวเวลาโชว์ "ราคาขายจริงถ้าตัดผลการตลาดออก")
+GP%_line          = (actual_price_line − total_cost) / actual_price_line
+```
+Join: เหลือแค่ `fact_sales.iprod = dim_product.iprod` (+ `dim_branch`/`dim_cache.json` สำหรับ RM/DM)
+
+**หมายเหตุ:** `solinetype='P'` พบเฉพาะที่ `sotowhs='901'` (คลัง/ช่องทางพิเศษ ไม่ใช่สาขาขายจริง 1-500) จึงแทบไม่ปรากฏใน dashboard นี้ (scope เฉพาะสาขา 1-500) — ตัวที่เห็นจริงในระบบคือ O กับ Y
+
+**Verify (14 วันล่าสุด, เฉพาะสาขา 1-500):**
+- ส่วนลดรวมทุกแบบ (ทุก linetype) ≈ 1,598,671 บาท
+- ในนั้นเป็น "สาขากดเอง" (O+Y) แค่ ≈ 24,203 บาท (~1.5%)
+- ที่เหลือ ≈ 1,574,467 บาท (~98.5%) เป็น "การตลาด/โปรอัตโนมัติ" (ส่วนใหญ่อยู่ใน linetype N — สอดคล้องกับที่ verify ครั้งก่อนว่า `sopricdisc` บน N-type คือราคาโปร/สมาชิกอัตโนมัติ)
+
+**⚠️ ประวัติแก้สูตร:** รอบแรกใช้ `sodisc_bill/sodisc` bill-ratio (ผิด — คนละกลไก), รอบสองตัด `sopricdisc` ออกทั้งหมด (ผิด — บาง `sopricdisc` เป็นของสาขาจริงถ้าอยู่ใน line type O/P/Y), รอบนี้ (final) ใช้ `solinetype` เป็นตัวจำแนกตรงๆ ตามที่ user ยืนยัน
+
+**GP% color threshold:** 🔴 <10%　🟡 10–20%　🟢 >20% (คำนวณหลังหักเฉพาะส่วนลดสาขา ไม่รวมคูปอง/คะแนน/เปอร์เซ็นต์การตลาด)
+
+**Hierarchy drill-down:** ภาพรวม → RM → DM → Store (คลิก drill ลง) + breakdown ตาม `solinetype` ในทุก level + เทียบวันนี้ vs เมื่อวาน
+
+**New buttons:** (1) สลับ trend ย้อนหลัง 3 เดือน (2) ดาวน์โหลด Excel/CSV ของ view ปัจจุบัน
+
+**Update:** เข้า pipeline daily 08:30 BKK เดิม (stepใหม่ `continue-on-error: true`) ต่อท้าย repo `daily-report`
+
+**Consequences:**
+- ✅ ตัวเลขแยกสาขา vs การตลาดแม่นกว่าที่คาดไว้แรก (ไม่ใช่แค่อ่าน field เดียว ต้อง join + prorate)
+- ✅ **Verification ผ่าน (2026-07-09):** sum(line_store_discount) ช่วง 14 วันล่าสุด = 176,356 บาท เทียบกับ sum(fact_bill_header.sodisc_bill) จริง = 224,283 บาท (~79% ตรงกัน) — ส่วนต่าง ~21% คาดว่ามาจาก bill ที่ join ไม่ครบ (คืนสินค้า/void, ขอบเขต store filter 1-500) ยอมรับได้ในระดับ dashboard เชิงเทรนด์ ไม่ใช่บัญชีที่ต้องเป๊ะ 100%
+- ✅ Backfill 92 วันเสร็จแล้ว (2026-04-08 → 2026-07-08, 89,850 แถว, 3.8MB) เก็บที่ `store_discount_data.json`
+- ⚠️ ไม่มีคอลัมน์ "ภาค" ตรงในระบบ — ต้องเช็คกับ user อีกครั้งถ้าต้องการ level ภาคจริงๆ แยกจาก RM
+
+---
+
 ## [2026-06-20] detect_max_day retry logic — product builder timing fix
 
 **Status:** Accepted
