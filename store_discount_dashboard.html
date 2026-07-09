@@ -101,7 +101,7 @@
 <script>
 const DATA_URL = 'store_discount_data.json';
 let DATA = null;
-let state = { level: 'rm', rm: null, dm: null, mode: 'daily', dateIdx: 0 };
+let state = { level: 'rm', rm: null, dm: null, store: null, mode: 'daily', dateIdx: 0 };
 let trendChart = null;
 
 function fmt(n, d=0){ return Number(n).toLocaleString('th-TH', {minimumFractionDigits:d, maximumFractionDigits:d}); }
@@ -171,22 +171,39 @@ function deriveMetrics(a){
 }
 
 function storesForScope(){
-  // returns list of store codes matching current rm/dm filter
+  // returns list of store codes matching current rm/dm/store filter
   const stores = [];
   for (const code in DATA.branches){
     const b = DATA.branches[code];
     if (state.rm && b.rm_code !== state.rm) continue;
     if (state.dm && b.dm_code !== state.dm) continue;
+    if (state.store && code !== state.store) continue;
     stores.push(code);
   }
   return stores;
 }
 
 function aggregateForDate(dateStr, groupBy){
-  // groupBy: 'rm' | 'dm' | 'store'
+  // groupBy: 'rm' | 'dm' | 'store' | 'linetype'
   const dayData = DATA.days[dateStr] || {};
   const groups = {}; // key -> {label, agg}
   const scopeStores = new Set(storesForScope());
+
+  if (groupBy === 'linetype'){
+    for (const whs in dayData){
+      if (!scopeStores.has(whs)) continue;
+      for (const l in dayData[whs]){
+        if (EXCLUDED_LINETYPES.has(l)) continue;
+        const key = l;
+        const label = `${l} ${STORE_LINETYPES.has(l) ? '🏪 สาขา' : '📢 การตลาด'}`;
+        if (!groups[key]) groups[key] = { key, label, agg: emptyAgg() };
+        addAgg(groups[key].agg, { [l]: dayData[whs][l] });
+      }
+    }
+    return Object.values(groups).map(g => ({ key:g.key, label:g.label, ...deriveMetrics(g.agg) }))
+                  .sort((a,b) => (b.store_discount+b.marketing_discount) - (a.store_discount+a.marketing_discount));
+  }
+
   for (const whs in dayData){
     if (!scopeStores.has(whs)) continue;
     const b = DATA.branches[whs] || {};
@@ -229,6 +246,7 @@ function linetypeBreakdown(dateStr){
 function currentGroupBy(){
   if (state.level === 'rm') return 'rm';
   if (state.level === 'dm') return 'dm';
+  if (state.level === 'linetype') return 'linetype';
   return 'store';
 }
 
@@ -246,7 +264,9 @@ function render(){
 
   renderSummaryCards(rows, prevRows);
   renderTable(rows, prevMap, groupBy);
-  renderLinetype(dateStr);
+  // when already drilled to per-linetype table, the separate breakdown panel below is redundant
+  document.getElementById('linetypePanel').style.display = (groupBy === 'linetype') ? 'none' : '';
+  if (groupBy !== 'linetype') renderLinetype(dateStr);
 }
 
 function renderBreadcrumb(){
@@ -260,16 +280,23 @@ function renderBreadcrumb(){
   };
   const sep = () => { const s = document.createElement('span'); s.textContent = '›'; return s; };
 
-  bc.appendChild(mk('ภาพรวม (RM)', () => { state.level='rm'; state.rm=null; state.dm=null; render(); }, state.level==='rm'));
+  bc.appendChild(mk('ภาพรวม (RM)', () => { state.level='rm'; state.rm=null; state.dm=null; state.store=null; render(); }, state.level==='rm'));
   if (state.rm){
     bc.appendChild(sep());
     const rmName = Object.values(DATA.branches).find(b=>b.rm_code===state.rm)?.rm || state.rm;
-    bc.appendChild(mk(`RM: ${rmName}`, () => { state.level='dm'; state.dm=null; render(); }, state.level==='dm' || state.level==='store'));
+    bc.appendChild(mk(`RM: ${rmName}`, () => { state.level='dm'; state.dm=null; state.store=null; render(); },
+      state.level==='dm' || state.level==='store' || state.level==='linetype'));
   }
   if (state.dm){
     bc.appendChild(sep());
     const dmName = Object.values(DATA.branches).find(b=>b.dm_code===state.dm)?.dm || state.dm;
-    bc.appendChild(mk(`DM: ${dmName}`, () => { state.level='store'; render(); }, true));
+    bc.appendChild(mk(`DM: ${dmName}`, () => { state.level='store'; state.store=null; render(); },
+      state.level==='store' || state.level==='linetype'));
+  }
+  if (state.store){
+    bc.appendChild(sep());
+    const storeB = DATA.branches[state.store] || {};
+    bc.appendChild(mk(`สาขา: ${state.store} ${storeB.name || ''}`, () => { state.level='store'; render(); }, true));
   }
 }
 
@@ -299,11 +326,12 @@ function renderSummaryCards(rows, prevRows){
 }
 
 function renderTable(rows, prevMap, groupBy){
-  const titleMap = { rm:'ภาพรวมตาม RM', dm:'รายเขต (DM)', store:'รายสาขา' };
+  const titleMap = { rm:'ภาพรวมตาม RM', dm:'รายเขต (DM)', store:'รายสาขา', linetype:`แยกตาม Linetype — สาขา ${state.store || ''} ${DATA.branches[state.store]?.name || ''}` };
   document.getElementById('tableTitle').textContent = titleMap[groupBy];
 
+  const colLabel = groupBy==='linetype' ? 'Linetype' : groupBy==='store' ? 'สาขา' : groupBy==='dm' ? 'DM' : 'RM';
   const thead = document.getElementById('theadRow');
-  thead.innerHTML = `<th>${groupBy==='store'?'สาขา':groupBy==='dm'?'DM':'RM'}</th>
+  thead.innerHTML = `<th>${colLabel}</th>
     <th>ราคาปกติ</th><th>ส่วนลดสาขา</th><th>%ลด</th><th>ราคาขายจริง</th><th>GP%</th><th>เทียบวันก่อน</th>`;
 
   const tbody = document.getElementById('tbodyRows');
@@ -329,11 +357,13 @@ function renderTable(rows, prevMap, groupBy){
   tbody.querySelectorAll('tr').forEach(tr => {
     tr.addEventListener('click', () => {
       const key = tr.dataset.key;
-      if (groupBy === 'rm'){ state.level='dm'; state.rm=key; state.dm=null; render(); }
-      else if (groupBy === 'dm'){ state.level='store'; state.dm=key; render(); }
-      // store level: no further drill
+      if (groupBy === 'rm'){ state.level='dm'; state.rm=key; state.dm=null; state.store=null; render(); }
+      else if (groupBy === 'dm'){ state.level='store'; state.dm=key; state.store=null; render(); }
+      else if (groupBy === 'store'){ state.level='linetype'; state.store=key; render(); }
+      // linetype level: leaf, no further drill
     });
   });
+  tbody.style.cursor = groupBy === 'linetype' ? 'default' : 'pointer';
 }
 
 function renderLinetype(dateStr){
