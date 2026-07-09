@@ -65,7 +65,7 @@ from lib.db import get_conn, get_config          # noqa: E402
 from lib.safe_write import safe_write_json        # noqa: E402
 
 OUT_FILE = os.path.join(FOLDER, 'store_discount_data.json')
-PRODUCTS_OUT_FILE = os.path.join(FOLDER, 'store_discount_products.json')
+PRODUCTS_OUT_DIR = os.path.join(FOLDER, 'store_discount_products')  # one small file per store
 BRANCH_CACHE = os.path.join(FOLDER, 'dim_cache.json')
 SCHEMA = 2  # v2: dropped store_discount column (bill-ratio method) — dashboard now
             # derives discount = list_amt - net_sales and classifies store vs
@@ -220,30 +220,48 @@ def build(days_arg: int | None, single_day: str | None, push: bool):
     # days only (default 2: today + yesterday, so the UI can show day-on-day
     # comparison at product level too), fully overwritten each run — not
     # accumulated onto the 92-day history (see query_product_detail docstring).
+    # 2026-07-09: split into ONE SMALL FILE PER STORE (store_discount_products/<whs>.json)
+    # instead of one combined ~24MB file — combined file made the dashboard's
+    # per-store drill-down fetch the whole thing just to look at one store.
     recent_day_strs = sorted(merged_days.keys())[-PRODUCTS_DAYS_KEPT:] if merged_days else []
+    product_file_paths: list[str] = []
     if recent_day_strs:
         conn2 = get_conn()
-        products_days = {}
+        by_day: dict[str, dict] = {}
         for d_str in recent_day_strs:
             d = datetime.strptime(d_str, '%Y-%m-%d').date()
-            products_days[d_str] = query_product_detail(conn2, d)
+            by_day[d_str] = query_product_detail(conn2, d)
         conn2.close()
-        products_output = {
-            'schema': 2,
-            'dates': recent_day_strs,
-            'generated_at': datetime.now().isoformat(timespec='seconds'),
-            'days': products_days,
-        }
-        psize = safe_write_json(PRODUCTS_OUT_FILE, products_output)
-        print(f'[build_store_discount_data] wrote {PRODUCTS_OUT_FILE} ({psize:,} bytes, '
-              f'dates={recent_day_strs})')
+
+        # reshape from {date: {whs: [items]}} to {whs: {date: [items]}}
+        all_whs = set()
+        for day_stores in by_day.values():
+            all_whs.update(day_stores.keys())
+
+        os.makedirs(PRODUCTS_OUT_DIR, exist_ok=True)
+        total_bytes = 0
+        for whs in sorted(all_whs):
+            store_days = {d_str: by_day[d_str].get(whs, []) for d_str in recent_day_strs}
+            store_output = {
+                'schema': 3,
+                'whs': whs,
+                'dates': recent_day_strs,
+                'generated_at': datetime.now().isoformat(timespec='seconds'),
+                'days': store_days,
+            }
+            path = os.path.join(PRODUCTS_OUT_DIR, f'{whs}.json')
+            total_bytes += safe_write_json(path, store_output)
+            product_file_paths.append(path)
+        print(f'[build_store_discount_data] wrote {len(product_file_paths)} per-store product '
+              f'files to {PRODUCTS_OUT_DIR} ({total_bytes:,} bytes total, dates={recent_day_strs})')
     else:
         print('[build_store_discount_data] no days in output — skipping product detail')
 
     if push:
         push_github(OUT_FILE, 'store_discount_data.json')
-        if recent_day_strs:
-            push_github(PRODUCTS_OUT_FILE, 'store_discount_products.json')
+        if product_file_paths:
+            rel_paths = [os.path.relpath(p, FOLDER).replace('\\', '/') for p in product_file_paths]
+            push_github_tree(rel_paths, f'Update store_discount_products/ ({datetime.now().isoformat(timespec="seconds")})')
 
 
 def push_github(local_path, repo_filename):
@@ -289,6 +307,75 @@ def push_github(local_path, repo_filename):
     with urllib.request.urlopen(req2) as resp:
         result = json.loads(resp.read())
         print(f'[build_store_discount_data] pushed {repo_filename}: {result.get("commit", {}).get("sha", "?")}')
+
+
+def push_github_tree(rel_paths: list[str], message: str):
+    """Push MANY files as ONE commit via the Git Data API (blob+tree+commit),
+    same approach as push_files_api.py. Used for store_discount_products/ (202
+    small per-store files) so a daily run doesn't create 202 separate commits.
+    """
+    from lib.db import github_token, github_repo
+    import base64
+    import urllib.request
+    import urllib.error
+    import time as _time
+
+    token = github_token()
+    repo = github_repo()
+    if not token:
+        print('[build_store_discount_data] no github_token in db_config.json — skip push')
+        return
+
+    headers = {
+        'Authorization': f'token {token}',
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+    }
+
+    def api(method, path, body=None, retries=4):
+        url = f'https://api.github.com/{path}'
+        data = json.dumps(body).encode() if body is not None else None
+        for attempt in range(retries):
+            req = urllib.request.Request(url, data=data, method=method, headers=headers)
+            try:
+                with urllib.request.urlopen(req, timeout=300) as r:
+                    return json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                if e.code >= 500 and attempt < retries - 1:
+                    _time.sleep(10 * (attempt + 1))
+                    continue
+                raise RuntimeError(f'HTTP {e.code} on {method} {path}: {e.read().decode()[:300]}')
+            except (urllib.error.URLError, TimeoutError):
+                if attempt < retries - 1:
+                    _time.sleep(10 * (attempt + 1))
+                    continue
+                raise
+
+    ref = api('GET', f'repos/{repo}/git/ref/heads/main')
+    parent = ref['object']['sha']
+    commit = api('GET', f'repos/{repo}/git/commits/{parent}')
+
+    tree_items = []
+    for rel in rel_paths:
+        local = os.path.join(FOLDER, rel)
+        if not os.path.exists(local):
+            continue
+        with open(local, 'rb') as fh:
+            blob = api('POST', f'repos/{repo}/git/blobs',
+                       {'content': base64.b64encode(fh.read()).decode(), 'encoding': 'base64'})
+        tree_items.append({'path': rel, 'mode': '100644', 'type': 'blob', 'sha': blob['sha']})
+
+    if not tree_items:
+        print('[build_store_discount_data] push_github_tree: no files found — skip')
+        return
+
+    tree = api('POST', f'repos/{repo}/git/trees',
+               {'base_tree': commit['tree']['sha'], 'tree': tree_items})
+    new_commit = api('POST', f'repos/{repo}/git/commits',
+                     {'message': message, 'tree': tree['sha'], 'parents': [parent]})
+    api('PATCH', f'repos/{repo}/git/refs/heads/main', {'sha': new_commit['sha']})
+    print(f'[build_store_discount_data] pushed {len(tree_items)} files in 1 commit: '
+          f'{new_commit["sha"][:8]}')
 
 
 def main():

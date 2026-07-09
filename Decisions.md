@@ -68,6 +68,16 @@ Join: เหลือแค่ `fact_sales.iprod = dim_product.iprod` (+ `dim_br
 - ✅ Backfill 92 วันเสร็จแล้ว (2026-04-08 → 2026-07-08, 89,850 แถว, 3.8MB) เก็บที่ `store_discount_data.json`
 - ⚠️ ไม่มีคอลัมน์ "ภาค" ตรงในระบบ — ต้องเช็คกับ user อีกครั้งถ้าต้องการ level ภาคจริงๆ แยกจาก RM
 
+**แก้ไข perf 2026-07-09: แยก `store_discount_products.json` (24MB รวมทุกสาขา) เป็นไฟล์รายสาขา:** user รายงานว่าหน้าคลิกดูสินค้าระดับสาขา "โหลดนานมาก" — root cause: ไฟล์เดียวรวม 202 สาขา × 2 วัน (~24MB) ถูก fetch ทั้งไฟล์ทุกครั้งที่ drill ลงดูแค่สาขาเดียว
+- **Decision:** เปลี่ยนจากไฟล์รวม 1 ไฟล์ → โฟลเดอร์ `store_discount_products/<whs>.json` (202 ไฟล์ย่อย ~120KB/ไฟล์เฉลี่ย, schema 3: `{schema, whs, dates, generated_at, days:{date:[items]}}`)
+- `build_store_discount_data.py`: เปลี่ยน `PRODUCTS_OUT_FILE` → `PRODUCTS_OUT_DIR`, reshape ข้อมูลจาก `{date:{whs:[...]}}` เป็นต่อสาขา, เขียนทีละไฟล์ผ่าน `safe_write_json`
+- เพิ่ม `push_github_tree()` ใน builder — ใช้ Git Data API (blob+tree+commit) push 202 ไฟล์เป็น **1 commit เดียว** (กัน 202 commits/วัน)
+- `push_files_api.py` เพิ่ม directory-argument expansion (walk โฟลเดอร์ที่ส่งเข้ามา รวมไฟล์ทั้งหมดในนั้นเข้า tree เดียวกัน)
+- Dashboard JS: เปลี่ยนจาก global `PRODUCTS_DATA` object → `productsCache = new Map()` (key = รหัสสาขา), `ensureProductsLoaded(whs)` fetch เฉพาะไฟล์สาขาที่กำลังดู (lazy per-store), `renderProductLevel`/`downloadCSV` อ่านจาก cache แทน
+- **Verification:** JS syntax check ผ่าน (`node --check`) หลัง reconstruct จากไฟล์เต็มผ่าน Read tool (bash mount มี stale-cache แสดงไฟล์ตัดที่ 18,383 bytes แต่ Read tool ยืนยันไฟล์จริงสมบูรณ์ 565 บรรทัด จบด้วย `</html>`)
+- ไฟล์เก่า `store_discount_products.json` (24MB รวม, commit `0d1d59a8`) เหลือค้างใน repo แต่ dashboard ไม่อ้างอิงแล้ว — ยังไม่ลบ (รอ user ตัดสินใจ)
+- **ยังไม่ push** ไฟล์ 202 ไฟล์ + build script + dashboard.html ตัวใหม่ — รอ user รันคำสั่ง push
+
 ---
 
 ## [2026-06-20] detect_max_day retry logic — product builder timing fix

@@ -111,22 +111,22 @@
 
 <script>
 const DATA_URL = 'store_discount_data.json';
-const PRODUCTS_DATA_URL = 'store_discount_products.json';
+const PRODUCTS_DIR = 'store_discount_products'; // one small file per store: <dir>/<whs>.json
 let DATA = null;
-let PRODUCTS_DATA = null;
-let productsLoading = false;
+const productsCache = new Map(); // whs -> {dates, days} | null (fetch failed/missing)
+let productsLoadingFor = null;
 let state = { level: 'rm', rm: null, dm: null, store: null, linetype: null, mode: 'daily', dateIdx: 0 };
 let trendChart = null;
 
-async function ensureProductsLoaded(){
-  if (PRODUCTS_DATA || productsLoading) return;
-  productsLoading = true;
+async function ensureProductsLoaded(whs){
+  if (productsCache.has(whs) || productsLoadingFor === whs) return;
+  productsLoadingFor = whs;
   try {
-    const res = await fetch(PRODUCTS_DATA_URL);
-    PRODUCTS_DATA = await res.json();
-  } catch(e) { console.error('load products failed', e); }
-  productsLoading = false;
-  if (state.level === 'product') render();
+    const res = await fetch(`${PRODUCTS_DIR}/${whs}.json`);
+    productsCache.set(whs, res.ok ? await res.json() : null);
+  } catch(e) { console.error('load products failed', e); productsCache.set(whs, null); }
+  productsLoadingFor = null;
+  if (state.level === 'product' && state.store === whs) render();
 }
 
 function fmt(n, d=0){ return Number(n).toLocaleString('th-TH', {minimumFractionDigits:d, maximumFractionDigits:d}); }
@@ -312,26 +312,34 @@ function renderProductLevel(dateStr){
   const tbody = document.getElementById('tbodyRows');
   tbody.style.cursor = 'default';
 
-  if (!PRODUCTS_DATA){
+  const storeWhs = state.store;
+  const productsData = productsCache.get(storeWhs);
+
+  if (productsData === undefined){
     tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--muted)">กำลังโหลดข้อมูลสินค้า...</td></tr>`;
     document.getElementById('emptyMsg').style.display = 'none';
-    ensureProductsLoaded();
+    ensureProductsLoaded(storeWhs);
     return;
   }
-  if (!PRODUCTS_DATA.days[dateStr]){
-    const have = PRODUCTS_DATA.dates.map(fmtDate).join(', ');
+  if (productsData === null){
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--muted)">โหลดข้อมูลสินค้าของสาขานี้ไม่สำเร็จ</td></tr>`;
+    document.getElementById('emptyMsg').style.display = 'none';
+    return;
+  }
+  if (!productsData.days[dateStr]){
+    const have = productsData.dates.map(fmtDate).join(', ');
     tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--muted)">รายละเอียดสินค้ามีเฉพาะวันล่าสุด (${have}) — เปลี่ยนวันที่เป็นวันใดวันหนึ่งด้านบนเพื่อดู</td></tr>`;
     document.getElementById('emptyMsg').style.display = 'none';
     return;
   }
-  const items = (PRODUCTS_DATA.days[dateStr][state.store] || []).filter(p => p.linetype === state.linetype)
+  const items = (productsData.days[dateStr] || []).filter(p => p.linetype === state.linetype)
                 .sort((a,b) => b.discount - a.discount);
 
   // day-on-day comparison: find yesterday's entry for the same product, if available
   const dates = DATA._dates;
   const curIdx = dates.indexOf(dateStr);
   const prevDateStr = curIdx > 0 ? dates[curIdx-1] : null;
-  const prevItems = (prevDateStr && PRODUCTS_DATA.days[prevDateStr]) ? (PRODUCTS_DATA.days[prevDateStr][state.store] || []) : [];
+  const prevItems = (prevDateStr && productsData.days[prevDateStr]) ? productsData.days[prevDateStr] : [];
   const prevByIprod = {};
   prevItems.forEach(p => { if (p.linetype === state.linetype) prevByIprod[p.iprod] = p; });
 
@@ -515,11 +523,12 @@ function downloadCSV(){
   const dateStr = dates[state.dateIdx];
 
   if (state.level === 'product'){
-    if (!PRODUCTS_DATA || !PRODUCTS_DATA.days[dateStr]){
+    const productsData = productsCache.get(state.store);
+    if (!productsData || !productsData.days[dateStr]){
       alert('รายละเอียดสินค้ามีเฉพาะวันล่าสุด — ยังโหลดไม่เสร็จหรือวันที่ไม่ตรง');
       return;
     }
-    const items = (PRODUCTS_DATA.days[dateStr][state.store] || []).filter(p => p.linetype === state.linetype);
+    const items = (productsData.days[dateStr] || []).filter(p => p.linetype === state.linetype);
     const header = ['barcode','name','qty','list_amt','discount','net_sales'];
     const lines = [header.join(',')];
     items.forEach(p => {

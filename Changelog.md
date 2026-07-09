@@ -21,6 +21,16 @@
 ### Fixed (same day, after user correction)
 - **เปลี่ยนตัวจำแนกสาขา vs การตลาดเป็น `solinetype`** — user ยืนยันตรงๆ ว่า linetype `O`, `P`, `Y` = สาขากดเอง ที่เหลือ = การตลาด/โปรอัตโนมัติ (คนละกลไกกับ `sodisc_bill/sodisc` ที่ใช้ตอนแรก) แก้ `build_store_discount_data.py` (ตัด join `fact_bill_header` ทิ้ง, schema v2) และ `store_discount_dashboard.html` (คำนวณ store vs marketing discount จาก linetype key ตอน render) — verify แล้วตรงกับข้อมูลเดิมที่ backfill ไว้ (ไม่ต้อง rebuild JSON) — ดู Decisions.md `[2026-07-09]` ฉบับ FINAL
 - **แก้ Edit tool truncation** บน `store_discount_dashboard.html` (18KB, โดนตัดกลาง JS ตอนใช้ Edit หลายรอบ) — เขียนใหม่เต็มไฟล์ด้วย Write tool ครั้งเดียวแทน + verify ด้วย Read tool (bash mount ใน sandbox มี stale cache ไม่สะท้อนไฟล์จริง — ใช้ Read tool เป็น ground truth)
+- **ตัด linetype `C` (ของแถม) และ `F` (สินค้าสมนาคุณ)** ออกจากทุกที่ในแดชบอร์ด — `F` ไม่รวมใน GP% calc ด้วย (ราคาเต็ม>0 ขายจริง 0 บาททำให้ GP บิดเบือน เช่น -239900%)
+- **เพิ่ม drill level 4-5**: คลิกสาขา → breakdown ตาม linetype → คลิก linetype → รายการสินค้า (บาร์โค้ด/ชื่อ/จำนวน/ราคาเต็ม/ราคาลด/ราคาขายสุทธิ + เทียบเมื่อวาน) — ข้อมูลสินค้าเก็บแยกไฟล์ `store_discount_products.json` (โหลด lazy เฉพาะตอน drill ถึงระดับนี้), ขยายจาก 1 วัน → 2 วัน (ล่าสุด+เมื่อวาน) เพื่อเทียบ day-on-day
+- **สีพาสเทล** ตามที่ user ขอ (--lavender/--mint/--peach/--sky/--butter) + format วันที่เป็น dd-mm-yyyy ทุกจุดที่แสดงผล
+
+### Perf fix (2026-07-09, หลัง user รายงาน "โหลดข้อมูลสินค้านานจัง")
+- Root cause: `store_discount_products.json` รวมทุกสาขา (202 สาขา × 2 วัน) เป็นไฟล์เดียว ~24MB — โหลดทั้งไฟล์ทุกครั้งที่ดูแค่สาขาเดียว
+- **แยกเป็นไฟล์รายสาขา** `store_discount_products/<whs>.json` (~120KB เฉลี่ย/ไฟล์) — dashboard ใช้ `productsCache` (Map) โหลด lazy ทีละสาขา
+- เพิ่ม `push_github_tree()` push 202 ไฟล์เป็น 1 commit (Git Data API), `push_files_api.py` รองรับ push ทั้งโฟลเดอร์
+- Verify: `node --check` ผ่าน, ไฟล์ HTML ครบ 565 บรรทัดจบด้วย `</html>` (ยืนยันผ่าน Read tool เนื่องจาก bash mount stale)
+- **ยังไม่ push** — ดูคำสั่ง push ด้านล่าง
 
 ## [2026-06-23] Trigger lost-Product Daily GP Analysis Rebuild automatically (Antigravity)
 
