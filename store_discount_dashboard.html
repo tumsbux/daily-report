@@ -7,46 +7,57 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js"></script>
 <style>
   :root {
-    --red: #e5484d; --red-bg: #ffe8e8;
-    --yellow: #f5a623; --yellow-bg: #fff6e0;
-    --green: #2fa84f; --green-bg: #e6f7ea;
-    --border: #e2e2e2; --muted: #767676;
+    --red: #d1728a; --red-bg: #fbe4ea;
+    --yellow: #c99a3e; --yellow-bg: #fdf3dc;
+    --green: #4f9e82; --green-bg: #e2f4ec;
+    --border: #ece6f5; --muted: #8b8a9a;
+    --lavender: #c9b6e4; --lavender-dark: #a58fc9;
+    --mint: #b8e3d4; --peach: #ffd8c2; --sky: #bcdcf0; --butter: #fdedb0;
   }
   * { box-sizing: border-box; }
-  body { font-family: 'Segoe UI', 'Sarabun', Tahoma, sans-serif; margin:0; background:#f7f8fa; color:#222; }
-  header { background:#1f2937; color:#fff; padding:16px 24px; }
+  body { font-family: 'Segoe UI', 'Sarabun', Tahoma, sans-serif; margin:0;
+         background: linear-gradient(180deg,#f6f1fb 0%,#f8fafc 260px); color:#4a4560; }
+  header { background: linear-gradient(120deg,#c9b6e4 0%,#bcdcf0 100%); color:#3b3450; padding:18px 24px;
+            border-radius:0 0 18px 18px; box-shadow:0 2px 10px rgba(150,120,200,0.15); }
   header h1 { margin:0; font-size:20px; }
-  header .sub { font-size:12px; color:#c8ccd2; margin-top:4px; }
+  header .sub { font-size:12px; color:#5b5470; margin-top:4px; }
   .wrap { max-width:1400px; margin:0 auto; padding:20px; }
   .toolbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:16px; }
-  .btn { background:#fff; border:1px solid var(--border); border-radius:8px; padding:8px 14px;
-         cursor:pointer; font-size:13px; color:#333; }
-  .btn:hover { background:#f0f0f0; }
-  .btn.active { background:#1f2937; color:#fff; border-color:#1f2937; }
+  .btn { background:#fff; border:1px solid var(--border); border-radius:10px; padding:8px 14px;
+         cursor:pointer; font-size:13px; color:#5b5470; box-shadow:0 1px 3px rgba(150,120,200,0.08); }
+  .btn:hover { background:#f3ecfb; }
+  .btn.active { background:var(--lavender-dark); color:#fff; border-color:var(--lavender-dark); }
   .breadcrumb { display:flex; gap:6px; align-items:center; font-size:13px; color:var(--muted); flex-wrap:wrap; }
-  .breadcrumb span.crumb { cursor:pointer; color:#2563eb; }
+  .breadcrumb span.crumb { cursor:pointer; color:#7b5fb0; }
   .breadcrumb span.crumb:hover { text-decoration:underline; }
   .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:18px; }
-  .card { background:#fff; border:1px solid var(--border); border-radius:10px; padding:14px; }
+  .card { background:#fff; border:1px solid var(--border); border-radius:14px; padding:14px;
+          box-shadow:0 2px 8px rgba(150,120,200,0.08); border-top:4px solid var(--lavender); }
+  .card:nth-child(2){ border-top-color:var(--peach); }
+  .card:nth-child(3){ border-top-color:var(--sky); }
+  .card:nth-child(4){ border-top-color:var(--mint); }
+  .card:nth-child(5){ border-top-color:var(--butter); }
+  .card:nth-child(6){ border-top-color:var(--lavender-dark); }
   .card .label { font-size:12px; color:var(--muted); margin-bottom:6px; }
-  .card .value { font-size:20px; font-weight:600; }
+  .card .value { font-size:20px; font-weight:700; color:#4a4560; }
   .card .delta { font-size:12px; margin-top:4px; }
   .delta.up { color:var(--red); } .delta.down { color:var(--green); }
-  table { width:100%; border-collapse:collapse; background:#fff; border-radius:10px; overflow:hidden; }
+  table { width:100%; border-collapse:collapse; background:#fff; border-radius:14px; overflow:hidden; }
   th, td { padding:9px 12px; text-align:right; border-bottom:1px solid var(--border); font-size:13px; white-space:nowrap; }
-  th { background:#f0f1f3; text-align:right; font-weight:600; color:#444; }
+  th { background:#f3ecfb; text-align:right; font-weight:600; color:#6b5f8a; }
   th:first-child, td:first-child { text-align:left; }
   tbody tr { cursor:pointer; }
-  tbody tr:hover { background:#f5f8ff; }
+  tbody tr:hover { background:#f6f1fb; }
   .gp-pill { display:inline-block; padding:2px 8px; border-radius:12px; font-weight:600; font-size:12px; }
   .gp-red { background:var(--red-bg); color:var(--red); }
-  .gp-yellow { background:var(--yellow-bg); color:#b8790a; }
+  .gp-yellow { background:var(--yellow-bg); color:var(--yellow); }
   .gp-green { background:var(--green-bg); color:var(--green); }
-  .panel { background:#fff; border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:18px; }
-  .panel h3 { margin:0 0 10px 0; font-size:15px; }
+  .panel { background:#fff; border:1px solid var(--border); border-radius:14px; padding:16px; margin-bottom:18px;
+           box-shadow:0 2px 8px rgba(150,120,200,0.06); }
+  .panel h3 { margin:0 0 10px 0; font-size:15px; color:#5b5470; }
   .linetype-row { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
-  .lt-chip { background:#f0f1f3; border-radius:8px; padding:6px 10px; font-size:12px; }
-  select, input[type=date] { padding:7px 10px; border:1px solid var(--border); border-radius:8px; font-size:13px; }
+  .lt-chip { background:#f6f1fb; border-radius:10px; padding:6px 10px; font-size:12px; color:#4a4560; }
+  select, input[type=date] { padding:7px 10px; border:1px solid var(--border); border-radius:10px; font-size:13px; }
   .empty { padding:30px; text-align:center; color:var(--muted); }
   .footnote { font-size:11px; color:var(--muted); margin-top:10px; line-height:1.6; }
   #chartWrap { max-width:100%; }
@@ -54,7 +65,7 @@
 </head>
 <body>
 <header>
-  <h1>แดชบอร์ดปรับลดราคาโดยสาขา (ไม่รวมโปรโมชั่นส่วนกลาง)</h1>
+  <h1>🌸 แดชบอร์ดปรับลดราคาโดยสาขา (ไม่รวมโปรโมชั่นส่วนกลาง)</h1>
   <div class="sub" id="genInfo">กำลังโหลดข้อมูล...</div>
 </header>
 <div class="wrap">
@@ -369,7 +380,7 @@ function renderTable(rows, prevMap, groupBy){
 function renderLinetype(dateStr){
   const rows = linetypeBreakdown(dateStr);
   document.getElementById('linetypeRow').innerHTML = rows.map(r => `
-    <div class="lt-chip" style="border-left:3px solid ${r.isStore ? 'var(--red)' : '#9aa0a6'}">
+    <div class="lt-chip" style="border-left:4px solid ${r.isStore ? 'var(--lavender-dark)' : '#c9c4d8'}">
       <b>${r.linetype}</b> ${r.isStore ? '🏪 สาขา' : '📢 การตลาด'} · ลด ${fmt(r.discount)}฿
       (${pct(r.list_amt>0 ? r.discount/r.list_amt : 0)}) ·
       <span class="gp-pill ${gpClass(r.gp)}" style="margin-left:4px">GP ${pct(r.gp)}</span>
@@ -397,8 +408,8 @@ function renderTrend(){
     data: {
       labels,
       datasets: [
-        { type:'bar', label:'ส่วนลดสาขา (บาท)', data:discSeries, backgroundColor:'#e5484d88', yAxisID:'y' },
-        { type:'line', label:'GP% คงเหลือ', data:gpSeries, borderColor:'#2fa84f', yAxisID:'y1', tension:0.25 },
+        { type:'bar', label:'ส่วนลดสาขา (บาท)', data:discSeries, backgroundColor:'#c9b6e4aa', borderRadius:4, yAxisID:'y' },
+        { type:'line', label:'GP% คงเหลือ', data:gpSeries, borderColor:'#4f9e82', backgroundColor:'#4f9e82', yAxisID:'y1', tension:0.35 },
       ]
     },
     options: {
