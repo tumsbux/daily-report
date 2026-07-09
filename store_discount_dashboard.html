@@ -92,7 +92,7 @@
   <div class="footnote">
     หมายเหตุ: "ส่วนลดที่สาขากดเอง" = ยอดส่วนต่างจากราคาปกติเฉพาะรายการที่มี linetype = O, P หรือ Y
     (ตัวจำแนกที่ยืนยันจากผู้ใช้งานจริง) รายการ linetype อื่นทั้งหมดถือเป็น "การตลาด/โปรอัตโนมัติ" (ราคาสมาชิก/โปรที่ระบบตั้งไว้)
-    และแสดงแยกไว้เป็นข้อมูลอ้างอิงเท่านั้น ไม่รวมในเป้าหมายหลักของแดชบอร์ดนี้
+    และแสดงแยกไว้เป็นข้อมูลอ้างอิงเท่านั้น ไม่รวมในเป้าหมายหลักของแดชบอร์ดนี้ &middot; ตัด linetype C (ของแถม มูลค่า 0) ออกทั้งหมด
     &middot; เกณฑ์สี GP%: 🔴 &lt;10% &nbsp; 🟡 10–20% &nbsp; 🟢 &gt;20%
     &middot; อัปเดตอัตโนมัติทุกวัน 08:30 น. &middot; เก็บย้อนหลัง 92 วัน
   </div>
@@ -149,10 +149,13 @@ function toggleMode(){
 // marketing/member-price promo. 'P' only ever occurs at whs '901' (special
 // channel, not a real 1-500 store) so in practice only O/Y show up here.
 const STORE_LINETYPES = new Set(['O','P','Y']);
+// linetype 'C' = ของแถม/free-gift line (มูลค่า 0 เสมอ) — ตัดออกทั้งหมดตามที่ user แจ้ง
+const EXCLUDED_LINETYPES = new Set(['C']);
 
 function emptyAgg(){ return { qty:0, cost:0, net_sales:0, list_amt:0, store_discount:0, marketing_discount:0 }; }
 function addAgg(a, whsData){
   for (const lt in whsData){
+    if (EXCLUDED_LINETYPES.has(lt)) continue;
     const [qty,cost,net_sales,list_amt] = whsData[lt];
     const discount = list_amt - net_sales;
     a.qty += qty; a.cost += cost; a.net_sales += net_sales; a.list_amt += list_amt;
@@ -205,6 +208,7 @@ function linetypeBreakdown(dateStr){
   for (const whs in dayData){
     if (!scopeStores.has(whs)) continue;
     for (const l in dayData[whs]){
+      if (EXCLUDED_LINETYPES.has(l)) continue;
       if (!lt[l]) lt[l] = emptyAgg();
       const [qty,cost,net_sales,list_amt] = dayData[whs][l];
       const discount = list_amt - net_sales;

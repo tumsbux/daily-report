@@ -45,6 +45,8 @@ Join: เหลือแค่ `fact_sales.iprod = dim_product.iprod` (+ `dim_br
 
 **⚠️ ประวัติแก้สูตร:** รอบแรกใช้ `sodisc_bill/sodisc` bill-ratio (ผิด — คนละกลไก), รอบสองตัด `sopricdisc` ออกทั้งหมด (ผิด — บาง `sopricdisc` เป็นของสาขาจริงถ้าอยู่ใน line type O/P/Y), รอบนี้ (final) ใช้ `solinetype` เป็นตัวจำแนกตรงๆ ตามที่ user ยืนยัน
 
+**เพิ่มเติม 2026-07-09 (หลัง push):** user แจ้งให้ตัด `solinetype='C'` ออกจากทุกที่ในแดชบอร์ด (ของแถม/free-gift — มูลค่า qty/cost/sales/discount = 0 อยู่แล้วทุกแถว ไม่กระทบตัวเลขรวม แต่ทำให้ chip linetype ในหน้า breakdown สะอาดขึ้น) — แก้ที่ dashboard JS เท่านั้น (`EXCLUDED_LINETYPES = {'C'}` กรองใน `addAgg` และ `linetypeBreakdown`) ไม่ต้อง rebuild ข้อมูล
+
 **GP% color threshold:** 🔴 <10%　🟡 10–20%　🟢 >20% (คำนวณหลังหักเฉพาะส่วนลดสาขา ไม่รวมคูปอง/คะแนน/เปอร์เซ็นต์การตลาด)
 
 **Hierarchy drill-down:** ภาพรวม → RM → DM → Store (คลิก drill ลง) + breakdown ตาม `solinetype` ในทุก level + เทียบวันนี้ vs เมื่อวาน
