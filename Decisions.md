@@ -78,6 +78,14 @@ Join: เหลือแค่ `fact_sales.iprod = dim_product.iprod` (+ `dim_br
 - ไฟล์เก่า `store_discount_products.json` (24MB รวม, commit `0d1d59a8`) เหลือค้างใน repo แต่ dashboard ไม่อ้างอิงแล้ว — ยังไม่ลบ (รอ user ตัดสินใจ)
 - **ยังไม่ push** ไฟล์ 202 ไฟล์ + build script + dashboard.html ตัวใหม่ — รอ user รันคำสั่ง push
 
+**บั๊กจริงที่เจอ + แก้แล้ว 2026-07-09: `branches` mapping ค้าง (cross-RM misattribution):** user รายงานให้ช่วย verify ตัวเลขการ์ด RM จินตนา อินทะเสโน (rm_code 36299) — query DB สดเทียบกับไฟล์พบว่า "ราคาปกติรวม" ขาดไป 12,009 บาท (~1%)
+- **Root cause:** `load_branches()` เดิม**ไม่ query `dim_branch` เอง** แต่อ่าน `branches` dict จาก `dim_cache.json` (cache ที่ `rebuild_fraud_analysis.py` สร้างไว้คนละสคริปต์) — cache นี้ค้างและไม่ sync กับ `dim_branch` ปัจจุบัน
+- พบว่าสาขารหัส `080` (คลองสงค์) ในระบบจริงตอนนี้ขึ้นกับ RM จินตนา (36299) แต่ cache เก่ายังผูกไว้กับ RM สุพรรษา (36285) — และสาขารหัส `081` (ซีเฟรซ) กลับกัน (cache คิดว่าเป็นของจินตนา แต่จริงๆ เป็นของสุพรรษาแล้ว) → ยอดขายสาขา 080 (18,140 บาทของวันนั้น) เลยไปโผล่ผิด RM ในแดชบอร์ด
+- **Fix:** เปลี่ยน `load_branches()` ให้ query `dim_branch` สดทุกครั้งที่ build (`SELECT code,name,dm,dm_code,rm,rm_code FROM dim_branch WHERE code REGEXP '^[0-9]+$' AND CAST(code AS UNSIGNED) BETWEEN 1 AND 500`) แทนที่จะพึ่ง `dim_cache.json` — ตัด cross-script dependency ทิ้งทั้งหมด, ลบ `BRANCH_CACHE` constant ที่ไม่ใช้แล้ว
+- **Hotfix ทันที (ไม่ต้องรอ cron พรุ่งนี้):** patch คีย์ `branches` ใน `store_discount_data.json` ที่มีอยู่ตรงๆ ด้วย mapping สดจาก `dim_branch` (203 สาขา) โดยไม่แตะ `days` (ข้อมูลยอดขาย 92 วันเดิมไม่กระทบ เพราะ key ด้วยรหัสสาขาอยู่แล้ว ไม่ผูกกับ branches)
+- **Verify:** หลัง patch แล้ว คำนวณ RM จินตนา วันที่ 2026-07-07 จากไฟล์ตรงกับ query DB สดเป๊ะ (list_amt 1,275,713 / store_disc 85 / marketing 26,004.66 — ตรงทุกหลัก)
+- **ยังไม่ push** `store_discount_data.json` (patched), `build_store_discount_data.py` (fixed) — รวมอยู่ในคำสั่ง push เดียวกับ per-store product split ด้านบน
+
 ---
 
 ## [2026-06-20] detect_max_day retry logic — product builder timing fix

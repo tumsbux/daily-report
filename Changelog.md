@@ -32,6 +32,13 @@
 - Verify: `node --check` ผ่าน, ไฟล์ HTML ครบ 565 บรรทัดจบด้วย `</html>` (ยืนยันผ่าน Read tool เนื่องจาก bash mount stale)
 - **ยังไม่ push** — ดูคำสั่ง push ด้านล่าง
 
+### Data bug fix (2026-07-09, จาก user ขอ verify ตัวเลขการ์ด)
+- พบว่า RM/DM mapping (`branches` dict) ใช้ cache ค้างจาก `dim_cache.json` (สร้างโดย `rebuild_fraud_analysis.py` คนละสคริปต์) — ไม่ sync กับ `dim_branch` จริงเมื่อมีการย้ายสาขาข้าม RM
+- ตัวอย่างจริงที่เจอ: สาขา `080` (คลองสงค์) ย้ายไป RM จินตนา (36299) แล้วในระบบจริง แต่ cache ยังผูกกับ RM สุพรรษา (36285) — ทำให้ยอด RM จินตนาขาดไป ~12,009 บาท/วัน (~1%) และไปโป่งที่ RM สุพรรษาแทน
+- **Fix:** `load_branches()` เปลี่ยนไป query `dim_branch` สดทุกครั้งที่ build แทนพึ่ง `dim_cache.json` — ตัด cross-script dependency, ลบ `BRANCH_CACHE` ที่ไม่ใช้แล้ว
+- **Hotfix ทันที:** patch คีย์ `branches` ใน `store_discount_data.json` ที่มีอยู่ด้วยข้อมูลสดจาก `dim_branch` (203 สาขา) ไม่ต้องรอ query 92 วันใหม่ (ข้อมูลยอดขายเดิมไม่กระทบ)
+- Verify: คำนวณจากไฟล์หลัง patch ตรงกับ query MySQL สดเป๊ะทุกหลัก (RM 36299, 2026-07-07: list_amt 1,275,713 / store_disc 85 / marketing 26,004.66)
+
 ## [2026-06-23] Trigger lost-Product Daily GP Analysis Rebuild automatically (Antigravity)
 
 ### Fixed

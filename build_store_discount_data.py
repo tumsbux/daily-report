@@ -27,8 +27,11 @@ classifier is solinetype, not the bill-header discount fields):
     confirmed directly: classify by solinetype, no fact_bill_header join needed.
 
 Joins: fact_sales.iprod = dim_product.iprod
-       whs (sotowhs)    -> dim_branch (RM/DM) via dim_cache.json (already built by
-       rebuild_fraud_analysis.py — reused here instead of re-querying dim_branch)
+       whs (sotowhs)    -> dim_branch (RM/DM), queried fresh from dim_branch on every
+       run (FIXED 2026-07-09: used to reuse dim_cache.json built by
+       rebuild_fraud_analysis.py, which went stale when a store's RM assignment
+       changed in dim_branch and silently misattributed that store's sales to the
+       wrong RM — see Decisions.md [2026-07-09] branches-cache-staleness fix)
 
 Output: store_discount_data.json
     {
@@ -66,7 +69,6 @@ from lib.safe_write import safe_write_json        # noqa: E402
 
 OUT_FILE = os.path.join(FOLDER, 'store_discount_data.json')
 PRODUCTS_OUT_DIR = os.path.join(FOLDER, 'store_discount_products')  # one small file per store
-BRANCH_CACHE = os.path.join(FOLDER, 'dim_cache.json')
 SCHEMA = 2  # v2: dropped store_discount column (bill-ratio method) — dashboard now
             # derives discount = list_amt - net_sales and classifies store vs
             # marketing by solinetype key (O/P/Y = store) at read time
@@ -74,12 +76,34 @@ WINDOW_DAYS_DEFAULT = 92  # ~3 months rolling
 PRODUCTS_DAYS_KEPT = 2    # store_discount_products.json: today + yesterday only
 
 
-def load_branches() -> dict:
-    """Reuse the RM/DM/store mapping already built by rebuild_fraud_analysis.py."""
-    if os.path.exists(BRANCH_CACHE):
-        with open(BRANCH_CACHE, encoding='utf-8') as f:
-            return json.load(f).get('branches', {})
-    return {}
+def load_branches(conn) -> dict:
+    """Query dim_branch directly for the current RM/DM/store mapping.
+
+    FIXED 2026-07-09: previously reused dim_cache.json (built by
+    rebuild_fraud_analysis.py) instead of querying dim_branch fresh. That cache
+    is only refreshed when the fraud script happens to run, so when a store's
+    code/RM assignment changes in dim_branch (e.g. store 080/081 code
+    reassignment discovered 2026-07-09 — verified against live DB, sales for
+    080 were being silently misattributed to the WRONG RM because the stale
+    cache still mapped 080 to the old RM), this dashboard's RM/DM rollups would
+    be wrong until the fraud cache happened to refresh. Querying dim_branch
+    directly here removes that cross-script dependency entirely.
+    """
+    sql = """
+        SELECT code, name, dm, dm_code, rm, rm_code
+        FROM dim_branch
+        WHERE code REGEXP '^[0-9]+$' AND CAST(code AS UNSIGNED) BETWEEN 1 AND 500
+    """
+    cur = conn.cursor()
+    cur.execute(sql)
+    branches = {}
+    for code, name, dm, dm_code, rm, rm_code in cur:
+        branches[str(code).zfill(3)] = {
+            'name': name, 'dm': dm, 'dm_code': dm_code, 'rm': rm, 'rm_code': rm_code,
+        }
+    cur.close()
+    print(f'[build_store_discount_data] loaded {len(branches)} branches fresh from dim_branch')
+    return branches
 
 
 def query_range(conn, start_date: date, end_date_excl: date) -> dict:
@@ -181,7 +205,7 @@ def merge_days(existing: dict, fresh: dict, window_days: int) -> dict:
 
 def build(days_arg: int | None, single_day: str | None, push: bool):
     conn = get_conn()
-    branches = load_branches()
+    branches = load_branches(conn)
 
     existing = {}
     if os.path.exists(OUT_FILE):
