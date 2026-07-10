@@ -467,6 +467,11 @@ def push_github_tree(rel_paths: list[str], message: str):
     }
 
     def api(method, path, body=None, retries=4):
+        # 401 on git/blobs during this 202-file bulk-POST loop has been observed to be
+        # a TRANSIENT secondary-rate-limit/abuse-detection response from GitHub (the
+        # same token succeeds again seconds later) rather than a real bad-credentials
+        # error — see Decisions.md [2026-07-10]. Retry it like a 5xx instead of raising
+        # immediately.
         url = f'https://api.github.com/{path}'
         data = json.dumps(body).encode() if body is not None else None
         for attempt in range(retries):
@@ -475,8 +480,11 @@ def push_github_tree(rel_paths: list[str], message: str):
                 with urllib.request.urlopen(req, timeout=300) as r:
                     return json.loads(r.read())
             except urllib.error.HTTPError as e:
-                if e.code >= 500 and attempt < retries - 1:
-                    _time.sleep(10 * (attempt + 1))
+                if (e.code >= 500 or e.code in (401, 403)) and attempt < retries - 1:
+                    wait = 10 * (attempt + 1)
+                    print(f'      WARN: HTTP {e.code} on {method} {path} — retry '
+                          f'{attempt + 1}/{retries - 1} in {wait}s...')
+                    _time.sleep(wait)
                     continue
                 raise RuntimeError(f'HTTP {e.code} on {method} {path}: {e.read().decode()[:300]}')
             except (urllib.error.URLError, TimeoutError):
@@ -490,7 +498,7 @@ def push_github_tree(rel_paths: list[str], message: str):
     commit = api('GET', f'repos/{repo}/git/commits/{parent}')
 
     tree_items = []
-    for rel in rel_paths:
+    for i, rel in enumerate(rel_paths):
         local = os.path.join(FOLDER, rel)
         if not os.path.exists(local):
             continue
@@ -498,6 +506,12 @@ def push_github_tree(rel_paths: list[str], message: str):
             blob = api('POST', f'repos/{repo}/git/blobs',
                        {'content': base64.b64encode(fh.read()).decode(), 'encoding': 'base64'})
         tree_items.append({'path': rel, 'mode': '100644', 'type': 'blob', 'sha': blob['sha']})
+        # small pacing delay — ~200 sequential blob POSTs in a tight loop is the
+        # likely trigger for GitHub's secondary rate-limit/abuse detection (see
+        # Decisions.md [2026-07-10]); this cuts request rate without meaningfully
+        # slowing the ~202-file run (adds ~30s total).
+        if i % 20 == 19:
+            _time.sleep(1)
 
     if not tree_items:
         print('[build_store_discount_data] push_github_tree: no files found — skip')
