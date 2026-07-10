@@ -61,6 +61,14 @@ import os
 import sys
 import time
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
+
+BKK_TZ = ZoneInfo('Asia/Bangkok')
+
+
+def now_bkk() -> datetime:
+    """Bangkok-local now (GHA runner is UTC — datetime.now() alone is 7h behind)."""
+    return datetime.now(BKK_TZ)
 
 FOLDER = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, FOLDER)
@@ -334,7 +342,7 @@ def build(days_arg: int | None, single_day: str | None, push: bool):
 
     output = {
         'schema': SCHEMA,
-        'generated_at': datetime.now().isoformat(timespec='seconds'),
+        'generated_at': now_bkk().isoformat(timespec='seconds'),
         'window_days': window_days,
         'branches': branches,
         'days': merged_days,
@@ -372,7 +380,7 @@ def build(days_arg: int | None, single_day: str | None, push: bool):
                 'schema': 3,
                 'whs': whs,
                 'dates': recent_day_strs,
-                'generated_at': datetime.now().isoformat(timespec='seconds'),
+                'generated_at': now_bkk().isoformat(timespec='seconds'),
                 'days': store_days,
             }
             path = os.path.join(PRODUCTS_OUT_DIR, f'{whs}.json')
@@ -387,7 +395,7 @@ def build(days_arg: int | None, single_day: str | None, push: bool):
         push_github(OUT_FILE, 'store_discount_data.json')
         if product_file_paths:
             rel_paths = [os.path.relpath(p, FOLDER).replace('\\', '/') for p in product_file_paths]
-            push_github_tree(rel_paths, f'Update store_discount_products/ ({datetime.now().isoformat(timespec="seconds")})')
+            push_github_tree(rel_paths, f'Update store_discount_products/ ({now_bkk().isoformat(timespec="seconds")})')
 
 
 def push_github(local_path, repo_filename):
@@ -417,7 +425,7 @@ def push_github(local_path, repo_filename):
         pass
 
     payload = {
-        'message': f'Update {repo_filename} ({datetime.now().isoformat(timespec="seconds")})',
+        'message': f'Update {repo_filename} ({now_bkk().isoformat(timespec="seconds")})',
         'content': content_b64,
     }
     if sha:
