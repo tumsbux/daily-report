@@ -59,6 +59,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from datetime import date, datetime, timedelta
 
 FOLDER = os.path.dirname(os.path.abspath(__file__))
@@ -66,6 +67,18 @@ sys.path.insert(0, FOLDER)
 
 from lib.db import get_conn, get_config          # noqa: E402
 from lib.safe_write import safe_write_json        # noqa: E402
+
+# Errno 2013 = "Lost connection to MySQL server during query" (seen 2026-07-10,
+# GHA run #187 — build_store_discount_data.py crashed mid-92-day query and the
+# workflow's continue-on-error masked it as a silent success). 2006 = "server
+# has gone away", same failure family. RETRYABLE_ERRNOS below are retried with
+# a fresh connection instead of killing the whole build.
+RETRYABLE_ERRNOS = {2013, 2006}
+CHUNK_DAYS = 14   # query_range pulls this many days per query instead of the
+                   # full window in one shot, so a dropped connection only
+                   # costs one chunk's worth of retry, not the whole 92 days
+MAX_QUERY_RETRIES = 3
+RETRY_DELAY_SECS = 5
 
 OUT_FILE = os.path.join(FOLDER, 'store_discount_data.json')
 PRODUCTS_OUT_DIR = os.path.join(FOLDER, 'store_discount_products')  # one small file per store
@@ -106,10 +119,10 @@ def load_branches(conn) -> dict:
     return branches
 
 
-def query_range(conn, start_date: date, end_date_excl: date) -> dict:
-    """Query store-discount aggregation for [start_date, end_date_excl).
-
-    Returns {date_str: {whs: {linetype: [qty, cost, net_sales, list_amt, store_discount]}}}
+def _query_range_once(conn, start_date: date, end_date_excl: date) -> tuple[dict, int]:
+    """Single-shot query for [start_date, end_date_excl) on an already-open conn.
+    Raises mysql.connector.errors.OperationalError on connection loss — caller
+    (query_range) catches this and retries with a fresh connection.
     """
     sql = """
         SELECT
@@ -144,17 +157,62 @@ def query_range(conn, start_date: date, end_date_excl: date) -> dict:
             round(float(list_amt or 0), 2),
         ]
     cur.close()
-    print(f'      {n:,} (date, store, linetype) rows from fact_sales')
+    return days, n
+
+
+def query_range(start_date: date, end_date_excl: date) -> dict:
+    """Query store-discount aggregation for [start_date, end_date_excl), split
+    into CHUNK_DAYS-sized pieces, each on its OWN fresh connection, with retry
+    on connection loss (errno 2013/2006 — see RETRYABLE_ERRNOS docstring above).
+
+    FIXED 2026-07-10: previously took a single long-lived `conn` and ran the
+    whole window (e.g. 92 days) as one query. GHA run #187 crashed with
+    "mysql.connector.errors.OperationalError: 2013 (HY000): Lost connection to
+    MySQL server during query" partway through — because build_store_discount_data.py
+    runs LAST in the daily pipeline (after ~17 min of other DB-heavy steps),
+    and continue-on-error in the workflow silently swallowed the crash, so the
+    dashboard's data silently stopped updating. Chunking means a dropped
+    connection only costs one ~14-day chunk's retry, not the whole build; a
+    fresh connection per chunk avoids reusing one that's gone stale/idle.
+    """
+    import mysql.connector.errors as _mysql_errors
+
+    days: dict = {}
+    total_n = 0
+    cur_start = start_date
+    while cur_start < end_date_excl:
+        cur_end = min(cur_start + timedelta(days=CHUNK_DAYS), end_date_excl)
+        attempt = 0
+        while True:
+            attempt += 1
+            conn = get_conn()
+            try:
+                chunk_days, n = _query_range_once(conn, cur_start, cur_end)
+                total_n += n
+                for d_str, whs_map in chunk_days.items():
+                    days.setdefault(d_str, {}).update(whs_map)
+                break
+            except _mysql_errors.OperationalError as e:
+                errno = getattr(e, 'errno', None)
+                if errno not in RETRYABLE_ERRNOS or attempt >= MAX_QUERY_RETRIES:
+                    raise
+                print(f'      WARN: chunk {cur_start}..{cur_end} lost connection '
+                      f'(errno {errno}), retry {attempt}/{MAX_QUERY_RETRIES - 1} '
+                      f'in {RETRY_DELAY_SECS}s...')
+                time.sleep(RETRY_DELAY_SECS)
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+        cur_start = cur_end
+
+    print(f'      {total_n:,} (date, store, linetype) rows from fact_sales '
+          f'(chunked {CHUNK_DAYS}d/query)')
     return days
 
 
-def query_product_detail(conn, target_date: date) -> dict:
-    """Product-level detail (barcode, name, qty, unit price, discount, net sales)
-    for ONE day only, per store. This is the 'drill into a store's linetype ->
-    per-product' view added 2026-07-09. Kept separate from store_discount_data.json
-    (which is aggregated, 92-day rolling) because per-product-per-store detail is
-    much bigger — only the latest day is kept, overwritten daily, not accumulated.
-    """
+def _query_product_detail_once(conn, target_date: date) -> tuple[dict, int]:
     sql = """
         SELECT LPAD(s.sotowhs,3,'0') AS whs, s.iprod, s.solinetype AS linetype,
           SUM(s.net_qty) AS qty, SUM(s.net_sales_amt) AS net_sales,
@@ -168,9 +226,6 @@ def query_product_detail(conn, target_date: date) -> dict:
           AND CAST(s.sotowhs AS UNSIGNED) BETWEEN 1 AND 500
         GROUP BY whs, s.iprod, linetype, dp.ipunit3, dp.idesc
     """
-    # NOTE 2026-07-10: added SUM(s.total_cost) AS cost so the product-level table
-    # can show GP% per line item (previously GP% only existed at RM/DM/store/
-    # linetype aggregate levels, not per product) — see Decisions.md [2026-07-10]
     start = target_date.isoformat()
     end_excl = (target_date + timedelta(days=1)).isoformat()
     cur = conn.cursor()
@@ -196,8 +251,48 @@ def query_product_detail(conn, target_date: date) -> dict:
             'cost': round(cost, 2),
         })
     cur.close()
-    print(f'      {n:,} (store, product, linetype) rows for product detail on {target_date.isoformat()}')
-    return stores
+    return stores, n
+
+
+def query_product_detail(target_date: date) -> dict:
+    """Product-level detail (barcode, name, qty, unit price, discount, net sales)
+    for ONE day only, per store. This is the 'drill into a store's linetype ->
+    per-product' view added 2026-07-09. Kept separate from store_discount_data.json
+    (which is aggregated, 92-day rolling) because per-product-per-store detail is
+    much bigger — only the latest day is kept, overwritten daily, not accumulated.
+
+    NOTE 2026-07-10: added SUM(s.total_cost) AS cost so the product-level table
+    can show GP% per line item (previously GP% only existed at RM/DM/store/
+    linetype aggregate levels, not per product) — see Decisions.md [2026-07-10]
+
+    FIXED 2026-07-10: now opens its OWN fresh connection per call and retries
+    on connection loss (errno 2013/2006), same fix as query_range — see that
+    function's docstring for why (GHA run #187 crash).
+    """
+    import mysql.connector.errors as _mysql_errors
+
+    attempt = 0
+    while True:
+        attempt += 1
+        conn = get_conn()
+        try:
+            stores, n = _query_product_detail_once(conn, target_date)
+            print(f'      {n:,} (store, product, linetype) rows for product '
+                  f'detail on {target_date.isoformat()}')
+            return stores
+        except _mysql_errors.OperationalError as e:
+            errno = getattr(e, 'errno', None)
+            if errno not in RETRYABLE_ERRNOS or attempt >= MAX_QUERY_RETRIES:
+                raise
+            print(f'      WARN: product detail {target_date.isoformat()} lost '
+                  f'connection (errno {errno}), retry {attempt}/'
+                  f'{MAX_QUERY_RETRIES - 1} in {RETRY_DELAY_SECS}s...')
+            time.sleep(RETRY_DELAY_SECS)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def merge_days(existing: dict, fresh: dict, window_days: int) -> dict:
@@ -210,8 +305,13 @@ def merge_days(existing: dict, fresh: dict, window_days: int) -> dict:
 
 
 def build(days_arg: int | None, single_day: str | None, push: bool):
+    # NOTE 2026-07-10: load_branches still uses one short-lived connection
+    # (it's a fast single query). query_range/query_product_detail now open
+    # and close their OWN connections internally (chunked + retry-safe) —
+    # see their docstrings for why (GHA run #187 crash mid-query).
     conn = get_conn()
     branches = load_branches(conn)
+    conn.close()
 
     existing = {}
     if os.path.exists(OUT_FILE):
@@ -221,16 +321,14 @@ def build(days_arg: int | None, single_day: str | None, push: bool):
     if single_day:
         d = datetime.strptime(single_day, '%Y-%m-%d').date()
         print(f'[build_store_discount_data] single-day update: {d.isoformat()}')
-        fresh = query_range(conn, d, d + timedelta(days=1))
+        fresh = query_range(d, d + timedelta(days=1))
         window_days = WINDOW_DAYS_DEFAULT
     else:
         window_days = days_arg or WINDOW_DAYS_DEFAULT
         end_excl = date.today() + timedelta(days=1)
         start = end_excl - timedelta(days=window_days)
         print(f'[build_store_discount_data] backfill range: {start} .. {end_excl} ({window_days}d)')
-        fresh = query_range(conn, start, end_excl)
-
-    conn.close()
+        fresh = query_range(start, end_excl)
 
     merged_days = merge_days(existing, fresh, window_days)
 
@@ -256,12 +354,10 @@ def build(days_arg: int | None, single_day: str | None, push: bool):
     recent_day_strs = sorted(merged_days.keys())[-PRODUCTS_DAYS_KEPT:] if merged_days else []
     product_file_paths: list[str] = []
     if recent_day_strs:
-        conn2 = get_conn()
         by_day: dict[str, dict] = {}
         for d_str in recent_day_strs:
             d = datetime.strptime(d_str, '%Y-%m-%d').date()
-            by_day[d_str] = query_product_detail(conn2, d)
-        conn2.close()
+            by_day[d_str] = query_product_detail(d)  # opens/retries its own connection
 
         # reshape from {date: {whs: [items]}} to {whs: {date: [items]}}
         all_whs = set()

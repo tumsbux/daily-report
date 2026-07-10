@@ -3,6 +3,28 @@
 > งานที่ทำเสร็จ — เรียงจากใหม่ → เก่า
 > Format: [Keep a Changelog](https://keepachangelog.com/)
 
+## [2026-07-10] Fix: silent MySQL disconnect crash in build_store_discount_data.py (Claude, Cowork)
+
+### Root cause
+- GHA run #187 (Jul 10, manual, "succeeded" green ✓ in 24m24s) actually had **2 failed steps** masked by `continue-on-error: true`:
+  - `Build store discount data` → `mysql.connector.errors.OperationalError: 2013 (HY000): Lost connection to MySQL server during query` (crashed inside the 92-day `query_range()` query)
+  - `Build lost product data` → same exit-code-1 pattern (different script, not touched in this fix)
+- Because both steps have `continue-on-error: true`, the job showed all-green even though `store_discount_data.json` never got rebuilt/pushed — this is why the live dashboard kept showing `generated_at: 2026-07-09T20:30:00` no matter how many times the pipeline ran afterward
+- Likely trigger: this step runs LAST (after ~17 min of other DB-heavy steps), and/or the 92-day×203-store aggregation query itself is heavy enough to exceed the MySQL server's connection/read timeout
+
+### Fixed — `build_store_discount_data.py`
+- `query_range()`: no longer takes one long-lived connection for the whole window. Now chunks the date range into `CHUNK_DAYS=14`-day pieces, each on its **own fresh connection**, with retry (`MAX_QUERY_RETRIES=3`, 5s backoff) on errno 2013/2006 ("lost connection"/"server has gone away")
+- `query_product_detail()`: same fix — opens its own connection per call with the same retry wrapper (was sharing one connection across both product-detail days)
+- `build()`: updated call sites accordingly (`load_branches` still uses one short-lived conn; the two heavy queries manage their own now)
+- Verified via reconstructed-copy `python3 -m py_compile` (bash mount shows stale content immediately after Write/Edit — established workaround from earlier in this project)
+
+### Fixed — `.github/workflows/daily-update.yml`
+- Job-level `timeout-minutes: 30` → `65`. Step-level timeouts sum to 55 min (15+10+15+15) which could exceed the old 30-min job cap and force-kill the run mid-pipeline before it reached `store_discount_data.json`/`update_dashboard.py`
+
+### Not yet done
+- `build_lost_product_data.py` has the identical exit-code-1 symptom — not investigated/fixed in this pass (different script, out of scope for this dashboard fix)
+- Not yet pushed — pending user's push command
+
 ## [2026-07-10] Month-on-month comparison view (Claude, Cowork)
 
 ### Added
