@@ -159,6 +159,7 @@ def query_product_detail(conn, target_date: date) -> dict:
         SELECT LPAD(s.sotowhs,3,'0') AS whs, s.iprod, s.solinetype AS linetype,
           SUM(s.net_qty) AS qty, SUM(s.net_sales_amt) AS net_sales,
           SUM(dp.ipunit3 * s.net_qty) AS list_amt, dp.ipunit3 AS unit_price, dp.idesc AS name,
+          SUM(s.total_cost) AS cost,
           (SELECT MIN(b.barcode) FROM dim_item_barcode b WHERE b.parcode = s.iprod AND b.baractive='Y') AS barcode
         FROM fact_sales s
         JOIN dim_product dp ON dp.iprod = s.iprod
@@ -167,17 +168,21 @@ def query_product_detail(conn, target_date: date) -> dict:
           AND CAST(s.sotowhs AS UNSIGNED) BETWEEN 1 AND 500
         GROUP BY whs, s.iprod, linetype, dp.ipunit3, dp.idesc
     """
+    # NOTE 2026-07-10: added SUM(s.total_cost) AS cost so the product-level table
+    # can show GP% per line item (previously GP% only existed at RM/DM/store/
+    # linetype aggregate levels, not per product) — see Decisions.md [2026-07-10]
     start = target_date.isoformat()
     end_excl = (target_date + timedelta(days=1)).isoformat()
     cur = conn.cursor()
     cur.execute(sql, (start, end_excl))
     stores: dict = {}
     n = 0
-    for whs, iprod, linetype, qty, net_sales, list_amt, unit_price, name, barcode in cur:
+    for whs, iprod, linetype, qty, net_sales, list_amt, unit_price, name, cost, barcode in cur:
         n += 1
         bucket = stores.setdefault(whs, [])
         list_amt = float(list_amt or 0)
         net_sales = float(net_sales or 0)
+        cost = float(cost or 0)
         bucket.append({
             'iprod': iprod,
             'barcode': barcode or iprod,
@@ -188,6 +193,7 @@ def query_product_detail(conn, target_date: date) -> dict:
             'list_amt': round(list_amt, 2),
             'net_sales': round(net_sales, 2),
             'discount': round(list_amt - net_sales, 2),
+            'cost': round(cost, 2),
         })
     cur.close()
     print(f'      {n:,} (store, product, linetype) rows for product detail on {target_date.isoformat()}')

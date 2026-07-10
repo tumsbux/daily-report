@@ -7,9 +7,9 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js"></script>
 <style>
   :root {
-    --red: #d1728a; --red-bg: #fbe4ea;
+    --red: #e0587e; --red-bg: #ffd9e3;
     --yellow: #c99a3e; --yellow-bg: #fdf3dc;
-    --green: #4f9e82; --green-bg: #e2f4ec;
+    --green: #2f9e6e; --green-bg: #c8f2dd;
     --border: #ece6f5; --muted: #8b8a9a;
     --lavender: #c9b6e4; --lavender-dark: #a58fc9;
     --mint: #b8e3d4; --peach: #ffd8c2; --sky: #bcdcf0; --butter: #fdedb0;
@@ -17,10 +17,10 @@
   * { box-sizing: border-box; }
   body { font-family: 'Segoe UI', 'Sarabun', Tahoma, sans-serif; margin:0;
          background: linear-gradient(180deg,#f6f1fb 0%,#f8fafc 260px); color:#4a4560; }
-  header { background: linear-gradient(120deg,#c9b6e4 0%,#bcdcf0 100%); color:#3b3450; padding:18px 24px;
-            border-radius:0 0 18px 18px; box-shadow:0 2px 10px rgba(150,120,200,0.15); }
-  header h1 { margin:0; font-size:20px; }
-  header .sub { font-size:12px; color:#5b5470; margin-top:4px; }
+  header { background: linear-gradient(120deg,#c9b6e4 0%,#bcdcf0 100%); color:#3b3450; padding:22px 24px;
+            border-radius:0 0 18px 18px; box-shadow:0 2px 10px rgba(150,120,200,0.15); text-align:center; }
+  header h1 { margin:0; font-size:30px; }
+  header .sub { font-size:16px; color:#4a4560; margin-top:8px; font-weight:600; }
   .wrap { max-width:1400px; margin:0 auto; padding:20px; }
   .toolbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:16px; }
   .btn { background:#fff; border:1px solid var(--border); border-radius:10px; padding:8px 14px;
@@ -48,10 +48,10 @@
   th:first-child, td:first-child { text-align:left; }
   tbody tr { cursor:pointer; }
   tbody tr:hover { background:#f6f1fb; }
-  .gp-pill { display:inline-block; padding:2px 8px; border-radius:12px; font-weight:600; font-size:12px; }
-  .gp-red { background:var(--red-bg); color:var(--red); }
+  .gp-pill { display:inline-block; padding:3px 10px; border-radius:12px; font-weight:700; font-size:12px; border:1px solid transparent; }
+  .gp-red { background:var(--red-bg); color:var(--red); border-color:var(--red); }
   .gp-yellow { background:var(--yellow-bg); color:var(--yellow); }
-  .gp-green { background:var(--green-bg); color:var(--green); }
+  .gp-green { background:var(--green-bg); color:var(--green); border-color:var(--green); }
   .panel { background:#fff; border:1px solid var(--border); border-radius:14px; padding:16px; margin-bottom:18px;
            box-shadow:0 2px 8px rgba(150,120,200,0.06); }
   .panel h3 { margin:0 0 10px 0; font-size:15px; color:#5b5470; }
@@ -305,34 +305,45 @@ function render(){
 }
 
 function renderProductLevel(dateStr){
+  const storeB = DATA.branches[state.store] || {};
   document.getElementById('tableTitle').textContent =
-    `รายการสินค้า — สาขา ${state.store} ${DATA.branches[state.store]?.name || ''} · linetype ${state.linetype}`;
+    `รายการสินค้า — สาขา ${state.store} ${storeB.name || ''} · linetype ${state.linetype} (เฉพาะรายการที่สาขากดลดเอง)`;
   const thead = document.getElementById('theadRow');
-  thead.innerHTML = `<th>บาร์โค้ด</th><th style="text-align:left">ชื่อสินค้า</th><th>จำนวนขาย</th><th>ราคาเต็ม</th><th>ราคาลด</th><th>ราคาขายสุทธิ</th><th>เทียบเมื่อวาน</th>`;
+  // column order per user request 2026-07-10: บาร์โค้ด, ชื่อสินค้า, ราคาปกติ, ราคาลด (ราคาหลังลด),
+  // ลดไปกี่บาท, GP%, Type, ชื่อสาขา, ชื่อเขต(DM), ชื่อภาค(RM) — reason-for-discount column
+  // and type/tier-pricing exclusion deferred, see Decisions.md [2026-07-10]
+  thead.innerHTML = `<th>บาร์โค้ด</th><th style="text-align:left">ชื่อสินค้า</th><th>จำนวนขาย</th>
+    <th>ราคาปกติ</th><th>ราคาลด</th><th>ลดไปกี่บาท</th><th>GP%</th><th>Type</th>
+    <th style="text-align:left">ชื่อสาขา</th><th style="text-align:left">ชื่อเขต (DM)</th><th style="text-align:left">ชื่อภาค (RM)</th>
+    <th>เทียบเมื่อวาน</th>`;
   const tbody = document.getElementById('tbodyRows');
   tbody.style.cursor = 'default';
+  const COLSPAN = 12;
 
   const storeWhs = state.store;
   const productsData = productsCache.get(storeWhs);
 
   if (productsData === undefined){
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--muted)">กำลังโหลดข้อมูลสินค้า...</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${COLSPAN}" style="text-align:center;color:var(--muted)">กำลังโหลดข้อมูลสินค้า...</td></tr>`;
     document.getElementById('emptyMsg').style.display = 'none';
     ensureProductsLoaded(storeWhs);
     return;
   }
   if (productsData === null){
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--muted)">โหลดข้อมูลสินค้าของสาขานี้ไม่สำเร็จ</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${COLSPAN}" style="text-align:center;color:var(--muted)">โหลดข้อมูลสินค้าของสาขานี้ไม่สำเร็จ</td></tr>`;
     document.getElementById('emptyMsg').style.display = 'none';
     return;
   }
   if (!productsData.days[dateStr]){
     const have = productsData.dates.map(fmtDate).join(', ');
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--muted)">รายละเอียดสินค้ามีเฉพาะวันล่าสุด (${have}) — เปลี่ยนวันที่เป็นวันใดวันหนึ่งด้านบนเพื่อดู</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${COLSPAN}" style="text-align:center;color:var(--muted)">รายละเอียดสินค้ามีเฉพาะวันล่าสุด (${have}) — เปลี่ยนวันที่เป็นวันใดวันหนึ่งด้านบนเพื่อดู</td></tr>`;
     document.getElementById('emptyMsg').style.display = 'none';
     return;
   }
-  const items = (productsData.days[dateStr] || []).filter(p => p.linetype === state.linetype)
+  // only this store's own linetype selection, AND only rows with an actual discount
+  // (รายการไหนไม่ลดก็ไม่ต้องโชว์ — user request 2026-07-10)
+  const items = (productsData.days[dateStr] || [])
+                .filter(p => p.linetype === state.linetype && p.discount > 0)
                 .sort((a,b) => b.discount - a.discount);
 
   // day-on-day comparison: find yesterday's entry for the same product, if available
@@ -353,14 +364,22 @@ function renderProductLevel(dateStr){
     } else if (prev){
       deltaHtml = '<span style="color:var(--muted)">-</span>';
     }
+    const cost = p.cost || 0;
+    const gp = p.net_sales > 0 ? (p.net_sales - cost) / p.net_sales : 0;
+    const isStoreType = STORE_LINETYPES.has(p.linetype);
     return `
     <tr>
       <td>${p.barcode}</td>
       <td style="text-align:left">${p.name}</td>
       <td>${fmt(p.qty,2)}</td>
       <td>${fmt(p.list_amt)}</td>
-      <td>${fmt(p.discount)}</td>
       <td>${fmt(p.net_sales)}</td>
+      <td>${fmt(p.discount)}</td>
+      <td><span class="gp-pill ${gpClass(gp)}">${pct(gp)}</span></td>
+      <td>${p.linetype} ${isStoreType ? '🏪' : ''}</td>
+      <td style="text-align:left">${storeB.name || ''}</td>
+      <td style="text-align:left">${storeB.dm || ''}</td>
+      <td style="text-align:left">${storeB.rm || ''}</td>
       <td>${deltaHtml}</td>
     </tr>`;
   }).join('');
@@ -528,11 +547,15 @@ function downloadCSV(){
       alert('รายละเอียดสินค้ามีเฉพาะวันล่าสุด — ยังโหลดไม่เสร็จหรือวันที่ไม่ตรง');
       return;
     }
-    const items = (productsData.days[dateStr] || []).filter(p => p.linetype === state.linetype);
-    const header = ['barcode','name','qty','list_amt','discount','net_sales'];
+    const storeB = DATA.branches[state.store] || {};
+    const items = (productsData.days[dateStr] || []).filter(p => p.linetype === state.linetype && p.discount > 0);
+    const header = ['barcode','name','qty','list_price','sale_price','discount_baht','gp_pct','type','store_name','dm_name','rm_name'];
     const lines = [header.join(',')];
     items.forEach(p => {
-      lines.push([p.barcode, `"${(p.name||'').replace(/"/g,'""')}"`, p.qty, p.list_amt.toFixed(2), p.discount.toFixed(2), p.net_sales.toFixed(2)].join(','));
+      const cost = p.cost || 0;
+      const gp = p.net_sales > 0 ? (p.net_sales - cost) / p.net_sales : 0;
+      lines.push([p.barcode, `"${(p.name||'').replace(/"/g,'""')}"`, p.qty, p.list_amt.toFixed(2), p.net_sales.toFixed(2), p.discount.toFixed(2), (gp*100).toFixed(2), p.linetype,
+        `"${storeB.name||''}"`, `"${storeB.dm||''}"`, `"${storeB.rm||''}"`].join(','));
     });
     const blob = new Blob(['﻿' + lines.join('\n')], { type:'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);

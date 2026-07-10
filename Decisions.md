@@ -5,6 +5,32 @@
 
 ---
 
+## [2026-07-10] Product-level table redesign — GP%, store/DM/RM columns, hide zero-discount rows
+
+**Status:** Accepted, partially deferred (user approved subset, deferred 2 items)
+
+**Context:** User asked for the level-5 (product) table to show: บาร์โค้ด, รายการสินค้า, ราคาปกติ, ราคาลด, ลดไปกี่บาท, GP%, เหตุผลในการลด, Type, ชื่อสาขา, ชื่อเขต, ชื่อภาค — and to hide rows with zero discount, and exclude promotional/tiered-pricing items.
+
+**Gap analysis presented to user before implementing (per Verification Gates Rule 2):**
+- ✅ Already had: barcode, name, list price, net-sales (was mislabeled), discount amount (was mislabeled "ราคาลด")
+- ❌ Missing, now added: GP% per product row (needed `SUM(s.total_cost)` added to `query_product_detail()` — previously GP% only existed at RM/DM/store/linetype aggregate levels), ชื่อสาขา/ชื่อเขต/ชื่อภาค as table columns (data existed via `DATA.branches`, just wasn't shown as columns), Type column (shows the linetype code, no redesign — did NOT merge O/P/Y into one combined list, kept existing per-linetype drill for now), hide-zero-discount filter (`p.discount > 0`)
+- ⛔ **Deferred at user's request ("3,4 ยังไม่ต้องทำ" + "เหตุผลในการลด ยังไม่ต้องทำ"):**
+  1. **"เหตุผลในการลด" (reason for discount)** — checked `fact_sales` and `fact_bill_header.soremark`: no reason field is captured anywhere (soremark is blank "-" on every sampled row). Only `rt_reason_lake` exists, which is a **return** reason lookup, unrelated. Cannot implement without a new data source.
+  2. **Excluding "ราคาขั้นบันได" (tiered/staircase pricing)** — no field distinguishes tiered pricing from a regular O/P/Y manual discount in the current schema; no lookup table found. Needs user input on how to identify it before this can be built.
+  3. Restricting the underlying product-detail query itself to O/P/Y only (perf/cleanup side-benefit) — deferred, still pulls all linetypes; filtering to O/P/Y + discount>0 happens client-side only for now.
+
+**Column label fix:** previous table conflated "ราคาลด" (was showing discount amount) — renamed columns so **ราคาลด = ราคาหลังลด (net_sales)** and **ลดไปกี่บาท = discount amount**, matching user's literal wording.
+
+**UI:** header font enlarged + centered (`h1` 20px→30px, `.sub` 12px→16px, `text-align:center`), pastel red/green (`--red`/`--green` + `-bg` variants) made more saturated for clearer emphasis, `gp-pill` given bolder border/weight.
+
+**Data backfill for today (2026-07-10):** re-queried MySQL for O/P/Y rows only (2026-07-07..09, 57 rows) and patched the `cost` field directly into the already-pushed `store_discount_products/<whs>.json` files (26 of 57 matched — the rest are dated 2026-07-09, which is not yet in the per-store files' 2-day window; see auto-update note below) rather than re-running the full per-store rebuild, since the O/P/Y-with-discount dataset is tiny (~1.5% of all discounts).
+
+**Auto-update check (user asked "recheck why not auto update"):** GHA run #187 (`Daily Dashboard Update`) completed **Success in 24m 30s** at 2026-07-10 01:30 UTC (08:30 BKK — right on the primary cron slot). However the per-store product files still show `generated_at: 2026-07-09T19:54:49` and date window `[2026-07-07, 2026-07-08]` — NOT yet advanced to include 2026-07-09, even though a fresh MySQL query confirms `MAX(sodate) = 2026-07-09` is available now. Root cause not fully isolated (could be a data-availability timing edge case at the moment the job ran, or a push-step issue) — flagged for next-day verification once tomorrow's run completes; not blocking today's column/UI changes since those don't depend on the date window.
+
+**Verification:** `node --check` passed on reconstructed JS; all 202 `store_discount_products/*.json` files re-validated as parseable JSON after the cost patch.
+
+---
+
 ## [2026-07-09] Store Price-Discount Dashboard — NEW dashboard
 
 **Status:** Accepted (2026-07-09) — user confirmed data mapping + proration method + GP color thresholds

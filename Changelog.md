@@ -3,6 +3,30 @@
 > งานที่ทำเสร็จ — เรียงจากใหม่ → เก่า
 > Format: [Keep a Changelog](https://keepachangelog.com/)
 
+## [2026-07-10] Product-level table: GP%, RM/DM/store columns, hide zero-discount (Claude, Cowork)
+
+### Added
+- GP% per product row — added `SUM(s.total_cost) AS cost` to `query_product_detail()` in `build_store_discount_data.py`
+- Columns: ชื่อสาขา, ชื่อเขต (DM), ชื่อภาค (RM), Type (linetype badge) in the level-5 product table
+- Filter: hide rows where discount = 0 (`p.discount > 0`)
+- CSV export updated to match new columns (list_price, sale_price, discount_baht, gp_pct, type, store_name, dm_name, rm_name)
+
+### Fixed
+- Column label mix-up: "ราคาลด" used to show the discount *amount* — renamed so ราคาลด = ราคาหลังลด (net sales price), ลดไปกี่บาท = discount amount, matching user's wording
+
+### UI
+- Header font size increased and centered (h1 20→30px, subtitle 12→16px)
+- Pastel red/green colors made more saturated for clearer emphasis; GP% pill given bolder border
+
+### Deferred (user confirmed not needed yet)
+- "เหตุผลในการลด" (discount reason) — no such field exists in `fact_sales`/`fact_bill_header` (checked `soremark`, blank on every row); `rt_reason_lake` is unrelated (return reasons, not discount reasons)
+- Excluding "ราคาขั้นบันได" (tiered pricing) — no identifiable field/table for this in current schema
+- Restricting product-detail query to O/P/Y only at the source (currently filtered client-side)
+
+### Investigated
+- User asked to recheck auto-update: GHA run #187 succeeded (24m30s) at today's 08:30 BKK cron slot, but `store_discount_products/*.json` still shows yesterday's 2-day window (07-07/07-08), not yet 07-09, despite MySQL confirming 07-09 data is available now — root cause not fully isolated, flagged for tomorrow's verification
+- Manually patched `cost` into 26 already-matching O/P/Y product entries (07-08) in the pushed per-store files so GP% shows correctly without waiting for a full rebuild
+
 ## [2026-07-09] New: Store Price-Discount Dashboard (Claude, Cowork)
 
 ### Added
