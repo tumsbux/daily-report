@@ -142,13 +142,30 @@ Reason: Antigravity IR-B/C/D incident 2026-06-10
 
 ---
 
-## 🟡 Pending Approval (updated 2026-07-09)
+## ✅ Deployed 2026-07-09 — Store Price-Discount Dashboard
 
-- 🆕 **Store Price-Discount Dashboard — built, NOT pushed yet (2026-07-09):** `build_store_discount_data.py` + `store_discount_dashboard.html` + `store_discount_data.json` (92d backfill) พร้อมแล้วใน `F:\co work dashboard\`, เพิ่ม step ใน `daily-update.yml` แล้ว, ADR ใน Decisions.md `[2026-07-09]` — **ต้องรันบน Windows:**
-  ```
-  py push_files_api.py build_store_discount_data.py store_discount_data.json store_discount_dashboard.html .github/workflows/daily-update.yml Decisions.md CLAUDE.md Changelog.md -m "feat: add store price-discount dashboard"
-  ```
-  (Cowork sandbox เข้า `api.github.com` ไม่ได้ — 403 บน tunnel — ต่างจาก MySQL MCP ที่ใช้ได้)
+- **Pushed** (commit `168ce8ef`, 7 files): `build_store_discount_data.py`, `store_discount_data.json` (92d backfill), `store_discount_dashboard.html`, `.github/workflows/daily-update.yml` (new step added), `Decisions.md`, `CLAUDE.md`, `Changelog.md`
+- Live: `https://tumsbux.github.io/daily-report/store_discount_dashboard.html` (รอ GitHub Pages build สักครู่หลัง push)
+- ตัวจำแนกสาขา vs การตลาด = `solinetype` (`O`/`P`/`Y` = สาขากดเอง, อื่นๆ = การตลาด/โปรอัตโนมัติ) — ยืนยันโดย user, ดู ADR ใน Decisions.md `[2026-07-09]` ฉบับ FINAL
+- **ต่อมา (2026-07-09 PM):** เพิ่ม level 4-5 drill-down (linetype → รายการสินค้า), ตัด linetype C/F, สีพาสเทล, format วันที่ dd-mm-yyyy, แยก `store_discount_products.json` (24MB รวม) เป็นรายสาขา `store_discount_products/<whs>.json` (~120KB/ไฟล์ — แก้ปัญหาโหลดช้า) — ดูรายละเอียดเต็มใน Decisions.md/Changelog.md `[2026-07-09]`
+- **ค้าง:** รอ user รัน `push_files_api.py` push รอบล่าสุด (per-store split + bugfix ด้านล่าง) ขึ้น GitHub — ยังไม่ verify ว่า auto-update daily step (`Build store discount data`) รันผ่านจริงใน GHA รอบ 08:30 — เช็คหลังรอบถัดไป
+
+## 🚨 บั๊กที่พบ 2026-07-09 — `dim_cache.json` (branches) ค้าง ไม่ sync กับ `dim_branch` — **แจ้ง Antigravity**
+
+**สรุปสั้น:** `dim_cache.json`'s `branches` key (store→RM/DM mapping) ถูกสร้างครั้งเดียวโดย `rebuild_fraud_analysis.py` แล้ว**ไม่เคย refresh** เมื่อสาขาย้าย RM/DM ในระบบจริง (`dim_branch`) — เจอเคสจริง: สาขา `080` (คลองสงค์) ย้ายไป RM จินตนา (36299) แล้ว แต่ cache ยังผูกกับ RM สุพรรษา (36285) เดิม → ยอดขายไปโผล่ผิด RM ~12,000 บาท/วัน (~1%)
+
+**แก้แล้วเฉพาะ `build_store_discount_data.py`** (`load_branches()` เปลี่ยนไป query `dim_branch` สดทุกครั้ง แทนอ่าน `dim_cache.json`) — ดู ADR Decisions.md `[2026-07-09]` hotfix
+
+**⚠️ Antigravity โปรดทราบ:** `build_product_data_mysql.py` (`_load_branch_info()`, บรรทัด ~292-297) **ใช้ pattern เดียวกันทุกตัวอักษร** — อ่าน `branches` จาก `dim_cache.json` โดยตรง ไม่ query `dim_branch` สด แปลว่า**product dashboard หลักก็เสี่ยง bug เดียวกัน** (RM/DM ของสาขาที่ย้ายจะผิดจนกว่า `dim_cache.json` จะถูก rebuild ใหม่) — ยังไม่ได้แก้ไฟล์นี้ (เป็นไฟล์ production ที่ user ยังไม่ได้ approve ให้แก้ — ตาม Verification Gates Rule 2 ต้อง draft ADR + รอ user confirm ก่อน) — ถ้า Antigravity จะรับไปแก้ ช่วยเขียน ADR ใน Decisions.md ก่อนแก้ตามกฎ collab ด้านบน
+
+## ✅ Deployed 2026-07-10 — build_store_discount_data.py: 3 fixes + dd-mm-yyyy format
+
+- **Fix 1 — silent MySQL disconnect crash:** `query_range()`/`query_product_detail()` now chunk queries (14d) on fresh per-chunk connections with retry (errno 2013/2006), instead of one long-lived connection for the whole 92-day window. Root cause: GHA run #187 crashed mid-query, masked green by `continue-on-error`. Also bumped job `timeout-minutes` 30→65. Commit `5d90b8a0`. Full detail: Changelog.md `[2026-07-10]`.
+- **Fix 2 — `generated_at` was UTC, not Bangkok time:** added `now_bkk()` (zoneinfo Asia/Bangkok), replaced all `datetime.now()` call sites feeding `generated_at`/commit messages. Commit `708f404e`.
+- **Fix 3 — `push_github_tree()` 401 Unauthorized:** likely GitHub secondary-rate-limit/abuse-detection misreporting as 401 during the ~202 sequential blob-upload calls (same token worked seconds earlier). Added retry-on-401/403 + 1s pacing pause every 20 uploads. Commit `630bf450`. **Not 100% confirmed root cause — watch next 1-2 auto runs; escalate if 401 recurs.**
+- **dd-mm-yyyy date format** applied to header `generated_at` display (`fmtDateTime()` in `store_discount_dashboard.html`), bundled into commit `5d90b8a0`.
+- Docs pushed: commit `cf07d6ad` (Changelog.md).
+- **Verification:** manually triggered GHA run #190 (commit `cf07d6a`) after all 3 fixes were live — ยังไม่เช็คผลตอนจบ session นี้ **ค้าง: เช็ครอบถัดไปว่า (a) ไม่มี 401 ใน step "Build store discount data" (b) `generated_at` เป็นเวลาไทยถูกต้อง (ไม่ใช่ UTC)**
 
 ## 🟡 Pending Approval (updated 2026-06-14)
 
@@ -174,4 +191,4 @@ Reason: Antigravity IR-B/C/D incident 2026-06-10
 
 ---
 
-_Last updated: 2026-06-23_
+_Last updated: 2026-07-10 (Claude, Cowork) — build_store_discount_data.py: MySQL disconnect + timezone + GitHub 401 fixes, manual GHA run #190 triggered pending verification_
