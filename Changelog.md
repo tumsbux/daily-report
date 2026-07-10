@@ -23,7 +23,38 @@
 
 ### Not yet done
 - `build_lost_product_data.py` has the identical exit-code-1 symptom — not investigated/fixed in this pass (different script, out of scope for this dashboard fix)
-- Not yet pushed — pending user's push command
+
+### Push
+- Pushed commit `5d90b8a0` (fix above) — verified via commit `f1244bb` on `store_discount_data.json` showing fresh `generated_at: 2026-07-10T03:47:07`, schema 2 (correct)
+
+## [2026-07-10] Fix: `generated_at` timestamp was UTC, not Bangkok time (Claude, Cowork)
+
+### Root cause
+- `datetime.now()` on the GHA runner (Ubuntu, UTC) was used directly for `generated_at` in `store_discount_data.json` / per-store product files / commit messages — dashboard displayed it raw, so it showed 7 hours behind actual Bangkok time (e.g. `03:47` instead of `10:47`)
+
+### Fixed — `build_store_discount_data.py`
+- Added `now_bkk()` helper using `zoneinfo.ZoneInfo('Asia/Bangkok')`, replacing all `datetime.now()` calls used for `generated_at` and commit messages (4 call sites)
+- Verified via `python3 -m py_compile` (reconstructed-copy method — bash mount showed stale/truncated content immediately after the edit, established gotcha, not a real syntax error)
+
+### Push
+- Pushed commit `708f404e`
+
+## [2026-07-10] Fix: `push_github_tree()` 401 Unauthorized on per-store product bulk push (Claude, Cowork)
+
+### Root cause (probable — not 100% confirmed, monitor next runs)
+- Discovered only after the MySQL disconnect fix above let the pipeline get further: `push_github_tree()` (bulk-pushes ~202 `store_discount_products/<whs>.json` files as one commit) started failing with `HTTP Error 401: Unauthorized` on `POST repos/{repo}/git/blobs`
+- Same GitHub token succeeded on the main `store_discount_data.json` push moments earlier in the same run — rules out expired/bad token
+- Likely cause: ~202 sequential POST requests in a tight loop trips GitHub's secondary rate-limit/abuse-detection system, which is known to sometimes report `401` instead of the usual `403` for this failure mode
+
+### Fixed — `build_store_discount_data.py`
+- `push_github_tree()`'s inner `api()` helper: now retries on `401`/`403` (in addition to `5xx`) with the same backoff, instead of raising immediately
+- Added a 1-second pause every 20 blob-upload calls to reduce the chance of tripping the rate limiter in the first place (~10s added to a 202-file run)
+
+### Push
+- Pushed commit `630bf450`
+
+### Not yet done
+- Root cause is a theory based on symptoms (same token worked seconds before failing) — not confirmed against GitHub's own rate-limit docs/support. **Watch the next 1-2 automatic runs**: if 401 recurs even with the retry+pacing fix, escalate (check token scope/expiration in GitHub settings, consider batching into fewer, larger requests instead of 202 sequential blob calls)
 
 ## [2026-07-10] Month-on-month comparison view (Claude, Cowork)
 
