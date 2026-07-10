@@ -73,6 +73,7 @@
   <div class="toolbar">
     <button class="btn active" id="btnDaily">รายวัน</button>
     <button class="btn" id="btnTrend">แนวโน้ม 3 เดือน</button>
+    <button class="btn" id="btnMonth">📅 เทียบรายเดือน (MoM)</button>
     <select id="dateSelect"></select>
     <button class="btn" id="btnDownload">⬇ ดาวน์โหลด CSV</button>
   </div>
@@ -132,7 +133,16 @@ async function ensureProductsLoaded(whs){
 function fmt(n, d=0){ return Number(n).toLocaleString('th-TH', {minimumFractionDigits:d, maximumFractionDigits:d}); }
 function pct(n){ return (Number(n)*100).toFixed(1) + '%'; }
 function gpClass(gp){ if (gp < 0.10) return 'gp-red'; if (gp < 0.20) return 'gp-yellow'; return 'gp-green'; }
-function fmtDate(iso){ if (!iso) return iso; const [y,m,d] = iso.split('-'); return `${d}-${m}-${y}`; }
+function fmtDate(iso){ if (!iso) return iso; const [y,m,d] = String(iso).split('T')[0].split('-'); return `${d}-${m}-${y}`; }
+// formats any ISO date or datetime string as dd-mm-yyyy (with HH:MM kept if present)
+// — user requested this format be used everywhere a date appears (2026-07-10)
+function fmtDateTime(iso){
+  if (!iso) return iso;
+  const [datePart, timePart] = String(iso).split('T');
+  const [y, m, d] = datePart.split('-');
+  const dateFmt = `${d}-${m}-${y}`;
+  return timePart ? `${dateFmt} ${timePart.slice(0,5)}` : dateFmt;
+}
 
 async function init(){
   const res = await fetch(DATA_URL);
@@ -140,7 +150,7 @@ async function init(){
   const dates = Object.keys(DATA.days).sort();
   DATA._dates = dates;
   document.getElementById('genInfo').textContent =
-    `อัปเดตล่าสุด ${DATA.generated_at} · ข้อมูล ${fmtDate(dates[0])} ถึง ${fmtDate(dates[dates.length-1])} (${dates.length} วัน) · ${Object.keys(DATA.branches).length} สาขา`;
+    `อัปเดตล่าสุด ${fmtDateTime(DATA.generated_at)} · ข้อมูล ${fmtDate(dates[0])} ถึง ${fmtDate(dates[dates.length-1])} (${dates.length} วัน) · ${Object.keys(DATA.branches).length} สาขา`;
 
   const sel = document.getElementById('dateSelect');
   dates.slice().reverse().forEach((d, i) => {
@@ -154,6 +164,7 @@ async function init(){
 
   document.getElementById('btnDaily').addEventListener('click', () => { state.mode='daily'; toggleMode(); });
   document.getElementById('btnTrend').addEventListener('click', () => { state.mode='trend'; toggleMode(); });
+  document.getElementById('btnMonth').addEventListener('click', () => { state.mode='month'; toggleMode(); });
   document.getElementById('btnDownload').addEventListener('click', downloadCSV);
 
   render();
@@ -162,7 +173,8 @@ async function init(){
 function toggleMode(){
   document.getElementById('btnDaily').classList.toggle('active', state.mode==='daily');
   document.getElementById('btnTrend').classList.toggle('active', state.mode==='trend');
-  document.getElementById('tablePanel').style.display = state.mode==='daily' ? '' : 'none';
+  document.getElementById('btnMonth').classList.toggle('active', state.mode==='month');
+  document.getElementById('tablePanel').style.display = (state.mode==='daily' || state.mode==='month') ? '' : 'none';
   document.getElementById('linetypePanel').style.display = state.mode==='daily' ? '' : 'none';
   document.getElementById('trendPanel').style.display = state.mode==='trend' ? '' : 'none';
   document.getElementById('dateSelect').style.display = state.mode==='daily' ? '' : 'none';
@@ -279,6 +291,7 @@ function currentGroupBy(){
 }
 
 function render(){
+  if (state.mode === 'month'){ renderMonthView(); return; }
   const dates = DATA._dates;
   const dateStr = dates[state.dateIdx];
   const prevStr = state.dateIdx > 0 ? dates[state.dateIdx-1] : null;
@@ -498,6 +511,147 @@ function renderLinetype(dateStr){
       (${pct(r.list_amt>0 ? r.discount/r.list_amt : 0)}) ·
       <span class="gp-pill ${gpClass(r.gp)}" style="margin-left:4px">GP ${pct(r.gp)}</span>
     </div>`).join('') || '<span style="color:var(--muted)">ไม่มีข้อมูล</span>';
+}
+
+// ---- month-on-month comparison (added 2026-07-10, approved by user) ----
+// Compares the same day-of-month range (day 1..N) between the current month
+// and the previous month, using the existing 92-day rolling `DATA.days`
+// history (no new DB query). N = day-of-month of the latest available date.
+function computeMonthRanges(){
+  const dates = DATA._dates; // ascending
+  const lastDateStr = dates[dates.length-1];
+  const last = new Date(lastDateStr + 'T00:00:00');
+  const dayOfMonth = last.getDate();
+  const thisMonthDates = [];
+  const lastMonthDates = [];
+  const prevMonthAnchor = new Date(last.getFullYear(), last.getMonth()-1, 1);
+  for (const d of dates){
+    const dt = new Date(d + 'T00:00:00');
+    if (dt.getFullYear()===last.getFullYear() && dt.getMonth()===last.getMonth() && dt.getDate()<=dayOfMonth){
+      thisMonthDates.push(d);
+    } else if (dt.getFullYear()===prevMonthAnchor.getFullYear() && dt.getMonth()===prevMonthAnchor.getMonth() && dt.getDate()<=dayOfMonth){
+      lastMonthDates.push(d);
+    }
+  }
+  return { thisMonthDates, lastMonthDates, dayOfMonth, refDate: lastDateStr };
+}
+
+function aggregateForDateRange(dateStrs, groupBy){
+  // groupBy: 'rm' | 'dm' | 'store' | 'linetype' | 'total'
+  const scopeStores = new Set(storesForScope());
+  if (groupBy === 'total'){
+    const agg = emptyAgg();
+    dateStrs.forEach(dateStr => {
+      const dayData = DATA.days[dateStr] || {};
+      for (const whs in dayData){
+        if (!scopeStores.has(whs)) continue;
+        addAgg(agg, dayData[whs]);
+      }
+    });
+    return deriveMetrics(agg);
+  }
+  const groups = {};
+  dateStrs.forEach(dateStr => {
+    aggregateForDate(dateStr, groupBy).forEach(r => {
+      if (!groups[r.key]) groups[r.key] = { key:r.key, label:r.label, agg: emptyAgg() };
+      const a = groups[r.key].agg;
+      a.qty += r.qty; a.cost += r.cost; a.net_sales += r.net_sales; a.list_amt += r.list_amt;
+      a.store_discount += r.store_discount; a.marketing_discount += r.marketing_discount;
+    });
+  });
+  return Object.values(groups).map(g => ({ key:g.key, label:g.label, ...deriveMetrics(g.agg) }))
+                .sort((a,b) => b.store_discount - a.store_discount);
+}
+
+function renderMonthView(){
+  const { thisMonthDates, lastMonthDates, dayOfMonth } = computeMonthRanges();
+  renderBreadcrumb();
+
+  if (state.level === 'product'){
+    document.getElementById('summaryCards').innerHTML = '';
+    document.getElementById('linetypePanel').style.display = 'none';
+    document.getElementById('tableTitle').textContent =
+      'ไม่รองรับรายละเอียดสินค้าในโหมดเปรียบเทียบรายเดือน (ข้อมูลสินค้ารายชิ้นมีเฉพาะ 2 วันล่าสุด) — คลิก Linetype ด้านบนเพื่อย้อนกลับ';
+    document.getElementById('theadRow').innerHTML = '';
+    document.getElementById('tbodyRows').innerHTML = '';
+    document.getElementById('emptyMsg').style.display = 'none';
+    return;
+  }
+
+  const groupBy = currentGroupBy();
+  const curRows = aggregateForDateRange(thisMonthDates, groupBy);
+  const prevRows = aggregateForDateRange(lastMonthDates, groupBy);
+  const prevMap = {}; prevRows.forEach(r => prevMap[r.key] = r);
+
+  renderMonthSummaryCards(thisMonthDates, lastMonthDates);
+  renderMonthTable(curRows, prevMap, groupBy, dayOfMonth);
+  document.getElementById('linetypePanel').style.display = 'none';
+}
+
+function renderMonthSummaryCards(thisMonthDates, lastMonthDates){
+  const cur = aggregateForDateRange(thisMonthDates, 'total');
+  const prev = aggregateForDateRange(lastMonthDates, 'total');
+  const dSales = prev.net_sales > 0 ? (cur.net_sales - prev.net_sales) / prev.net_sales : null;
+  const dDisc = prev.store_discount > 0 ? (cur.store_discount - prev.store_discount) / prev.store_discount : null;
+
+  const cards = [
+    { label:`ยอดขายสุทธิ เดือนนี้ (วันที่ 1-${thisMonthDates.length})`, value: fmt(cur.net_sales) + ' ฿',
+      delta: dSales!==null ? `${dSales>=0?'▲':'▼'} ${pct(Math.abs(dSales))} vs เดือนที่แล้ว` : '', deltaUp: dSales>=0 },
+    { label:'ยอดขายสุทธิ เดือนที่แล้ว (ช่วงวันเดียวกัน)', value: fmt(prev.net_sales) + ' ฿' },
+    { label:'ส่วนลดสาขา (O/P/Y) เดือนนี้', value: fmt(cur.store_discount) + ' ฿',
+      delta: dDisc!==null ? `${dDisc>=0?'▲':'▼'} ${pct(Math.abs(dDisc))} vs เดือนที่แล้ว` : '', deltaUp: dDisc>=0 },
+    { label:'ส่วนลดสาขา เดือนที่แล้ว (ช่วงวันเดียวกัน)', value: fmt(prev.store_discount) + ' ฿' },
+    { label:'GP% เดือนนี้ (หักเฉพาะสาขา)', value: pct(cur.gp) },
+    { label:'GP% เดือนที่แล้ว', value: pct(prev.gp) },
+  ];
+  document.getElementById('summaryCards').innerHTML = cards.map(c => `
+    <div class="card">
+      <div class="label">${c.label}</div>
+      <div class="value">${c.value}</div>
+      ${c.delta ? `<div class="delta ${c.deltaUp?'up':'down'}">${c.delta}</div>` : ''}
+    </div>`).join('');
+}
+
+function renderMonthTable(rows, prevMap, groupBy, dayOfMonth){
+  const titleMap = { rm:'ภาพรวมตาม RM', dm:'รายเขต (DM)', store:'รายสาขา', linetype:`แยกตาม Linetype — สาขา ${state.store || ''} ${DATA.branches[state.store]?.name || ''}` };
+  document.getElementById('tableTitle').textContent = `${titleMap[groupBy]} — เทียบรายเดือน (MoM, วันที่ 1-${dayOfMonth} ของแต่ละเดือน)`;
+
+  const colLabel = groupBy==='linetype' ? 'Linetype' : groupBy==='store' ? 'สาขา' : groupBy==='dm' ? 'DM' : 'RM';
+  const thead = document.getElementById('theadRow');
+  thead.innerHTML = `<th>${colLabel}</th>
+    <th>ยอดขายสุทธิ เดือนนี้</th><th>ยอดขายสุทธิ เดือนที่แล้ว</th><th>Δ ยอดขาย</th>
+    <th>ส่วนลดสาขา เดือนนี้</th><th>ส่วนลดสาขา เดือนที่แล้ว</th><th>Δ ส่วนลด</th><th>GP% เดือนนี้</th>`;
+
+  const tbody = document.getElementById('tbodyRows');
+  document.getElementById('emptyMsg').style.display = rows.length ? 'none' : '';
+  tbody.innerHTML = rows.map(r => {
+    const prev = prevMap[r.key] || { net_sales:0, store_discount:0 };
+    const dSales = prev.net_sales > 0 ? (r.net_sales - prev.net_sales) / prev.net_sales : null;
+    const dDisc = prev.store_discount > 0 ? (r.store_discount - prev.store_discount) / prev.store_discount : null;
+    const salesHtml = dSales!==null ? `<span style="color:${dSales>=0?'var(--green)':'var(--red)'}">${dSales>=0?'▲':'▼'} ${pct(Math.abs(dSales))}</span>` : '-';
+    const discHtml = dDisc!==null ? `<span style="color:${dDisc>=0?'var(--red)':'var(--green)'}">${dDisc>=0?'▲':'▼'} ${pct(Math.abs(dDisc))}</span>` : '-';
+    return `<tr data-key="${r.key}">
+      <td>${r.label}</td>
+      <td>${fmt(r.net_sales)}</td>
+      <td>${fmt(prev.net_sales || 0)}</td>
+      <td>${salesHtml}</td>
+      <td>${fmt(r.store_discount)}</td>
+      <td>${fmt(prev.store_discount || 0)}</td>
+      <td>${discHtml}</td>
+      <td><span class="gp-pill ${gpClass(r.gp)}">${pct(r.gp)}</span></td>
+    </tr>`;
+  }).join('');
+
+  tbody.querySelectorAll('tr').forEach(tr => {
+    tr.addEventListener('click', () => {
+      const key = tr.dataset.key;
+      if (groupBy === 'rm'){ state.level='dm'; state.rm=key; state.dm=null; state.store=null; state.linetype=null; render(); }
+      else if (groupBy === 'dm'){ state.level='store'; state.dm=key; state.store=null; state.linetype=null; render(); }
+      else if (groupBy === 'store'){ state.level='linetype'; state.store=key; state.linetype=null; render(); }
+      // linetype level: no product drill-down in month mode (no monthly product data)
+    });
+  });
+  tbody.style.cursor = groupBy === 'linetype' ? 'default' : 'pointer';
 }
 
 function renderTrend(){

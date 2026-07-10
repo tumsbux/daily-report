@@ -3,6 +3,20 @@
 > งานที่ทำเสร็จ — เรียงจากใหม่ → เก่า
 > Format: [Keep a Changelog](https://keepachangelog.com/)
 
+## [2026-07-10] Month-on-month comparison view (Claude, Cowork)
+
+### Added
+- New toggle mode "📅 เทียบรายเดือน (MoM)" ในหน้า `store_discount_dashboard.html` (ปุ่มที่ 3 ต่อจาก รายวัน/แนวโน้ม 3 เดือน)
+- เปรียบเทียบยอดขายสุทธิ (ทุก type รวมกัน ไม่รวม C/F) และส่วนลดสาขา (O/P/Y) ระหว่าง "เดือนนี้" กับ "เดือนที่แล้ว" โดยเทียบวันที่เท่ากัน (วันที่ 1 ถึงวันปัจจุบันของเดือน) — คำนวณจากข้อมูล 92 วันเดิมที่มีอยู่แล้ว ไม่ query DB เพิ่ม
+- Reuse โครง drill-down เดิม (Company → RM → DM → Store → Linetype) — คลิกแถวเพื่อ drill ได้เหมือนโหมดรายวัน ยกเว้นระดับ product ที่ไม่รองรับ (ข้อมูลสินค้ารายชิ้นมีแค่ 2 วันล่าสุด ไม่พอสำหรับ MoM)
+- ฟังก์ชันใหม่: `computeMonthRanges()`, `aggregateForDateRange()`, `renderMonthView()`, `renderMonthSummaryCards()`, `renderMonthTable()`
+- Summary cards แสดง: ยอดขายสุทธิเดือนนี้/เดือนที่แล้ว + %MoM, ส่วนลดสาขาเดือนนี้/เดือนที่แล้ว + %MoM, GP% ทั้งสองเดือน
+- ตารางแสดง: ยอดขายสุทธิ + ส่วนลดสาขา ของทั้งสองเดือน พร้อม Δ MoM ต่อแถว (RM/DM/Store/Linetype)
+
+### Verification
+- Syntax verified via reconstructed script + `node --check` (bash mount ยังโชว์ไฟล์เก่า ใช้ Read tool เป็น ground truth ตามเดิม)
+- ยังไม่ได้ push ขึ้น GitHub — รอ user รันคำสั่ง push (ดู pending diagnostic เรื่องไฟล์ live ล้าหลังจากรอบก่อนหน้าด้วย)
+
 ## [2026-07-10] Product-level table: GP%, RM/DM/store columns, hide zero-discount (Claude, Cowork)
 
 ### Added
