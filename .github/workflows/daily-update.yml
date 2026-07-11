@@ -119,11 +119,14 @@ jobs:
         timeout-minutes: 10
         run: python build_product_data_mysql.py --no-push ${{ env.FULL_REFRESH_FLAG }}
 
-      - name: Build lost product data
-        if: steps.guard.outputs.skip != 'true'
-        continue-on-error: true
-        timeout-minutes: 15
-        run: python build_lost_product_data.py ${{ env.FULL_REFRESH_FLAG }}
+      # REMOVED 2026-07-11: "Build lost product data" step. lost_product_data.json
+      # built here was never consumed inside this repo — lost_product_dashboard.html
+      # fetches it cross-origin from https://tumsbux.github.io/lost-Product/lost_product_data.json
+      # (verified via grep). Its only purpose was to be pushed to tumsbux/lost-Product
+      # in the step below, which raced against lost-Product's OWN daily-update.yml
+      # doing the same build+push — two pipelines writing the same single-line
+      # minified JSON caused unresolvable git rebase conflicts. lost-Product now
+      # owns this file exclusively. See Decisions.md [2026-07-11].
 
       - name: Build store discount data (store-driven price adjustments)
         if: steps.guard.outputs.skip != 'true'
@@ -131,20 +134,25 @@ jobs:
         timeout-minutes: 15
         run: python build_store_discount_data.py --days 92
 
-      - name: Push lost-Product dashboard and data to tumsbux/lost-Product repo
+      - name: Push lost-Product dashboard (HTML/JS only) to tumsbux/lost-Product repo
+        # FIXED 2026-07-11: lost_product_data.json is now OWNED exclusively by
+        # lost-Product's own daily-update.yml (build_lost_product_data.py runs
+        # there directly). This step used to also push its own copy of
+        # lost_product_data.json, racing against lost-Product's own workflow
+        # writing the same file around the same time — since the JSON is a
+        # single minified line, git can't 3-way-merge two different versions,
+        # so whichever pipeline pushed second hit an unresolvable rebase
+        # conflict on "Commit and push rebuilt JSON". See Decisions.md
+        # [2026-07-11] in F:\lost-Product\. Only index.html/analytics.js
+        # (owned by this repo) are pushed here now.
         if: steps.guard.outputs.skip != 'true'
         continue-on-error: true
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
-          if [ ! -f lost_product_data.json ]; then
-            echo "no lost_product_data.json — skipping"
+          if [ ! -f index_for_lost_product.html ]; then
+            echo "no index_for_lost_product.html — skipping"
             exit 0
-          fi
-          SZ=$(du -m lost_product_data.json | cut -f1)
-          echo "lost_product_data.json size: ${SZ} MB"
-          if [ "$SZ" -gt 99 ]; then
-            echo "WARN: file over 99 MB — GitHub hard limit is 100 MB"
           fi
           TMP=$(mktemp -d)
           REPO_URL="https://x-access-token:${GH_PAT}@github.com/tumsbux/lost-Product.git"
@@ -160,15 +168,14 @@ jobs:
             echo "# lost-Product" > "$TMP/README.md"
             echo "Generated data for tumsbux/daily-report Lost Product dashboard." >> "$TMP/README.md"
           fi
-          cp lost_product_data.json "$TMP/lost_product_data.json"
           cp index_for_lost_product.html "$TMP/index.html"
           cp analytics.js "$TMP/analytics.js"
-          git -C "$TMP" add lost_product_data.json index.html analytics.js README.md 2>/dev/null || true
+          git -C "$TMP" add index.html analytics.js README.md 2>/dev/null || true
           if git -C "$TMP" diff --cached --quiet; then
             echo "no changes vs remote — skipping push"
           else
             git -C "$TMP" -c user.email=bot@dashboard -c user.name="Dashboard Bot" \
-              commit -m "auto: lost-Product dashboard and data update $(TZ=Asia/Bangkok date +%Y-%m-%d)"
+              commit -m "auto: lost-Product dashboard update $(TZ=Asia/Bangkok date +%Y-%m-%d)"
             git -C "$TMP" push -u origin main
             echo "OK pushed"
           fi

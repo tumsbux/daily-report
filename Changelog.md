@@ -3,6 +3,25 @@
 > งานที่ทำเสร็จ — เรียงจากใหม่ → เก่า
 > Format: [Keep a Changelog](https://keepachangelog.com/)
 
+## [2026-07-11] Fix: MySQL disconnect in lost-Product's build_lost_product_data.py + dual-pipeline race on lost_product_data.json (Claude, Cowork)
+
+### Root cause 1 — MySQL disconnect (same bug as [2026-07-10] store discount fix, this time in lost-Product repo)
+- GHA run #87/#88 in `tumsbux/lost-Product` today: job "Success" but "Build lost product data" step failed exit code 1 (masked by `continue-on-error`)
+- Fixed directly in `F:\lost-Product\build_lost_product_data.py` (user granted folder access) — same fresh-connection-per-query + retry-on-errno-2013/2006 pattern. See that repo's Decisions.md/Changelog `[2026-07-11]`. Pushed by user via `push_lost_product_files.py`.
+
+### Root cause 2 — dual-pipeline race on lost_product_data.json (found after fix #1 deployed — GHA run #89)
+- With the MySQL bug fixed, a NEW failure appeared: "Commit and push rebuilt JSON" step in `lost-Product`'s own workflow hit a `git pull --rebase` conflict on `lost_product_data.json`
+- Cause: this repo (`daily-report`) ALSO built + pushed its own copy of `lost_product_data.json` to `tumsbux/lost-Product`, racing against `lost-Product`'s own daily-update.yml doing the same. Minified single-line JSON can't be 3-way-merged by git — second pusher always conflicts.
+- Verified the local build in this repo was unused (`lost_product_dashboard.html` fetches cross-origin from `tumsbux.github.io/lost-Product/lost_product_data.json`, not the local file)
+
+### Fixed — `.github/workflows/daily-update.yml` (this repo)
+- Removed "Build lost product data" step entirely
+- "Push lost-Product dashboard and data..." step renamed, no longer pushes `lost_product_data.json` — only `index.html`/`analytics.js`
+- ADR: Decisions.md `[2026-07-11]`
+
+### Not yet pushed
+- Fix is local only — needs `push_files_api.py` to deploy `.github/workflows/daily-update.yml`, Decisions.md, Changelog.md to `tumsbux/daily-report`
+
 ## [2026-07-10] Fix: silent MySQL disconnect crash in build_store_discount_data.py (Claude, Cowork)
 
 ### Root cause

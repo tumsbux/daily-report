@@ -5,6 +5,26 @@
 
 ---
 
+## [2026-07-11] lost_product_data.json — single-owner fix (dual-pipeline race condition) (Claude, Cowork)
+
+**Status:** Accepted (user confirmed via AskUserQuestion — "ตัด daily-report ออก ให้ lost-Product เป็นเจ้าของไฟล์นี้คนเดียว")
+
+**Context:** Two independent pipelines were both building AND pushing `lost_product_data.json` to `tumsbux/lost-Product` main:
+1. `daily-report`'s `daily-update.yml` — ran its own copy of `build_lost_product_data.py` (in `F:\co work dashboard\`), then pushed the result to `tumsbux/lost-Product` in step "Push lost-Product dashboard and data..."
+2. `lost-Product`'s own `daily-update.yml` — runs its own copy of `build_lost_product_data.py` (in `F:\lost-Product\`, fixed today for the MySQL-disconnect bug — see that repo's Decisions.md `[2026-07-11]`), commits + pushes the same file.
+
+Both run around the same time (daily-report triggers lost-Product's workflow via cross-repo `workflow_dispatch` right after its own run). Since the JSON is emitted as one minified line (compact schema v2), git cannot 3-way-merge two different versions of it — whichever pipeline pushed second hit an unresolvable `git pull --rebase` conflict on "Commit and push rebuilt JSON" (confirmed live in GHA run #89, job `86507094671`).
+
+**Verified the local copy was actually unused:** `lost_product_dashboard.html` (pushed daily inside this repo) fetches the data **cross-origin** from `https://tumsbux.github.io/lost-Product/lost_product_data.json` — not from any locally-built file. `update_dashboard.py` never touches `lost_product_data.json` either. So the local build+push in this repo served no purpose other than being pushed to `lost-Product`, which is exactly what caused the race.
+
+**Decision:** `lost-Product` is the sole owner/builder/pusher of `lost_product_data.json`. Removed from `.github/workflows/daily-update.yml` (this repo):
+- Step "Build lost product data" (was calling `python build_lost_product_data.py`) — deleted entirely, no longer needed.
+- Step "Push lost-Product dashboard and data..." — renamed to "Push lost-Product dashboard (HTML/JS only)...", no longer copies/pushes `lost_product_data.json`, only `index_for_lost_product.html` → `index.html` and `analytics.js`.
+
+**Note:** `build_lost_product_data.py` still exists in `F:\co work dashboard\` (unused, kept for reference/history) — not deleted, just no longer invoked by this workflow.
+
+---
+
 ## [2026-07-10] Product-level table redesign — GP%, store/DM/RM columns, hide zero-discount rows
 
 **Status:** Accepted, partially deferred (user approved subset, deferred 2 items)
