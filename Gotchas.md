@@ -4,6 +4,20 @@
 
 ---
 
+### ⚠️ Write tool ทิ้ง NUL byte padding ท้ายไฟล์บน mounted path (พบ 2026-07-15)
+
+**Symptom:** เขียนไฟล์ทับด้วย Write tool ไปที่ path บน mounted folder (`F:\...` / `C:\Users\...\outputs\...`) — ไฟล์ผลลัพธ์อ่านด้วย `node`/`python` แล้ว syntax error ท้ายไฟล์ทั้งที่เนื้อหาที่ตั้งใจเขียนถูกต้อง
+
+**Root cause:** ถ้าไฟล์เดิม (ก่อนเขียนทับ) ยาวกว่าเนื้อหาใหม่ Write tool บาง mount ไม่ truncate ไฟล์เดิมให้สั้นลงตามจริง — เหลือ byte เก่าท้ายไฟล์เป็น `\x00` padding ต่อจากเนื้อหาใหม่
+
+**Fix:** ถ้าเจออาการนี้ ให้ตัด null bytes ทิ้งผ่าน bash/python: `data = open(f,'rb').read().split(b'\x00')[0]` แล้วเขียนทับด้วย mode `'wb'` — หรือป้องกันไว้ก่อนด้วยการลบไฟล์เดิมก่อน (`rm`) แล้วค่อย Write ใหม่แทนการเขียนทับตรงๆ
+
+**Rule:** ไฟล์ HTML/JS ใหญ่ (>20KB) อยู่แล้วห้ามใช้ Edit tool ตรงๆ (ดู entry "Edit tool truncation bug" ด้านล่าง) — ใช้ Python string-replace ผ่าน bash แทน (อ่าน/เขียนด้วย `open(path,'r'/'w', encoding='utf-8')` ตรงบน mounted path จะ truncate ถูกต้องเสมอ ต่างจาก Write tool)
+
+**Tags:** `#write-tool` `#mounted-path` `#file-corruption`
+
+---
+
 ### ⚠️ Product dashboard days_elapsed ไม่ตรงกับ Sales dashboard (พบ 2026-06-20)
 
 **Symptom:** Product dashboard แสดง 1–18 มิ.ย. ขณะที่ Sales/Fraud/Hub แสดง 1–19 มิ.ย. ทั้งที่รันใน GHA run เดียวกัน

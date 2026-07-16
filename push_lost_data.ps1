@@ -1,20 +1,19 @@
 # push_lost_data.ps1
-# Pushes lost_product_data.json to tumsbux/lost-Product repo.
+# Pushes index.html (dashboard) + analytics.js to tumsbux/lost-Product repo.
+# NOTE (2026-07-15): lost_product_data.json is intentionally NOT touched here anymore.
+# Per Decisions.md ADR [2026-07-11] "single-owner fix", tumsbux/lost-Product's OWN
+# daily-update.yml is the sole builder/pusher of lost_product_data.json (avoids the
+# dual-pipeline git-conflict race). Pushing the stale local copy from this folder would
+# silently regress live data. If you need to rebuild the JSON, do it from F:\lost-Product\.
 # Tolerant of git's normal stderr output (PowerShell treats it as error under Stop policy).
 
 $FOLDER = "F:\co work dashboard"
 Set-Location $FOLDER
 
-$jsonPath = Join-Path $FOLDER "lost_product_data.json"
-if (-not (Test-Path $jsonPath)) {
-    Write-Host "ERROR: lost_product_data.json not found. Run 'py build_lost_product_data.py' first." -ForegroundColor Red
+$htmlPath = Join-Path $FOLDER "index_for_lost_product.html"
+if (-not (Test-Path $htmlPath)) {
+    Write-Host "ERROR: index_for_lost_product.html not found." -ForegroundColor Red
     exit 1
-}
-
-$sz = [math]::Round((Get-Item $jsonPath).Length / 1MB, 1)
-Write-Host "lost_product_data.json size: $sz MB" -ForegroundColor Cyan
-if ($sz -gt 99) {
-    Write-Host "WARN: file is over 99 MB - GitHub hard limit is 100 MB. Raise MIN_QTY in build_lost_product_data.py." -ForegroundColor Yellow
 }
 
 $tok = (Get-Content (Join-Path $FOLDER "db_config.json") -Raw | ConvertFrom-Json).github_token
@@ -34,17 +33,28 @@ if ($cloneRc -ne 0) {
     exit 1
 }
 
-Copy-Item -Force $jsonPath (Join-Path $tmp "lost_product_data.json")
-Invoke-Cmd 'git' @('-C',"`"$tmp`"",'add','lost_product_data.json') | Out-Null
+Copy-Item -Force $htmlPath (Join-Path $tmp "index.html")
+Copy-Item -Force (Join-Path $FOLDER "analytics.js") (Join-Path $tmp "analytics.js")
+Invoke-Cmd 'git' @('-C',"`"$tmp`"",'add','index.html','analytics.js') | Out-Null
 
 $staged = & cmd /c "git -C `"$tmp`" diff --cached --stat 2>&1"
 if (-not $staged) {
-    Write-Host "No changes vs remote - JSON byte-identical to last push" -ForegroundColor Yellow
+    Write-Host "No changes vs remote - dashboard byte-identical to last push" -ForegroundColor Yellow
     Remove-Item $tmp -Recurse -Force
     exit 0
 }
 Write-Host $staged -ForegroundColor DarkGray
 
 $today = Get-Date -Format "yyyy-MM-dd"
-$msg = "data: lost_product_data.json " + $today
-Invoke-Cmd 'git' @('-C',"`"$tmp`"",'-c','user.em
+$msg = "dashboard update " + $today
+Invoke-Cmd 'git' @('-C',"`"$tmp`"",'-c','user.email=bot@dashboard','-c','user.name=Dashboard-Bot','commit','-m',"`"$msg`"") | Out-Null
+
+Write-Host "Pushing ..." -ForegroundColor Cyan
+$pushRc = Invoke-Cmd 'git' @('-C',"`"$tmp`"",'push','origin','main')
+if ($pushRc -eq 0) {
+    Write-Host "OK pushed to https://tumsbux.github.io/lost-Product/" -ForegroundColor Green
+} else {
+    Write-Host "FAIL push (exit code $pushRc)" -ForegroundColor Red
+}
+
+Remove-Item $tmp -Recurse -Force

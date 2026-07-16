@@ -3,6 +3,17 @@
 > งานที่ทำเสร็จ — เรียงจากใหม่ → เก่า
 > Format: [Keep a Changelog](https://keepachangelog.com/)
 
+## [2026-07-15] Lost Product dashboard — Action columns (ทดแทน/ยกเลิกขาย) + Google Sheets backend (Claude, Cowork)
+
+- เพิ่ม 3 คอลัมน์ใน `index_for_lost_product.html`: dropdown ทดแทน/ยกเลิกขาย, product picker modal (ค้นจาก parcode/iprod/ชื่อ ใน 65,812 สินค้าที่โหลดในหน่วยความจำ), ช่อง note — บันทึกไปยัง Google Sheet ผ่าน Apps Script Web App (`doGet`/`doPost`, key=`parcode`)
+- สินค้าที่กรอกครบทั้ง 3 ช่อง ("จัดการแล้ว") ถูกตัดออกจากตาราง + KPI/lost_score/qty ทั้งหมดโดยอัตโนมัติ
+- ช่องกรอง กลุ่ม/ประเภท เปลี่ยนจาก `<select>` เป็น `<input list="datalist">` พิมพ์ค้นหาได้ (substring match, case-insensitive)
+- Sheet: [Lost Product - Decisions](https://docs.google.com/spreadsheets/d/1sTjP_95zQ60Yh_1znozwVEdD2NRRz7lMXEYbJ0doPUE/edit) — สร้างผ่าน Google Drive connector
+- แก้ `push_lost_data.ps1` ให้เลิกแตะ `lost_product_data.json` (ตาม ADR `[2026-07-11]` single-owner) — เหลือ push แค่ index.html/analytics.js กัน regression
+- ทดสอบผ่าน jsdom headless (mock data) + endpoint จริงผ่าน Chrome (ไม่ mock) — ทั้งหมด PASS ดู evidence เต็มใน Decisions.md `[2026-07-15]`
+- **ค้าง:** ลบแถวทดสอบ `TEST0001` ออกจากชีท + user รัน `push_lost_data.ps1` เพื่อ deploy จริง + retest บน production (65,812 สินค้าจริง)
+- **Gotcha ใหม่:** Write tool บน mounted path (`F:\...`) ทิ้ง NUL byte padding ท้ายไฟล์เมื่อเขียนทับไฟล์เดิมที่ยาวกว่า — เจอตอนสร้าง test harness ใน `outputs/`, ไม่กระทบ `index_for_lost_product.html` (แก้ผ่าน Python replace ไม่ใช่ Write tool) แต่ต้องระวังถ้าใช้ Write tool overwrite ไฟล์ที่มีอยู่แล้ว — เช็ค Gotchas.md
+
 ## [2026-07-11] Fix: MySQL disconnect in lost-Product's build_lost_product_data.py + dual-pipeline race on lost_product_data.json (Claude, Cowork)
 
 ### Root cause 1 — MySQL disconnect (same bug as [2026-07-10] store discount fix, this time in lost-Product repo)

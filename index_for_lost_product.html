@@ -76,6 +76,13 @@ tbody tr:hover{background:#f8f9ff}
 .sa.asc::after{content:'▲'}.sa.desc::after{content:'▼'}
 .sa.asc,.sa.desc{opacity:1;color:#6366f1}
 .filter-info{font-size:11px;color:#6366f1;font-weight:600}
+.dec-action{border:1px solid #cbd5e1;border-radius:6px;padding:3px 6px;font-size:11px;background:#f8fafc;min-width:90px}
+.dec-pick-btn{border:1px solid #cbd5e1;border-radius:6px;padding:3px 8px;font-size:11px;background:#fff;cursor:pointer;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;display:block}
+.dec-pick-btn:hover{background:#f1f5f9}
+.dec-note{border:1px solid #cbd5e1;border-radius:6px;padding:3px 6px;font-size:11px;min-width:140px}
+.pp-item{padding:7px 8px;border-radius:6px;cursor:pointer;font-size:12px;display:flex;gap:8px;align-items:baseline}
+.pp-item:hover{background:#f1f5f9}
+.pp-item .parcode{font-family:monospace;color:#475569;flex-shrink:0;font-size:11px}
 .recom-box{background:#fffbeb;border-left:3px solid #f59e0b;padding:10px 14px;border-radius:6px;font-size:12px;color:#78350f}
 .recom-box b{color:#92400e}
 @media(max-width:900px){
@@ -155,10 +162,12 @@ tbody tr:hover{background:#f8f9ff}
   </select>
   <div class="filter-sep"></div>
   <label>กลุ่ม</label>
-  <select id="f-grp" onchange="applyAll()"><option value="">ทั้งหมด</option></select>
+  <input class="search-box" style="min-width:150px" id="f-grp" list="dl-grp" placeholder="พิมพ์ค้นหากลุ่ม..." oninput="applyAll()">
+  <datalist id="dl-grp"></datalist>
   <div class="filter-sep"></div>
   <label>ประเภท</label>
-  <select id="f-type" onchange="applyAll()"><option value="">ทั้งหมด</option></select>
+  <input class="search-box" style="min-width:150px" id="f-type" list="dl-type" placeholder="พิมพ์ค้นหาประเภท..." oninput="applyAll()">
+  <datalist id="dl-type"></datalist>
   <div class="filter-sep"></div>
   <label>หายไป</label>
   <select id="f-gone" onchange="applyAll()">
@@ -213,6 +222,9 @@ tbody tr:hover{background:#f8f9ff}
         <th class="r" onclick="sortBy(12,this)">peak qty<span class="sa"></span></th>
         <th class="c" onclick="sortBy(13,this)">สถานะ<span class="sa"></span></th>
         <th class="r" onclick="sortBy(14,this)">lost_score<span class="sa desc"></span></th>
+        <th>การจัดการ</th>
+        <th>สินค้าทดแทน</th>
+        <th>หมายเหตุ</th>
       </tr></thead>
       <tbody id="prod-tbody"></tbody>
     </table>
@@ -226,10 +238,15 @@ tbody tr:hover{background:#f8f9ff}
 </div>
 
 <script>
+const APPS_SCRIPT_URL='https://script.google.com/macros/s/AKfycbwTThcUxp9PihGFRf7bFeTc8hXD_7kn9io8ARh-kQzJ2AQe0DwxSfdQngJV6wtoHDkw/exec';
 let D=null, filtered=[], page=0, sortCol=14, sortDir=-1;
+let DECISIONS={}, PRODUCT_BY_PARCODE=new Map(), SEARCH_INDEX=[];
+let pickerTargetParcode=null, pickerTargetBtn=null;
+const noteTimers={};
 const PAGE_SIZE=50;
 const YEARS=[2021,2022,2023,2024,2025,2026];
 const fmt=n=>(n==null||isNaN(n))?'—':Math.round(n).toLocaleString();
+const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
 // ── Compact JSON decode (schema v2) — ADR [2026-06-11] ─────────────────────────────
 // v2 format: global `codes` table (int index → barcode string), products as
@@ -271,6 +288,13 @@ async function init(){
     document.body.innerHTML='<div style="padding:30px;color:#dc2626">ERROR loading lost_product_data.json: '+e.message+'</div>';
     return;
   }
+  try{
+    const dr=await fetch(APPS_SCRIPT_URL+'?v='+Date.now());
+    DECISIONS=await dr.json();
+  }catch(e){
+    console.warn('โหลดข้อมูลการตัดสินใจ (Google Sheet) ไม่สำเร็จ — ทำงานต่อแบบไม่มีข้อมูลเดิม', e);
+    DECISIONS={};
+  }
 
   // Nav
   document.getElementById('nav-yrs').textContent=YEARS[0]+'–'+YEARS[YEARS.length-1];
@@ -280,14 +304,20 @@ async function init(){
   // Populate group + type filters
   const grps=new Set(), types=new Set();
   D.products.forEach(p=>{if(p.group)grps.add(p.group);if(p.type)types.add(p.type);});
-  const grpSel=document.getElementById('f-grp');
+  const grpSel=document.getElementById('dl-grp');
   [...grps].sort((a,b)=>a.localeCompare(b,'th')).forEach(g=>{
-    const o=document.createElement('option');o.value=g;o.textContent=g;grpSel.appendChild(o);
+    const o=document.createElement('option');o.value=g;grpSel.appendChild(o);
   });
-  const typeSel=document.getElementById('f-type');
+  const typeSel=document.getElementById('dl-type');
   [...types].sort((a,b)=>a.localeCompare(b,'th')).forEach(t=>{
-    const o=document.createElement('option');o.value=t;o.textContent=t;typeSel.appendChild(o);
+    const o=document.createElement('option');o.value=t;typeSel.appendChild(o);
   });
+
+  // Product lookup + search index (สำหรับ picker "สินค้าทดแทน")
+  PRODUCT_BY_PARCODE=new Map();
+  D.products.forEach(p=>PRODUCT_BY_PARCODE.set(p.parcode,p));
+  SEARCH_INDEX=D.products.map(p=>({parcode:p.parcode,iprod:p.iprod,name:p.name||'',
+    key:((p.parcode||'')+' '+(p.iprod||'')+' '+(p.name||'')).toLowerCase()}));
 
   // RM / DM / Store from store_info
   const si=D.store_info||{};
@@ -422,11 +452,14 @@ function applyAll(){
     }).filter(Boolean);
   }
 
+  // ตัดสินค้าที่ "จัดการแล้ว" (กรอกครบ ทดแทน/ยกเลิก + สินค้าทดแทน + หมายเหตุ) ออกทั้งจากตารางและ KPI/lost_score
+  wProds = wProds.filter(p=>!isResolved(p.parcode));
+
   // Pass 1: filter everything EXCEPT status (for KPI cards)
   // Status is the breakdown the KPI cards show, so applying it would be circular.
   const kpiBase = wProds.filter(p=>{
-    if(fGrp && p.group!==fGrp) return false;
-    if(fType && p.type!==fType) return false;
+    if(fGrp && !(p.group||'').toLowerCase().includes(fGrp.toLowerCase())) return false;
+    if(fType && !(p.type||'').toLowerCase().includes(fType.toLowerCase())) return false;
     if(fGone && (p.years_gone||0)<fGone) return false;
     if(fSearch){
       const hit=(p.parcode||'').toLowerCase().includes(fSearch)||
@@ -457,6 +490,7 @@ function applyAll(){
   if(fGone) parts.push(`หาย ≥${fGone}ปี`);
   if(fSearch) parts.push(`ค้นหา: "${fSearch}"`);
   const scopeLabel = parts.length ? '🔍 '+parts.join(' · ') : '';
+  window.__anyFilter=anyFilter; window.__scopeLabel=scopeLabel;
   renderKPI(anyFilter ? kpiBase : null, scopeLabel);
 
   // Empty-scope diagnostic
@@ -519,7 +553,7 @@ function renderTable(){
     const hint = hasScope
       ? '⚠️ ไม่มีสินค้าตรงเงื่อนไขในขอบเขตนี้ — ลองล้าง filter ประเภท/กลุ่ม/สถานะ หรือเลือกร้านอื่น (บางสาขายังไม่มีข้อมูลใน bld_acc_lake)'
       : '— ไม่มีรายการตรงเงื่อนไข ลองปรับ filter';
-    tbody.innerHTML=`<tr><td colspan="15" style="text-align:center;padding:20px;color:#94a3b8">${hint}</td></tr>`;
+    tbody.innerHTML=`<tr><td colspan="18" style="text-align:center;padding:20px;color:#94a3b8">${hint}</td></tr>`;
     document.getElementById('prod-cnt').textContent='0 รายการ';
     renderPagination();
     return;
@@ -537,7 +571,7 @@ function renderTable(){
       if((y===cy||y===cy-1) && hadHistory) return `<td class="r yr-recent-zero">0</td>`;
       return `<td class="r yr-zero">—</td>`;
     };
-    return `<tr>
+    return `<tr data-parcode="${esc(p.parcode)}">
       <td>${start+idx+1}</td>
       <td class="parcode">${p.parcode}</td>
       <td class="prod-name" title="${p.name}">${p.name||'—'}</td>
@@ -553,9 +587,85 @@ function renderTable(){
       <td class="r">${fmt(p.max_qty)}</td>
       <td class="c"><span class="${stCls}">${stLabel}</span></td>
       <td class="r b">${fmt(p.lost_score)}</td>
+      ${decisionCellsHtml(p)}
     </tr>`;
   }).join('');
   document.getElementById('prod-cnt').textContent=filtered.length.toLocaleString()+' รายการ';
+  renderPagination();
+}
+
+// ── Action columns (ทดแทน/ยกเลิกขาย) — เก็บใน Google Sheets ผ่าน Apps Script ──────
+function decisionOf(parcode){ return DECISIONS[parcode]||{}; }
+function isResolved(parcode){
+  const d=DECISIONS[parcode];
+  return !!(d && d.action && d.replacement_parcode && d.note);
+}
+function rowContext(parcode){
+  const p=PRODUCT_BY_PARCODE.get(parcode)||{};
+  return {iprod:p.iprod||parcode, name:p.name||''};
+}
+function decisionCellsHtml(p){
+  const d=decisionOf(p.parcode);
+  const opts=['','ทดแทน','ยกเลิกขาย'];
+  const actHtml=opts.map(v=>`<option value="${v}" ${d.action===v?'selected':''}>${v||'—'}</option>`).join('');
+  const pickLabel=d.replacement_parcode ? (esc(d.replacement_parcode)+' '+esc(d.replacement_name||'')) : '— เลือกสินค้า —';
+  return `
+      <td><select class="dec-action" data-parcode="${esc(p.parcode)}" onchange="onActionChange(this)">${actHtml}</select></td>
+      <td><button class="dec-pick-btn" data-parcode="${esc(p.parcode)}" onclick="openProdPicker(this)" title="${pickLabel}">${pickLabel}</button></td>
+      <td><input class="dec-note" data-parcode="${esc(p.parcode)}" value="${esc(d.note||'')}" oninput="onNoteInput(this)" placeholder="หมายเหตุ..."></td>`;
+}
+function onActionChange(sel){ saveDecisionField(sel.dataset.parcode, {action:sel.value}); }
+function onNoteInput(inp){
+  const parcode=inp.dataset.parcode;
+  clearTimeout(noteTimers[parcode]);
+  noteTimers[parcode]=setTimeout(()=>{ saveDecisionField(parcode, {note:inp.value}); }, 700);
+}
+function openProdPicker(btn){
+  pickerTargetParcode=btn.dataset.parcode;
+  pickerTargetBtn=btn;
+  document.getElementById('pp-search').value='';
+  renderPickerResults('');
+  document.getElementById('prod-picker-modal').classList.add('open');
+  setTimeout(()=>{const el=document.getElementById('pp-search'); if(el) el.focus();},50);
+}
+function closeProdPicker(){ document.getElementById('prod-picker-modal').classList.remove('open'); }
+function renderPickerResults(q){
+  q=(q||'').toLowerCase().trim();
+  const list=document.getElementById('pp-results');
+  const matches = q ? SEARCH_INDEX.filter(x=>x.key.includes(q)).slice(0,30) : SEARCH_INDEX.slice(0,30);
+  list.innerHTML = matches.length ? matches.map(m=>
+    `<div class="pp-item" onclick="pickProduct('${m.parcode.replace(/'/g,"\\'")}')"><span class="parcode">${esc(m.parcode)}</span><span>${esc(m.name)}</span></div>`
+  ).join('') : '<div style="padding:10px;color:#94a3b8">ไม่พบสินค้า</div>';
+}
+function pickProduct(parcode){
+  const m=SEARCH_INDEX.find(x=>x.parcode===parcode);
+  if(!m) return;
+  if(pickerTargetBtn){ const lbl=esc(m.parcode)+' '+esc(m.name); pickerTargetBtn.innerHTML=lbl; pickerTargetBtn.title=lbl; }
+  saveDecisionField(pickerTargetParcode, {replacement_parcode:m.parcode, replacement_name:m.name});
+  closeProdPicker();
+}
+async function saveDecisionField(parcode, patch){
+  const ctx=rowContext(parcode);
+  const cur=DECISIONS[parcode]||{};
+  const merged=Object.assign({parcode:parcode, iprod:ctx.iprod, name:ctx.name}, cur, patch);
+  DECISIONS[parcode]=merged;
+  try{
+    await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(merged), headers:{'Content-Type':'text/plain;charset=utf-8'}});
+  }catch(e){ console.warn('บันทึกข้อมูลไม่สำเร็จ', e); }
+  if(isResolved(parcode)) removeResolvedRow(parcode);
+}
+function removeResolvedRow(parcode){
+  const idx=filtered.findIndex(p=>p.parcode===parcode);
+  if(idx>-1) filtered.splice(idx,1);
+  if(window.kpiBase){
+    const kidx=window.kpiBase.findIndex(p=>p.parcode===parcode);
+    if(kidx>-1) window.kpiBase.splice(kidx,1);
+  }
+  const sel=(window.CSS && CSS.escape) ? CSS.escape(parcode) : parcode.replace(/"/g,'\\"');
+  const tr=document.querySelector(`tr[data-parcode="${sel}"]`);
+  if(tr) tr.remove();
+  document.getElementById('prod-cnt').textContent=filtered.length.toLocaleString()+' รายการ';
+  renderKPI(window.__anyFilter ? window.kpiBase : null, window.__scopeLabel||'');
   renderPagination();
 }
 
@@ -654,7 +764,7 @@ function openAi(title, html) {
   document.getElementById('ai-modal').classList.add('open');
 }
 function closeAi(){ document.getElementById('ai-modal').classList.remove('open'); }
-document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeAi(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape'){ closeAi(); closeProdPicker(); } });
 
 function analyzeCause(prods){
   const lost = prods.filter(p => p.status === 'LOST');
@@ -835,6 +945,19 @@ init();
       <button class="ai-close" onclick="closeAi()">✕</button>
     </div>
     <div id="ai-modal-content"></div>
+  </div>
+</div>
+
+<div class="ai-modal" id="prod-picker-modal" onclick="if(event.target.id===&#39;prod-picker-modal&#39;)closeProdPicker()">
+  <div class="ai-modal-body" style="max-width:520px;max-height:70vh">
+    <div class="ai-modal-head">
+      <h3>เลือกสินค้าทดแทน</h3>
+      <button class="ai-close" onclick="closeProdPicker()">✕</button>
+    </div>
+    <div style="padding:12px 20px 4px">
+      <input id="pp-search" class="search-box" style="width:100%" placeholder="พิมพ์ parcode / iprod / ชื่อสินค้า..." oninput="renderPickerResults(this.value)">
+    </div>
+    <div id="pp-results" style="overflow-y:auto;max-height:50vh;padding:6px 12px 16px"></div>
   </div>
 </div>
 

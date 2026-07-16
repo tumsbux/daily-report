@@ -5,6 +5,47 @@
 
 ---
 
+## [2026-07-15] Lost Product dashboard — Action columns (ทดแทน/ยกเลิกขาย) backed by Google Sheets (Claude, Cowork)
+
+**Status:** ✅ Accepted + implemented (2026-07-15, Claude, Cowork) — โค้ด+ทดสอบเสร็จ **รอ user push ขึ้น `tumsbux/lost-Product`** (sandbox ไม่มี network ออก github.com)
+
+**Context:** User ต้องการเพิ่ม workflow ให้พนักงานตัดสินใจต่อสินค้าที่ LOST/STALE ในหน้า `lost_product_dashboard.html` (standalone, `tumsbux/lost-Product`, static GitHub Pages ไม่มี backend):
+1. Dropdown เลือก "ทดแทน" หรือ "ยกเลิกขาย"
+2. ช่องเลือกสินค้าทดแทน — ค้นหาได้จาก parcode/iprod หรือชื่อ จากสินค้าทั้ง ~65,812 รายการ
+3. ช่อง note (ข้อความอิสระ)
+
+สินค้าที่กรอกครบทั้ง 3 ช่อง → กรองออกจากรายการที่แสดง (ตัดออกทั้งจากตารางและ KPI/lost_score/qty sums) — ถือว่า "จัดการแล้ว"
+เพิ่มเติม: ช่อง กลุ่ม/ประเภท เปลี่ยนจาก `<select>` เป็นพิมพ์ค้นหาได้
+
+**User confirmed (2026-07-15, AskUserQuestion):** เก็บข้อมูลที่กรอกใน **Google Sheets** (ไม่ใช่ localStorage/export file) — "เก็บที่ชีทก่อน พร้อมตัวอ้างอิง" → key อ้างอิง = `parcode` (ตาม field convention ของโปรเจกต์: barcode=iprod=parcode, ใช้ Parcode เป็นหลัก)
+
+**Design (proposed):**
+- **Store:** Google Sheet ใหม่ 1 ชีท คอลัมน์: `parcode | iprod | name | action | replacement_parcode | replacement_name | note | updated_at`
+- **API:** Google Apps Script Web App ผูกกับชีทนี้ — `doGet()` คืน JSON ของทุกแถว (parcode → decision), `doPost()` upsert 1 แถวตาม parcode ที่ส่งมา (ต้อง deploy "Execute as: Me / Who has access: Anyone" — ทำได้เฉพาะ user เพราะต้อง OAuth ผ่านหน้า Google เอง ไม่มี MCP/tool ฝั่ง Claude ที่ deploy Apps Script ได้)
+- **Frontend (`index_for_lost_product.html`):** on load → fetch decisions จาก Apps Script GET, merge เข้า `D.products` ด้วย key parcode; 3 คอลัมน์ใหม่ต่อแถว, save-on-change (debounce สำหรับ note) → POST ไปยัง Apps Script; แถวที่ action+replacement+note ครบ → ตัดออกจาก `filtered`/`kpiBase` ก่อนคำนวณ KPI
+- **Product selector:** ใช้ `D.products` ที่โหลดในหน่วยความจำอยู่แล้ว (ไม่ query เพิ่ม) — custom autocomplete filter-as-type, จำกัดผลลัพธ์แสดง (เช่น 20 รายการแรก) เพื่อ performance กับ list 65,812 รายการ
+- **กลุ่ม/ประเภท filter:** เปลี่ยนเป็น `<input list="datalist">` (native HTML5) แทน `<select>` — พิมพ์ค้นหาได้ ค่ายังคง unique values เดิม
+
+**Implemented:**
+- Google Sheet: [Lost Product - Decisions](https://docs.google.com/spreadsheets/d/1sTjP_95zQ60Yh_1znozwVEdD2NRRz7lMXEYbJ0doPUE/edit) (สร้างผ่าน Drive connector, header row ตาม schema ข้างบน)
+- Apps Script Web App deployed โดย user — `doGet`/`doPost` ตาม design, endpoint: `https://script.google.com/macros/s/AKfycbwTThcUxp9PihGFRf7bFeTc8hXD_7kn9io8ARh-kQzJ2AQe0DwxSfdQngJV6wtoHDkw/exec`
+- `index_for_lost_product.html` แก้ผ่าน Python string-replace บน mounted path (**ไม่ใช้ Edit tool** — ไฟล์ 44.8KB > threshold ตาม Gotchas "Edit tool truncation bug") — เพิ่ม 3 คอลัมน์ (การจัดการ/สินค้าทดแทน/หมายเหตุ), product picker modal (ค้นจาก `D.products` 65,812 รายการในหน่วยความจำ), กลุ่ม/ประเภท เปลี่ยนเป็น input+datalist (substring match), resolved-row filter ตัดออกจาก `wProds` ก่อนคำนวณ KPI/lost_score
+- `push_lost_data.ps1` แก้ให้เลิก copy/push `lost_product_data.json` (ป้องกันไป conflict กับ ADR `[2026-07-11]` single-owner fix — สคริปต์เดิมยังพ่วง JSON เก่าอยู่ ถ้ารันตรงๆ จะ regress ข้อมูล live) — เหลือ push แค่ `index.html` + `analytics.js`
+
+**Verification evidence:**
+1. `node --check` ผ่าน (JS syntax valid) หลัง patch
+2. jsdom headless test (`test_dashboard.js`, mock 3 products) — ALL TESTS PASSED: 18 คอลัมน์ render ถูกต้อง, กลุ่ม/ประเภท เป็น input+datalist และ populate ถูก, product picker ค้นหา+เลือกได้, บันทึกทีละ field (dropdown/picker/note debounce) ยิง POST จริงตามลำดับ, แถวที่ครบ 3 ช่องถูกลบออกจาก DOM + `filtered`/`kpiBase` + `prod-cnt` อัปเดตถูก โดยแถวที่กรอกไม่ครบยังอยู่
+3. ทดสอบ endpoint จริงผ่าน browser (Chrome, ไม่ใช่ mock): `doGet` คืน `{}` ตอนว่าง, `doPost` เขียนแถว `TEST0001` สำเร็จ (`{"ok":true}`) และยืนยันแล้วว่าขึ้นในชีทจริงผ่าน Drive `read_file_content` — **ต้องลบแถวทดสอบนี้ออกจากชีทก่อนใช้งานจริง**
+
+**Open items ที่ต้องให้ user ทำ:**
+1. ลบแถว `TEST0001` ออกจาก Google Sheet (ทดสอบเท่านั้น ไม่ใช่สินค้าจริง)
+2. รัน `push_lost_data.ps1` บน Windows เพื่อ deploy `index_for_lost_product.html` → `index.html` ขึ้น `tumsbux/lost-Product` จริง (sandbox push ไม่ได้ — ไม่มี network ออก github.com)
+3. เปิดหน้า live ทดสอบซ้ำอีกครั้งหลัง deploy (โหลด 65,812 สินค้าจริงในเบราว์เซอร์จริง ต่างจาก mock 3 รายการที่ทดสอบใน sandbox)
+
+**Risk/Note:** Apps Script Web App แบบ public write ("Anyone") หมายความว่าใครก็เขียนข้อมูลลงชีทได้ถ้ารู้ URL (ไม่มี auth) — ยอมรับความเสี่ยงนี้เพราะหน้า dashboard เองก็ public (GitHub Pages) อยู่แล้ว ถ้าต้องการจำกัดสิทธิ์เพิ่มเติมในอนาคตค่อยพิจารณา auth token แยก
+
+---
+
 ## [2026-07-11] lost_product_data.json — single-owner fix (dual-pipeline race condition) (Claude, Cowork)
 
 **Status:** Accepted (user confirmed via AskUserQuestion — "ตัด daily-report ออก ให้ lost-Product เป็นเจ้าของไฟล์นี้คนเดียว")
