@@ -167,6 +167,18 @@ Reason: Antigravity IR-B/C/D incident 2026-06-10
 - Docs pushed: commit `cf07d6ad` (Changelog.md).
 - **Verification:** manually triggered GHA run #190 (commit `cf07d6a`) after all 3 fixes were live — ยังไม่เช็คผลตอนจบ session นี้ **ค้าง: เช็ครอบถัดไปว่า (a) ไม่มี 401 ใน step "Build store discount data" (b) `generated_at` เป็นเวลาไทยถูกต้อง (ไม่ใช่ UTC)**
 
+## ✅ Deployed 2026-07-22 — Lost Product: การจัดการ per-action fix + TJ/มือหนึ่ง(MNI) purchase-source column
+
+- **isResolved() per-action logic** (`index_for_lost_product.html`): "ยกเลิกขาย" ตัดแถวออกจากลิสต์ Lost/KPI/Executive Report ทันทีที่เลือก action เดียว (ไม่ต้องรอสินค้าทดแทน+หมายเหตุเหมือนเดิม) "ทดแทน" ตัดออกเมื่อเลือก action + สินค้าทดแทนแล้ว (หมายเหตุ optional) — เดิม logic เก่าบังคับกรอกครบ 3 ช่อง (action+replacement+note) ทำให้ "ยกเลิกขาย" ไม่มีทางถูกตัด เพราะไม่มี replacement ให้เลือก
+- **TJ / มือหนึ่ง(MNI) purchase-source flag** — เพิ่ม `buy_tj`/`buy_mni` (0/1) ต่อสินค้าใน schema v2 `products_header` ของ `lost_product_data.json` คำนวณจาก JOIN `fact_purchase_tj`/`fact_purchase_mni.default_code` (data-lake) ตรงกับ `parcode`/`iprod` ของสินค้า — ยืนยัน match แล้วด้วยของจริง (เช่น parcode `8859364800052`, `8857902251199`)
+  - **⚠️ Schema change:** `PRODUCTS_HEADER` ยาวขึ้นจาก 21 → 23 คอลัมน์ (`buy_tj`, `buy_mni` ต่อท้าย) — แก้ใน **ทั้ง 2 ชุด** `build_lost_product_data.py`: `F:\co work dashboard\` (dev/test copy) และ `F:\lost-Product\` (**ตัวจริงที่ GHA `daily-update.yml` รันสร้าง `lost_product_data.json` — single-owner ตาม ADR [2026-07-11]**) — Antigravity หรือ agent อื่นที่แก้ builder นี้ต้อง sync ทั้งสองที่
+  - เพิ่ม checkbox filter "ซื้อจาก TJ" / "ซื้อจาก มือหนึ่ง(MNI)" + คอลัมน์ตาราง "ซื้อจาก" (badge TJ/มือหนึ่ง/TJ+MNI/—)
+  - `anyFilter` (ตัวสั่ง KPI cards recalculate) ต้องรวม `fBuyTJ`/`fBuyMNI` ด้วย ไม่งั้น KPI ไม่ขยับตอนติ๊ก checkbox (เจอบั๊กนี้จริงระหว่างทดสอบ)
+- **Executive Report** (`openExecutiveReport()`) แก้ให้ตัดสินค้า resolved ออกก่อนคำนวณ KPI + Top 10 เหมือนตารางหลัก (เดิมใช้ `D.products`/`D.summary` ดิบ ไม่กรอง)
+- **Push mechanism ที่ใช้:** `py "F:\lost-Product\push_lost_product_files.py" <file> [-r index.html] -m "..."` (GitHub Contents API ตรง ไม่ต้อง git clone) — ใช้ push ทั้ง `build_lost_product_data.py` (ไป `F:\lost-Product\`) และ `index_for_lost_product.html` (เป็น `index.html` ไป repo `tumsbux/lost-Product`)
+- **Verified live:** trigger GHA "Daily GP Analysis & Lost Product Rebuild" manual run #138 สำเร็จ (`Build lost product data` 10m39s, commit `34a9089c`) — เช็ค checkbox filter ใช้งานได้จริงบนเว็บ (24,458→8,798 รายการตอนติ๊ก TJ) และ Executive Report ตัดสินค้า resolved ออกถูกต้อง (Lost 24,458→24,430 ตอนมี 28 รายการถูกจัดการแล้ว)
+- Commits: `d8d4880d` (build_lost_product_data.py), `51a19750` (index.html — isResolved+checkbox), `c5dff75c` (ซื้อจากคอลัมน์+KPI fix), `4de01662` (Executive Report fix)
+
 ## 🟡 Pending Approval (updated 2026-06-14)
 
 - **Phase IR (Incremental Refresh)** — สถานะจริงหลัง Claude ตรวจ code 2026-06-11:
@@ -191,4 +203,4 @@ Reason: Antigravity IR-B/C/D incident 2026-06-10
 
 ---
 
-_Last updated: 2026-07-10 (Claude, Cowork) — build_store_discount_data.py: MySQL disconnect + timezone + GitHub 401 fixes, manual GHA run #190 triggered pending verification_
+_Last updated: 2026-07-22 (Claude, Cowork) — Lost Product: isResolved per-action fix + TJ/มือหนึ่ง(MNI) purchase-source column, verified live_
