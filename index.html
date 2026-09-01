@@ -141,11 +141,11 @@ canvas{max-height:160px!important}
       <h1>ภาพรวมธุรกิจ — กันยายน 2569</h1>
       <p>ข้อมูลอัพเดทอัตโนมัติทุกเช้า · 203 สาขา · 4 RM · 15 DM</p>
       <div class="hero-kpis">
-        <div class="hero-kpi"><div class="hk-val">0.2M</div><div class="hk-lab">ยอดขาย MTD (฿)</div></div>
-        <div class="hero-kpi"><div class="hk-val">5%</div><div class="hk-lab">vs เป้า MTD</div></div>
-        <div class="hero-kpi"><div class="hk-val">5.3M</div><div class="hk-lab">Projected (฿)</div></div>
-        <div class="hero-kpi"><div class="hk-val">-95.4%</div><div class="hk-lab">YoY Projected</div></div>
-        <div class="hero-kpi"><div class="hk-val">31.15%</div><div class="hk-lab">GP%</div></div>
+        <div class="hero-kpi"><div class="hk-val">1.1M</div><div class="hk-lab">ยอดขาย MTD (฿)</div></div>
+        <div class="hero-kpi"><div class="hk-val">25%</div><div class="hk-lab">vs เป้า MTD</div></div>
+        <div class="hero-kpi"><div class="hk-val">31.5M</div><div class="hk-lab">Projected (฿)</div></div>
+        <div class="hero-kpi"><div class="hk-val">-72.5%</div><div class="hk-lab">YoY Projected</div></div>
+        <div class="hero-kpi"><div class="hk-val">31.07%</div><div class="hk-lab">GP%</div></div>
       </div>
     </div>
     <div class="hero-right">
@@ -161,7 +161,7 @@ canvas{max-height:160px!important}
     <div class="kpi-row2">
       <div class="kc" style="border-color:#8b5cf6">
         <div class="kc-lbl">Daily Run Rate</div>
-        <div class="kc-val" id="k-run">฿0.18M</div>
+        <div class="kc-val" id="k-run">฿1.05M</div>
         <div class="kc-sub">เฉลี่ย/วัน</div>
       </div>
       <div class="kc" style="border-color:#14b8a6">
@@ -195,12 +195,12 @@ canvas{max-height:160px!important}
         <div class="skpi-grid">
           <div class="skpi">
             <div class="skpi-label">ยอดขาย MTD</div>
-            <div class="skpi-val">0.2M</div>
+            <div class="skpi-val">1.1M</div>
             <div class="skpi-sub pos">▲ 109% vs เป้า</div>
           </div>
           <div class="skpi">
             <div class="skpi-label">Projected เต็มเดือน</div>
-            <div class="skpi-val">5.3M</div>
+            <div class="skpi-val">31.5M</div>
             <div class="skpi-sub pos">▲ +15.8% YoY</div>
           </div>
           <div class="skpi">
@@ -329,10 +329,10 @@ canvas{max-height:160px!important}
 <script>
 // RM data from sales dashboard
 const RM_DATA = [
-  {name:'จริยา รัตนติน', stores:50, sales:54405, proj:1632150, yoy:-94.8, pct:4.6},
-  {name:'จินตนา อินทะเสโน', stores:58, sales:44920, proj:1347600, yoy:-96.3, pct:4.5},
-  {name:'ฐานพัฒน์ แสงจง', stores:36, sales:24328, proj:729840, yoy:-94.8, pct:4.6},
-  {name:'สุพรรษา นามตาปี', stores:59, sales:53641, proj:1609230, yoy:-95.1, pct:4.6}
+  {name:'จริยา รัตนติน', stores:50, sales:325482, proj:9764460, yoy:-69.0, pct:27.5},
+  {name:'จินตนา อินทะเสโน', stores:58, sales:283829, proj:8514870, yoy:-76.8, pct:21.4},
+  {name:'ฐานพัฒน์ แสงจง', stores:36, sales:163752, proj:4912560, yoy:-64.7, pct:30.4},
+  {name:'สุพรรษา นามตาปี', stores:59, sales:277712, proj:8331360, yoy:-74.4, pct:23.7}
 ];
 
 // Populate RM table
@@ -357,7 +357,7 @@ RM_DATA.forEach(r=>{
 
 // Trend chart — 2026 vs 2025
 const months = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.'];
-const m26vals = [133.8,119.0,122.1,129.6,135.7,122.0,126.5,128.5,0.2];   // ก.ย. = MTD
+const m26vals = [133.8,119.0,122.1,129.6,135.7,122.0,126.5,128.5,1.1];   // ก.ย. = MTD
 const m25vals = [132.3,110.1,122.3,127.2,129.6,113.0,126.4,125.9,122.8];   // ก.ย. 2025 full month
 
 new Chart(document.getElementById('cTrend'),{
