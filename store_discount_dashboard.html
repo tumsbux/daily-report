@@ -57,7 +57,11 @@
   .panel h3 { margin:0 0 10px 0; font-size:15px; color:#5b5470; }
   .linetype-row { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
   .lt-chip { background:#f6f1fb; border-radius:10px; padding:6px 10px; font-size:12px; color:#4a4560; }
-  select, input[type=date] { padding:7px 10px; border:1px solid var(--border); border-radius:10px; font-size:13px; }
+  select, input[type=date] { padding:7px 10px; border:1px solid var(--border); border-radius:10px; font-size:13px; color:#4a4560; background:#fff; }
+  .range-box { display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap; background:#fff; padding:3px 8px; border-radius:10px; border:1px solid var(--border); }
+  .btn-preset { background:#f8fafc; border:1px solid var(--border); border-radius:8px; padding:5px 9px; cursor:pointer; font-size:12px; color:#5b5470; transition:all 0.15s ease; }
+  .btn-preset:hover { background:var(--lavender); color:#3b3450; }
+  .btn-preset.active { background:var(--lavender-dark); color:#fff; border-color:var(--lavender-dark); }
   .empty { padding:30px; text-align:center; color:var(--muted); }
   .footnote { font-size:11px; color:var(--muted); margin-top:10px; line-height:1.6; }
   #chartWrap { max-width:100%; }
@@ -72,9 +76,24 @@
 
   <div class="toolbar">
     <button class="btn active" id="btnDaily">รายวัน</button>
+    <button class="btn" id="btnRange">📅 เลือกช่วงวันที่</button>
     <button class="btn" id="btnTrend">แนวโน้ม 3 เดือน</button>
     <button class="btn" id="btnMonth">📅 เทียบรายเดือน (MoM)</button>
     <select id="dateSelect"></select>
+    <div id="rangeControls" class="range-box" style="display:none">
+      <span style="font-size:12px; color:var(--muted); font-weight:600;">เริ่ม:</span>
+      <input type="date" id="startDate">
+      <span style="font-size:12px; color:var(--muted); font-weight:600;">ถึง:</span>
+      <input type="date" id="endDate">
+      <button class="btn" id="btnApplyRange" style="background:var(--lavender-dark); color:#fff; padding:5px 10px; font-size:12px;">🔍 แสดงผล</button>
+      <div style="display:inline-flex; gap:4px; margin-left:4px;">
+        <button class="btn-preset active" data-days="7">7 วัน</button>
+        <button class="btn-preset" data-days="14">14 วัน</button>
+        <button class="btn-preset" data-days="30">30 วัน</button>
+        <button class="btn-preset" data-preset="month">เดือนนี้</button>
+        <button class="btn-preset" data-preset="all">ทั้งหมด</button>
+      </div>
+    </div>
     <button class="btn" id="btnDownload">⬇ ดาวน์โหลด CSV</button>
   </div>
 
@@ -116,7 +135,7 @@ const PRODUCTS_DIR = 'store_discount_products'; // one small file per store: <di
 let DATA = null;
 const productsCache = new Map(); // whs -> {dates, days} | null (fetch failed/missing)
 let productsLoadingFor = null;
-let state = { level: 'rm', rm: null, dm: null, store: null, linetype: null, mode: 'daily', dateIdx: 0 };
+let state = { level: 'rm', rm: null, dm: null, store: null, linetype: null, mode: 'daily', dateIdx: 0, startDate: null, endDate: null };
 let trendChart = null;
 
 async function ensureProductsLoaded(whs){
@@ -144,6 +163,14 @@ function fmtDateTime(iso){
   return timePart ? `${dateFmt} ${timePart.slice(0,5)}` : dateFmt;
 }
 
+function getSelectedDateRange(){
+  const dates = DATA._dates;
+  const s = state.startDate || dates[0];
+  const e = state.endDate || dates[dates.length - 1];
+  const matched = dates.filter(d => d >= s && d <= e);
+  return matched.length ? matched : [dates[dates.length - 1]];
+}
+
 async function init(){
   const res = await fetch(DATA_URL);
   DATA = await res.json();
@@ -162,7 +189,66 @@ async function init(){
   state.dateIdx = dates.length - 1;
   sel.addEventListener('change', () => { state.dateIdx = Number(sel.value); render(); });
 
+  // Range controls setup
+  const startInput = document.getElementById('startDate');
+  const endInput = document.getElementById('endDate');
+  const defaultStartIdx = Math.max(0, dates.length - 7);
+  state.startDate = dates[defaultStartIdx];
+  state.endDate = dates[dates.length - 1];
+  startInput.min = dates[0]; startInput.max = dates[dates.length - 1];
+  endInput.min = dates[0]; endInput.max = dates[dates.length - 1];
+  startInput.value = state.startDate;
+  endInput.value = state.endDate;
+
+  startInput.addEventListener('change', () => {
+    if (startInput.value > endInput.value) endInput.value = startInput.value;
+    state.startDate = startInput.value;
+    state.endDate = endInput.value;
+    document.querySelectorAll('.btn-preset').forEach(b => b.classList.remove('active'));
+    if (state.mode === 'range') render();
+  });
+  endInput.addEventListener('change', () => {
+    if (endInput.value < startInput.value) startInput.value = endInput.value;
+    state.startDate = startInput.value;
+    state.endDate = endInput.value;
+    document.querySelectorAll('.btn-preset').forEach(b => b.classList.remove('active'));
+    if (state.mode === 'range') render();
+  });
+  document.getElementById('btnApplyRange').addEventListener('click', () => {
+    state.startDate = startInput.value;
+    state.endDate = endInput.value;
+    render();
+  });
+
+  document.querySelectorAll('.btn-preset').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.btn-preset').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const days = btn.dataset.days;
+      const preset = btn.dataset.preset;
+      const maxD = dates[dates.length - 1];
+      if (days){
+        const count = parseInt(days, 10);
+        const sIdx = Math.max(0, dates.length - count);
+        state.startDate = dates[sIdx];
+        state.endDate = maxD;
+      } else if (preset === 'month'){
+        const lastDt = new Date(maxD + 'T00:00:00');
+        const sStr = `${lastDt.getFullYear()}-${String(lastDt.getMonth()+1).padStart(2,'0')}-01`;
+        state.startDate = dates.find(d => d >= sStr) || dates[0];
+        state.endDate = maxD;
+      } else if (preset === 'all'){
+        state.startDate = dates[0];
+        state.endDate = maxD;
+      }
+      startInput.value = state.startDate;
+      endInput.value = state.endDate;
+      if (state.mode === 'range') render();
+    });
+  });
+
   document.getElementById('btnDaily').addEventListener('click', () => { state.mode='daily'; toggleMode(); });
+  document.getElementById('btnRange').addEventListener('click', () => { state.mode='range'; toggleMode(); });
   document.getElementById('btnTrend').addEventListener('click', () => { state.mode='trend'; toggleMode(); });
   document.getElementById('btnMonth').addEventListener('click', () => { state.mode='month'; toggleMode(); });
   document.getElementById('btnDownload').addEventListener('click', downloadCSV);
@@ -172,12 +258,16 @@ async function init(){
 
 function toggleMode(){
   document.getElementById('btnDaily').classList.toggle('active', state.mode==='daily');
+  document.getElementById('btnRange').classList.toggle('active', state.mode==='range');
   document.getElementById('btnTrend').classList.toggle('active', state.mode==='trend');
   document.getElementById('btnMonth').classList.toggle('active', state.mode==='month');
-  document.getElementById('tablePanel').style.display = (state.mode==='daily' || state.mode==='month') ? '' : 'none';
-  document.getElementById('linetypePanel').style.display = state.mode==='daily' ? '' : 'none';
+
+  document.getElementById('tablePanel').style.display = (state.mode==='daily' || state.mode==='range' || state.mode==='month') ? '' : 'none';
+  document.getElementById('linetypePanel').style.display = (state.mode==='daily' || state.mode==='range') ? '' : 'none';
   document.getElementById('trendPanel').style.display = state.mode==='trend' ? '' : 'none';
   document.getElementById('dateSelect').style.display = state.mode==='daily' ? '' : 'none';
+  document.getElementById('rangeControls').style.display = state.mode==='range' ? 'inline-flex' : 'none';
+
   if (state.mode==='trend') renderTrend(); else render();
 }
 
@@ -257,21 +347,24 @@ function aggregateForDate(dateStr, groupBy){
                 .sort((a,b) => b.store_discount - a.store_discount);
 }
 
-function linetypeBreakdown(dateStr){
-  const dayData = DATA.days[dateStr] || {};
+function linetypeBreakdown(datesInput){
+  const dateStrs = Array.isArray(datesInput) ? datesInput : [datesInput];
   const scopeStores = new Set(storesForScope());
   const lt = {};
-  for (const whs in dayData){
-    if (!scopeStores.has(whs)) continue;
-    for (const l in dayData[whs]){
-      if (EXCLUDED_LINETYPES.has(l)) continue;
-      if (!lt[l]) lt[l] = emptyAgg();
-      const [qty,cost,net_sales,list_amt] = dayData[whs][l];
-      const discount = list_amt - net_sales;
-      lt[l].qty += qty; lt[l].cost += cost; lt[l].net_sales += net_sales; lt[l].list_amt += list_amt;
-      if (STORE_LINETYPES.has(l)) lt[l].store_discount += discount;
-      else lt[l].marketing_discount += discount;
-      lt[l]._own_discount = (lt[l]._own_discount || 0) + discount; // this linetype's own total discount
+  for (const dateStr of dateStrs){
+    const dayData = DATA.days[dateStr] || {};
+    for (const whs in dayData){
+      if (!scopeStores.has(whs)) continue;
+      for (const l in dayData[whs]){
+        if (EXCLUDED_LINETYPES.has(l)) continue;
+        if (!lt[l]) lt[l] = emptyAgg();
+        const [qty,cost,net_sales,list_amt] = dayData[whs][l];
+        const discount = list_amt - net_sales;
+        lt[l].qty += qty; lt[l].cost += cost; lt[l].net_sales += net_sales; lt[l].list_amt += list_amt;
+        if (STORE_LINETYPES.has(l)) lt[l].store_discount += discount;
+        else lt[l].marketing_discount += discount;
+        lt[l]._own_discount = (lt[l]._own_discount || 0) + discount; // this linetype's own total discount
+      }
     }
   }
   return Object.entries(lt).map(([k,v]) => ({
@@ -292,6 +385,7 @@ function currentGroupBy(){
 
 function render(){
   if (state.mode === 'month'){ renderMonthView(); return; }
+  if (state.mode === 'range'){ renderRangeView(); return; }
   const dates = DATA._dates;
   const dateStr = dates[state.dateIdx];
   const prevStr = state.dateIdx > 0 ? dates[state.dateIdx-1] : null;
@@ -503,14 +597,201 @@ function renderTable(rows, prevMap, groupBy){
   tbody.style.cursor = groupBy === 'product' ? 'default' : 'pointer';
 }
 
-function renderLinetype(dateStr){
-  const rows = linetypeBreakdown(dateStr);
+function renderLinetype(datesInput){
+  const rows = linetypeBreakdown(datesInput);
   document.getElementById('linetypeRow').innerHTML = rows.map(r => `
     <div class="lt-chip" style="border-left:4px solid ${r.isStore ? 'var(--lavender-dark)' : '#c9c4d8'}">
       <b>${r.linetype}</b> ${r.isStore ? '🏪 สาขา' : '📢 การตลาด'} · ลด ${fmt(r.discount)}฿
       (${pct(r.list_amt>0 ? r.discount/r.list_amt : 0)}) ·
       <span class="gp-pill ${gpClass(r.gp)}" style="margin-left:4px">GP ${pct(r.gp)}</span>
     </div>`).join('') || '<span style="color:var(--muted)">ไม่มีข้อมูล</span>';
+}
+
+// ---- custom date range view ----
+function renderRangeView(){
+  renderBreadcrumb();
+  const rangeDates = getSelectedDateRange();
+  const sDate = rangeDates[0];
+  const eDate = rangeDates[rangeDates.length - 1];
+  const count = rangeDates.length;
+
+  if (state.level === 'product'){
+    document.getElementById('summaryCards').innerHTML = '';
+    document.getElementById('linetypePanel').style.display = 'none';
+    renderProductLevelRange(rangeDates);
+    return;
+  }
+
+  const groupBy = currentGroupBy();
+  const curRows = aggregateForDateRange(rangeDates, groupBy);
+
+  // Previous comparison range of equal length (if available)
+  const dates = DATA._dates;
+  const firstIdx = dates.indexOf(sDate);
+  const prevEndIdx = firstIdx - 1;
+  const prevStartIdx = Math.max(0, firstIdx - count);
+  const prevDates = (prevEndIdx >= 0 && prevEndIdx >= prevStartIdx) ? dates.slice(prevStartIdx, prevEndIdx + 1) : [];
+  const prevRows = prevDates.length ? aggregateForDateRange(prevDates, groupBy) : [];
+  const prevMap = {}; prevRows.forEach(r => prevMap[r.key] = r);
+
+  renderRangeSummaryCards(curRows, prevRows, rangeDates, prevDates);
+  renderRangeTable(curRows, prevMap, groupBy, rangeDates);
+  document.getElementById('linetypePanel').style.display = (groupBy === 'linetype') ? 'none' : '';
+  if (groupBy !== 'linetype') renderLinetype(rangeDates);
+}
+
+function renderRangeSummaryCards(rows, prevRows, rangeDates, prevDates){
+  const tot = rows.reduce((acc,r) => {
+    acc.list_amt+=r.list_amt; acc.store_discount+=r.store_discount;
+    acc.marketing_discount+=r.marketing_discount; acc.actual_price+=r.actual_price; acc.cost+=r.cost;
+    return acc;
+  }, {list_amt:0,store_discount:0,marketing_discount:0,actual_price:0,cost:0});
+
+  const prevTot = prevRows.reduce((acc,r) => {
+    acc.store_discount+=r.store_discount; return acc;
+  }, {store_discount:0});
+
+  const gp = tot.actual_price>0 ? (tot.actual_price - tot.cost)/tot.actual_price : 0;
+  const discPct = tot.list_amt>0 ? tot.store_discount/tot.list_amt : 0;
+  const mktPct = tot.list_amt>0 ? tot.marketing_discount/tot.list_amt : 0;
+  const deltaPct = (prevTot.store_discount>0 && prevDates.length) ? (tot.store_discount - prevTot.store_discount)/prevTot.store_discount : null;
+
+  const prevCompareLabel = prevDates.length ? `vs ${prevDates.length} วันก่อนหน้า` : '';
+
+  const cards = [
+    { label:`ราคาปกติรวม (${rangeDates.length} วัน)`, value: fmt(tot.list_amt) + ' ฿' },
+    { label:'ส่วนลดที่สาขากดเอง (O/P/Y)', value: fmt(tot.store_discount) + ' ฿',
+      delta: deltaPct!==null ? `${deltaPct>=0?'▲':'▼'} ${pct(Math.abs(deltaPct))} ${prevCompareLabel}` : '', deltaUp: deltaPct>=0 },
+    { label:'ส่วนลดการตลาด/โปรอัตโนมัติ (อ้างอิง)', value: fmt(tot.marketing_discount) + ' ฿ (' + pct(mktPct) + ')' },
+    { label:'ราคาขายจริง (หลังหักเฉพาะส่วนลดสาขา)', value: fmt(tot.actual_price) + ' ฿' },
+    { label:'% ลดจากสาขา', value: pct(discPct) },
+    { label:'GP% คงเหลือ (หักเฉพาะสาขา)', value: pct(gp) },
+  ];
+  document.getElementById('summaryCards').innerHTML = cards.map(c => `
+    <div class="card">
+      <div class="label">${c.label}</div>
+      <div class="value">${c.value}</div>
+      ${c.delta ? `<div class="delta ${c.deltaUp?'up':'down'}">${c.delta}</div>` : ''}
+    </div>`).join('');
+}
+
+function renderRangeTable(rows, prevMap, groupBy, rangeDates){
+  const titleMap = { rm:'ภาพรวมตาม RM', dm:'รายเขต (DM)', store:'รายสาขา', linetype:`แยกตาม Linetype — สาขา ${state.store || ''} ${DATA.branches[state.store]?.name || ''}` };
+  const s = fmtDate(rangeDates[0]);
+  const e = fmtDate(rangeDates[rangeDates.length - 1]);
+  document.getElementById('tableTitle').textContent = `${titleMap[groupBy]} — ช่วงวันที่ ${s} ถึง ${e} (${rangeDates.length} วัน)`;
+
+  const colLabel = groupBy==='linetype' ? 'Linetype' : groupBy==='store' ? 'สาขา' : groupBy==='dm' ? 'DM' : 'RM';
+  const thead = document.getElementById('theadRow');
+  thead.innerHTML = `<th>${colLabel}</th>
+    <th>ราคาปกติ</th><th>ส่วนลดสาขา</th><th>%ลด</th><th>ราคาขายจริง</th><th>GP%</th><th>เทียบช่วงก่อน</th>`;
+
+  const tbody = document.getElementById('tbodyRows');
+  document.getElementById('emptyMsg').style.display = rows.length ? 'none' : '';
+  tbody.innerHTML = rows.map(r => {
+    const prev = prevMap[r.key];
+    let deltaHtml = '-';
+    if (prev && prev.store_discount > 0){
+      const d = (r.store_discount - prev.store_discount) / prev.store_discount;
+      deltaHtml = `<span style="color:${d>=0?'var(--red)':'var(--green)'}">${d>=0?'▲':'▼'} ${pct(Math.abs(d))}</span>`;
+    }
+    return `<tr data-key="${r.key}">
+      <td>${r.label}</td>
+      <td>${fmt(r.list_amt)}</td>
+      <td>${fmt(r.store_discount)}</td>
+      <td>${pct(r.disc_pct)}</td>
+      <td>${fmt(r.actual_price)}</td>
+      <td><span class="gp-pill ${gpClass(r.gp)}">${pct(r.gp)}</span></td>
+      <td>${deltaHtml}</td>
+    </tr>`;
+  }).join('');
+
+  tbody.querySelectorAll('tr').forEach(tr => {
+    tr.addEventListener('click', () => {
+      const key = tr.dataset.key;
+      if (groupBy === 'rm'){ state.level='dm'; state.rm=key; state.dm=null; state.store=null; state.linetype=null; render(); }
+      else if (groupBy === 'dm'){ state.level='store'; state.dm=key; state.store=null; state.linetype=null; render(); }
+      else if (groupBy === 'store'){ state.level='linetype'; state.store=key; state.linetype=null; render(); }
+      else if (groupBy === 'linetype'){ state.level='product'; state.linetype=key; render(); }
+    });
+  });
+  tbody.style.cursor = 'pointer';
+}
+
+function renderProductLevelRange(rangeDates){
+  const storeB = DATA.branches[state.store] || {};
+  const s = fmtDate(rangeDates[0]);
+  const e = fmtDate(rangeDates[rangeDates.length - 1]);
+  document.getElementById('tableTitle').textContent =
+    `รายการสินค้า — สาขา ${state.store} ${storeB.name || ''} · linetype ${state.linetype} · ช่วง ${s} ถึง ${e} (${rangeDates.length} วัน)`;
+  const thead = document.getElementById('theadRow');
+  thead.innerHTML = `<th>บาร์โค้ด</th><th style="text-align:left">ชื่อสินค้า</th><th>จำนวนขาย</th>
+    <th>ราคาปกติ</th><th>ราคาลด</th><th>ลดไปกี่บาท</th><th>GP%</th><th>Type</th>
+    <th style="text-align:left">ชื่อสาขา</th><th style="text-align:left">ชื่อเขต (DM)</th><th style="text-align:left">ชื่อภาค (RM)</th>`;
+  const tbody = document.getElementById('tbodyRows');
+  tbody.style.cursor = 'default';
+  const COLSPAN = 11;
+
+  const storeWhs = state.store;
+  const productsData = productsCache.get(storeWhs);
+
+  if (productsData === undefined){
+    tbody.innerHTML = `<tr><td colspan="${COLSPAN}" style="text-align:center;color:var(--muted)">กำลังโหลดข้อมูลสินค้า...</td></tr>`;
+    document.getElementById('emptyMsg').style.display = 'none';
+    ensureProductsLoaded(storeWhs);
+    return;
+  }
+  if (productsData === null){
+    tbody.innerHTML = `<tr><td colspan="${COLSPAN}" style="text-align:center;color:var(--muted)">โหลดข้อมูลสินค้าของสาขานี้ไม่สำเร็จ</td></tr>`;
+    document.getElementById('emptyMsg').style.display = 'none';
+    return;
+  }
+
+  const matchingDates = rangeDates.filter(d => productsData.days && productsData.days[d]);
+  if (!matchingDates.length){
+    const have = (productsData.dates || []).map(fmtDate).join(', ');
+    tbody.innerHTML = `<tr><td colspan="${COLSPAN}" style="text-align:center;color:var(--muted)">รายละเอียดสินค้ามีเฉพาะวันล่าสุด (${have}) — ช่วงวันที่ที่เลือกไม่มีข้อมูลสินค้าระดับบาร์โค้ด</td></tr>`;
+    document.getElementById('emptyMsg').style.display = 'none';
+    return;
+  }
+
+  const itemMap = {};
+  matchingDates.forEach(d => {
+    (productsData.days[d] || []).forEach(p => {
+      if (p.linetype !== state.linetype || p.discount <= 0) return;
+      if (!itemMap[p.iprod]){
+        itemMap[p.iprod] = { ...p };
+      } else {
+        itemMap[p.iprod].qty += p.qty;
+        itemMap[p.iprod].list_amt += p.list_amt;
+        itemMap[p.iprod].net_sales += p.net_sales;
+        itemMap[p.iprod].discount += p.discount;
+        itemMap[p.iprod].cost = (itemMap[p.iprod].cost || 0) + (p.cost || 0);
+      }
+    });
+  });
+
+  const items = Object.values(itemMap).sort((a,b) => b.discount - a.discount);
+  document.getElementById('emptyMsg').style.display = items.length ? 'none' : '';
+  tbody.innerHTML = items.map(p => {
+    const cost = p.cost || 0;
+    const gp = p.net_sales > 0 ? (p.net_sales - cost) / p.net_sales : 0;
+    const isStoreType = STORE_LINETYPES.has(p.linetype);
+    return `
+    <tr>
+      <td>${p.barcode}</td>
+      <td style="text-align:left">${p.name}</td>
+      <td>${fmt(p.qty,2)}</td>
+      <td>${fmt(p.list_amt)}</td>
+      <td>${fmt(p.net_sales)}</td>
+      <td>${fmt(p.discount)}</td>
+      <td><span class="gp-pill ${gpClass(gp)}">${pct(gp)}</span></td>
+      <td>${p.linetype} ${isStoreType ? '🏪' : ''}</td>
+      <td style="text-align:left">${storeB.name || ''}</td>
+      <td style="text-align:left">${storeB.dm || ''}</td>
+      <td style="text-align:left">${storeB.rm || ''}</td>
+    </tr>`;
+  }).join('');
 }
 
 // ---- month-on-month comparison (added 2026-07-10, approved by user) ----
@@ -692,6 +973,72 @@ function renderTrend(){
 }
 
 function downloadCSV(){
+  if (state.mode === 'range'){
+    const rangeDates = getSelectedDateRange();
+    const sDate = rangeDates[0];
+    const eDate = rangeDates[rangeDates.length - 1];
+
+    if (state.level === 'product'){
+      const productsData = productsCache.get(state.store);
+      if (!productsData){
+        alert('ยังโหลดข้อมูลสินค้าไม่เสร็จ');
+        return;
+      }
+      const storeB = DATA.branches[state.store] || {};
+      const matchingDates = rangeDates.filter(d => productsData.days && productsData.days[d]);
+      if (!matchingDates.length){
+        alert('ช่วงวันที่ที่เลือกไม่มีข้อมูลสินค้าระดับบาร์โค้ด');
+        return;
+      }
+      const itemMap = {};
+      matchingDates.forEach(d => {
+        (productsData.days[d] || []).forEach(p => {
+          if (p.linetype !== state.linetype || p.discount <= 0) return;
+          if (!itemMap[p.iprod]){
+            itemMap[p.iprod] = { ...p };
+          } else {
+            itemMap[p.iprod].qty += p.qty;
+            itemMap[p.iprod].list_amt += p.list_amt;
+            itemMap[p.iprod].net_sales += p.net_sales;
+            itemMap[p.iprod].discount += p.discount;
+            itemMap[p.iprod].cost = (itemMap[p.iprod].cost || 0) + (p.cost || 0);
+          }
+        });
+      });
+      const items = Object.values(itemMap).sort((a,b) => b.discount - a.discount);
+      const header = ['barcode','name','qty','list_price','sale_price','discount_baht','gp_pct','type','store_name','dm_name','rm_name'];
+      const lines = [header.join(',')];
+      items.forEach(p => {
+        const cost = p.cost || 0;
+        const gp = p.net_sales > 0 ? (p.net_sales - cost) / p.net_sales : 0;
+        lines.push([p.barcode, `"${(p.name||'').replace(/"/g,'""')}"`, p.qty, p.list_amt.toFixed(2), p.net_sales.toFixed(2), p.discount.toFixed(2), (gp*100).toFixed(2), p.linetype,
+          `"${storeB.name||''}"`, `"${storeB.dm||''}"`, `"${storeB.rm||''}"`].join(','));
+      });
+      const blob = new Blob(['\ufeff' + lines.join('\n')], { type:'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `store_discount_products_${state.store}_${state.linetype}_${sDate}_to_${eDate}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    const groupBy = currentGroupBy();
+    const rows = aggregateForDateRange(rangeDates, groupBy);
+    const header = ['label','list_amt','store_discount','disc_pct','actual_price','gp_pct','qty'];
+    const lines = [header.join(',')];
+    rows.forEach(r => {
+      lines.push([r.label, r.list_amt.toFixed(2), r.store_discount.toFixed(2), (r.disc_pct*100).toFixed(2), r.actual_price.toFixed(2), (r.gp*100).toFixed(2), r.qty].join(','));
+    });
+    const blob = new Blob(['\ufeff' + lines.join('\n')], { type:'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `store_discount_${sDate}_to_${eDate}_${groupBy}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    return;
+  }
+
   const dates = DATA._dates;
   const dateStr = dates[state.dateIdx];
 
@@ -711,7 +1058,7 @@ function downloadCSV(){
       lines.push([p.barcode, `"${(p.name||'').replace(/"/g,'""')}"`, p.qty, p.list_amt.toFixed(2), p.net_sales.toFixed(2), p.discount.toFixed(2), (gp*100).toFixed(2), p.linetype,
         `"${storeB.name||''}"`, `"${storeB.dm||''}"`, `"${storeB.rm||''}"`].join(','));
     });
-    const blob = new Blob(['﻿' + lines.join('\n')], { type:'text/csv;charset=utf-8;' });
+    const blob = new Blob(['\ufeff' + lines.join('\n')], { type:'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = `store_discount_products_${state.store}_${state.linetype}_${dateStr}.csv`;
@@ -727,7 +1074,7 @@ function downloadCSV(){
   rows.forEach(r => {
     lines.push([r.label, r.list_amt.toFixed(2), r.store_discount.toFixed(2), (r.disc_pct*100).toFixed(2), r.actual_price.toFixed(2), (r.gp*100).toFixed(2), r.qty].join(','));
   });
-  const blob = new Blob(['﻿' + lines.join('\n')], { type:'text/csv;charset=utf-8;' });
+  const blob = new Blob(['\ufeff' + lines.join('\n')], { type:'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = `store_discount_${dateStr}_${groupBy}.csv`;
