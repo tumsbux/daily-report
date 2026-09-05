@@ -58,7 +58,8 @@
   .linetype-row { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
   .lt-chip { background:#f6f1fb; border-radius:10px; padding:6px 10px; font-size:12px; color:#4a4560; }
   select, input[type=date] { padding:7px 10px; border:1px solid var(--border); border-radius:10px; font-size:13px; color:#4a4560; background:#fff; }
-  .range-box { display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap; background:#fff; padding:3px 8px; border-radius:10px; border:1px solid var(--border); }
+  .range-box, .filter-box { display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap; background:#fff; padding:3px 8px; border-radius:10px; border:1px solid var(--border); }
+  .filter-box select { padding:5px 8px; font-size:12px; }
   .btn-preset { background:#f8fafc; border:1px solid var(--border); border-radius:8px; padding:5px 9px; cursor:pointer; font-size:12px; color:#5b5470; transition:all 0.15s ease; }
   .btn-preset:hover { background:var(--lavender); color:#3b3450; }
   .btn-preset.active { background:var(--lavender-dark); color:#fff; border-color:var(--lavender-dark); }
@@ -93,6 +94,13 @@
         <button class="btn-preset" data-preset="month">เดือนนี้</button>
         <button class="btn-preset" data-preset="all">ทั้งหมด</button>
       </div>
+    </div>
+    <div class="filter-box">
+      <span style="font-size:12px; color:var(--muted); font-weight:600;">ภาค (RM):</span>
+      <select id="rmSelect"><option value="">ทุก RM (ทั้งหมด)</option></select>
+      <span style="font-size:12px; color:var(--muted); font-weight:600;">เขต (DM):</span>
+      <select id="dmSelect"><option value="">ทุก DM (ทั้งหมด)</option></select>
+      <button class="btn" id="btnResetFilter" title="ล้างตัวกรอง RM/DM" style="padding:4px 8px; font-size:12px;">↺ ล้างตัวกรอง</button>
     </div>
     <button class="btn" id="btnDownload">⬇ ดาวน์โหลด CSV</button>
   </div>
@@ -169,6 +177,68 @@ function getSelectedDateRange(){
   const e = state.endDate || dates[dates.length - 1];
   const matched = dates.filter(d => d >= s && d <= e);
   return matched.length ? matched : [dates[dates.length - 1]];
+}
+
+function populateRmSelect(){
+  const rmSel = document.getElementById('rmSelect');
+  if (!rmSel) return;
+  rmSel.innerHTML = '<option value="">ทุก RM (ทั้งหมด)</option>';
+
+  const rmMap = new Map();
+  for (const whs in DATA.branches){
+    const b = DATA.branches[whs];
+    if (b.rm_code && !rmMap.has(b.rm_code)){
+      rmMap.set(b.rm_code, b.rm || b.rm_code);
+    }
+  }
+  const sortedRms = [...rmMap.entries()].sort((a,b) => a[1].localeCompare(b[1], 'th'));
+  sortedRms.forEach(([code, name]) => {
+    const opt = document.createElement('option');
+    opt.value = code;
+    opt.textContent = `${name}`;
+    rmSel.appendChild(opt);
+  });
+}
+
+function populateDmSelect(filterRmCode = null){
+  const dmSel = document.getElementById('dmSelect');
+  if (!dmSel) return;
+  const curDm = state.dm;
+  dmSel.innerHTML = '<option value="">ทุก DM (ทั้งหมด)</option>';
+
+  const dmMap = new Map();
+  for (const whs in DATA.branches){
+    const b = DATA.branches[whs];
+    if (!b.dm_code) continue;
+    if (filterRmCode && b.rm_code !== filterRmCode) continue;
+    if (!dmMap.has(b.dm_code)){
+      dmMap.set(b.dm_code, b.dm || b.dm_code);
+    }
+  }
+
+  const sortedDms = [...dmMap.entries()].sort((a,b) => a[1].localeCompare(b[1], 'th'));
+  sortedDms.forEach(([code, name]) => {
+    const opt = document.createElement('option');
+    opt.value = code;
+    opt.textContent = `${name}`;
+    dmSel.appendChild(opt);
+  });
+
+  if (curDm && dmMap.has(curDm)){
+    dmSel.value = curDm;
+  } else if (curDm && !dmMap.has(curDm)){
+    state.dm = null;
+    dmSel.value = '';
+  }
+}
+
+function syncFilterDropdowns(){
+  const rmSel = document.getElementById('rmSelect');
+  const dmSel = document.getElementById('dmSelect');
+  if (!rmSel || !dmSel) return;
+  rmSel.value = state.rm || '';
+  populateDmSelect(state.rm);
+  dmSel.value = state.dm || '';
 }
 
 async function init(){
@@ -252,6 +322,50 @@ async function init(){
   document.getElementById('btnTrend').addEventListener('click', () => { state.mode='trend'; toggleMode(); });
   document.getElementById('btnMonth').addEventListener('click', () => { state.mode='month'; toggleMode(); });
   document.getElementById('btnDownload').addEventListener('click', downloadCSV);
+
+  populateRmSelect();
+  populateDmSelect();
+
+  document.getElementById('rmSelect').addEventListener('change', (e) => {
+    const val = e.target.value;
+    state.rm = val || null;
+    state.dm = null;
+    state.store = null;
+    state.linetype = null;
+    state.level = state.rm ? 'dm' : 'rm';
+    populateDmSelect(state.rm);
+    render();
+  });
+
+  document.getElementById('dmSelect').addEventListener('change', (e) => {
+    const val = e.target.value;
+    state.dm = val || null;
+    state.store = null;
+    state.linetype = null;
+    if (state.dm){
+      const bMatch = Object.values(DATA.branches).find(b => b.dm_code === state.dm);
+      if (bMatch && bMatch.rm_code && state.rm !== bMatch.rm_code){
+        state.rm = bMatch.rm_code;
+        document.getElementById('rmSelect').value = state.rm;
+        populateDmSelect(state.rm);
+        document.getElementById('dmSelect').value = val;
+      }
+      state.level = 'store';
+    } else {
+      state.level = state.rm ? 'dm' : 'rm';
+    }
+    render();
+  });
+
+  document.getElementById('btnResetFilter').addEventListener('click', () => {
+    state.rm = null;
+    state.dm = null;
+    state.store = null;
+    state.linetype = null;
+    state.level = 'rm';
+    syncFilterDropdowns();
+    render();
+  });
 
   render();
 }
@@ -529,6 +643,7 @@ function renderBreadcrumb(){
     bc.appendChild(sep());
     bc.appendChild(mk(`Linetype: ${state.linetype}`, () => { state.level='product'; render(); }, true));
   }
+  syncFilterDropdowns();
 }
 
 function renderSummaryCards(rows, prevRows){
@@ -557,7 +672,14 @@ function renderSummaryCards(rows, prevRows){
 }
 
 function renderTable(rows, prevMap, groupBy){
-  const titleMap = { rm:'ภาพรวมตาม RM', dm:'รายเขต (DM)', store:'รายสาขา', linetype:`แยกตาม Linetype — สาขา ${state.store || ''} ${DATA.branches[state.store]?.name || ''}` };
+  const rmName = state.rm ? (Object.values(DATA.branches).find(b=>b.rm_code===state.rm)?.rm || state.rm) : '';
+  const dmName = state.dm ? (Object.values(DATA.branches).find(b=>b.dm_code===state.dm)?.dm || state.dm) : '';
+  const titleMap = {
+    rm: 'ภาพรวมตาม RM',
+    dm: state.rm ? `รายเขต (DM) — ภาค: ${rmName}` : 'รายเขต (DM)',
+    store: state.dm ? `รายสาขา — เขต: ${dmName}` : state.rm ? `รายสาขา — ภาค: ${rmName}` : 'รายสาขา',
+    linetype: `แยกตาม Linetype — สาขา ${state.store || ''} ${DATA.branches[state.store]?.name || ''}`
+  };
   document.getElementById('tableTitle').textContent = titleMap[groupBy];
 
   const colLabel = groupBy==='linetype' ? 'Linetype' : groupBy==='store' ? 'สาขา' : groupBy==='dm' ? 'DM' : 'RM';
@@ -676,7 +798,14 @@ function renderRangeSummaryCards(rows, prevRows, rangeDates, prevDates){
 }
 
 function renderRangeTable(rows, prevMap, groupBy, rangeDates){
-  const titleMap = { rm:'ภาพรวมตาม RM', dm:'รายเขต (DM)', store:'รายสาขา', linetype:`แยกตาม Linetype — สาขา ${state.store || ''} ${DATA.branches[state.store]?.name || ''}` };
+  const rmName = state.rm ? (Object.values(DATA.branches).find(b=>b.rm_code===state.rm)?.rm || state.rm) : '';
+  const dmName = state.dm ? (Object.values(DATA.branches).find(b=>b.dm_code===state.dm)?.dm || state.dm) : '';
+  const titleMap = {
+    rm: 'ภาพรวมตาม RM',
+    dm: state.rm ? `รายเขต (DM) — ภาค: ${rmName}` : 'รายเขต (DM)',
+    store: state.dm ? `รายสาขา — เขต: ${dmName}` : state.rm ? `รายสาขา — ภาค: ${rmName}` : 'รายสาขา',
+    linetype: `แยกตาม Linetype — สาขา ${state.store || ''} ${DATA.branches[state.store]?.name || ''}`
+  };
   const s = fmtDate(rangeDates[0]);
   const e = fmtDate(rangeDates[rangeDates.length - 1]);
   document.getElementById('tableTitle').textContent = `${titleMap[groupBy]} — ช่วงวันที่ ${s} ถึง ${e} (${rangeDates.length} วัน)`;
@@ -949,7 +1078,9 @@ function renderTrend(){
     discSeries.push(Math.round(tot.store_discount));
     gpSeries.push(tot.actual_price>0 ? Math.round((tot.actual_price-tot.cost)/tot.actual_price*1000)/10 : 0);
   }
-  const title = state.dm ? 'DM ที่เลือก' : state.rm ? 'RM ที่เลือก' : 'ภาพรวมทั้งหมด';
+  const rmName = state.rm ? (Object.values(DATA.branches).find(b=>b.rm_code===state.rm)?.rm || state.rm) : '';
+  const dmName = state.dm ? (Object.values(DATA.branches).find(b=>b.dm_code===state.dm)?.dm || state.dm) : '';
+  const title = state.dm ? `DM: ${dmName}` : state.rm ? `RM: ${rmName}` : 'ภาพรวมทั้งหมด';
   document.getElementById('trendTitle').textContent = `แนวโน้ม 92 วันล่าสุด — ${title}`;
 
   const ctx = document.getElementById('trendChart');
